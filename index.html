@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ridgekeep</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <strong>Ridgekeep</strong>
+            <em>Northmark against Dunmarch</em>
+          </div>
+        </div>
+        <div class="readout" title="Ore in the Keep">
+          <span class="swatch ore"></span>
+          <span>Ore</span>
+          <b id="ore">0</b>
+        </div>
+        <div class="readout" title="Population, including units still in training">
+          <span class="swatch pop"></span>
+          <span>Pop</span>
+          <b id="supply">0 / 0</b>
+        </div>
+        <div id="clock">0:00</div>
+        <div class="top-actions">
+          <button id="idle" type="button" title="Select idle porters (F)">Idle</button>
+          <button id="mute" type="button">Sound</button>
+          <button id="help-btn" type="button">Controls</button>
+        </div>
+      </header>
+
+      <div id="hint">
+        <p>Select the porters and right-click the gold ore. Haul it home, raise a Yard, and break the red Keep.</p>
+        <button id="hint-x" type="button">Got it</button>
+      </div>
+
+      <div id="stage">
+        <canvas id="view" tabindex="0" aria-label="Ridgekeep battlefield"></canvas>
+        <div id="modeflag" class="hidden"></div>
+        <div id="toasts"></div>
+      </div>
+
+      <footer id="dock">
+        <canvas id="minimap" aria-label="Minimap"></canvas>
+        <section id="inspect"></section>
+        <section id="commands"></section>
+      </footer>
+
+      <div id="overlay" class="hidden">
+        <div class="card">
+          <p class="eyebrow" id="end-kicker"></p>
+          <h2 id="end-title"></h2>
+          <p id="end-copy"></p>
+          <button id="again" type="button">Fight again</button>
+          <p class="seed" id="end-seed"></p>
+        </div>
+      </div>
+
+      <div id="help" class="hidden">
+        <div class="card help-card">
+          <p class="eyebrow">Field notes</p>
+          <h2>How to hold the ridge</h2>
+          <ul>
+            <li><b>Left-click</b> a friendly unit or building. Drag a box to select several. Shift adds.</li>
+            <li><b>Double-click</b> a unit to grab every visible one of that type.</li>
+            <li><b>Right-click</b> ground to move, an enemy to attack, ore to gather.</li>
+            <li><b>Q</b>, then left-click, orders an attack-move. <b>X</b> stops.</li>
+            <li><b>Y</b> places a Yard, <b>L</b> a Silo. <b>P</b> trains a Porter from the Keep.</li>
+            <li><b>K</b> trains a Pike, <b>J</b> a Howler, when a Yard is selected.</li>
+            <li><b>WASD</b> or the arrow keys pan. Wheel zooms. Edge of the map scrolls.</li>
+            <li>Middle-drag pans. Click the minimap to jump. <b>Space</b> recenters.</li>
+            <li><b>F</b> selects idle porters. <b>Ctrl+1–9</b> saves a group, <b>1–9</b> recalls it.</li>
+            <li>Right-click with a building selected to set its rally point. <b>M</b> mutes.</li>
+          </ul>
+          <p class="meta">Touch: drag to pan, tap to select, tap the ground to move, tap an enemy to attack.</p>
+          <button id="help-close" type="button">Back to the field</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
