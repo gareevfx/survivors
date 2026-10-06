@@ -281,7 +281,6 @@ export function createMatch(seed: number): MatchState {
 
   rebuildBlocked(state)
   recomputeSupply(state)
-  pushToast(state, 'Right-click gold ore. Porters haul it back to the Keep.')
   return state
 }
 

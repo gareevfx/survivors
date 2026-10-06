@@ -159,9 +159,12 @@ export function renderWorld(
     const alpha = Math.max(0, particle.life / particle.max)
     ctx.globalAlpha = alpha
     if (particle.text) {
-      ctx.fillStyle = particle.color
-      ctx.font = 'bold 11px "Segoe UI", sans-serif'
+      ctx.font = 'bold 14px "Segoe UI", sans-serif'
       ctx.textAlign = 'center'
+      ctx.lineWidth = 3
+      ctx.strokeStyle = '#1a1408'
+      ctx.strokeText(particle.text, particle.x, particle.y)
+      ctx.fillStyle = particle.color
       ctx.fillText(particle.text, particle.x, particle.y)
     } else {
       ctx.fillStyle = particle.color

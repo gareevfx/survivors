@@ -174,7 +174,7 @@ button, canvas { font: inherit; }
 #modeflag {
   position: absolute;
   left: 12px;
-  top: 12px;
+  bottom: 12px;
   max-width: min(460px, calc(100% - 24px));
   padding: 8px 10px;
   background: rgba(20, 24, 16, 0.88);
@@ -186,7 +186,7 @@ button, canvas { font: inherit; }
 
 #toasts {
   position: absolute;
-  top: 12px;
+  top: 16px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

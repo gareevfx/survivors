@@ -432,13 +432,13 @@ function advanceGather(state: MatchState, dt: number): void {
     if (unit.owner === 0) state.tutorial = false
     state.particles.push({
       x: unit.x,
-      y: unit.y - 14,
+      y: unit.y - 18,
       vx: 0,
-      vy: -22,
-      life: 0.8,
-      max: 0.8,
+      vy: -28,
+      life: 1.15,
+      max: 1.15,
       r: 0,
-      color: '#e6c15a',
+      color: '#ffe7a0',
       text: `+${unit.cargo}`,
     })
     unit.cargo = 0

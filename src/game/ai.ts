@@ -73,7 +73,7 @@ export function updateAi(state: MatchState, dt: number): void {
       unit.hp > 0 &&
       Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) < 340,
   )
-  if (threatened || army.length >= 7 || (state.time > 58 && army.length >= 4)) state.aiAttacking = true
+  if (threatened || army.length >= 10 || (state.time > 105 && army.length >= 5)) state.aiAttacking = true
   if (!threatened && army.length === 0) state.aiAttacking = false
   if (!state.aiAttacking || !playerKeep) return
 

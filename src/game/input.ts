@@ -56,8 +56,14 @@ export function attachInput(opts: {
   selectIdle: () => void
   focusPoint: (x: number, y: number) => void
 }): InputController {
-  const keys = new Set<string>()
+  const keyAt = new Map<string, number>()
   const groups = new Map<number, number[]>()
+  // Key repeat keeps this fresh. A keydown that never receives keyup stops panning
+  // instead of dragging the camera across the map.
+  const held = (code: string) => {
+    const at = keyAt.get(code)
+    return at != null && performance.now() - at < 1200
+  }
   let pointer: { sx: number; sy: number; over: boolean } | null = null
   let drag: Drag | null = null
   let lastClick = { t: 0, id: -1 }
@@ -390,7 +396,7 @@ export function attachInput(opts: {
   )
 
   window.addEventListener('keydown', (event) => {
-    keys.add(event.code)
+    keyAt.set(event.code, performance.now())
     if (
       event.code === 'Space' ||
       event.code === 'ArrowUp' ||
@@ -516,9 +522,11 @@ export function attachInput(opts: {
   })
 
   window.addEventListener('keyup', (event) => {
-    keys.delete(event.code)
+    keyAt.delete(event.code)
   })
-  window.addEventListener('blur', () => keys.clear())
+  window.addEventListener('blur', () => {
+    keyAt.clear()
+  })
 
   return {
     pan(dt: number) {
@@ -527,12 +535,12 @@ export function attachInput(opts: {
       const speed = 740 / cam.zoom
       let dx = 0
       let dy = 0
-      if (keys.has('KeyW') || keys.has('ArrowUp')) dy -= 1
-      if (keys.has('KeyS') || keys.has('ArrowDown')) dy += 1
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) dx -= 1
-      if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1
-      if (pointer?.over && !drag?.panning) {
-        const margin = 22
+      if (held('KeyW') || held('ArrowUp')) dy -= 1
+      if (held('KeyS') || held('ArrowDown')) dy += 1
+      if (held('KeyA') || held('ArrowLeft')) dx -= 1
+      if (held('KeyD') || held('ArrowRight')) dx += 1
+      if (pointer?.over && !drag?.panning && !opts.helpOpen()) {
+        const margin = 8
         if (pointer.sx < margin) dx -= 1
         if (pointer.sx > box.w - margin) dx += 1
         if (pointer.sy < margin) dy -= 1
