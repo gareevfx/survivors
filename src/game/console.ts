@@ -9,13 +9,13 @@ import { clearFog, restoreFog } from './vision'
 export function runCommand(state: MatchState, raw: string): boolean {
   const text = raw.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!text) return false
-  if (text === 'clear fog of war' || text === 'clear fog') {
+  if (text === 'off fog of war') {
     if (state.fogCleared) {
-      pushToast(state, 'Fog of war is already clear.')
+      pushToast(state, 'Fog of war is already off.')
       return true
     }
     clearFog(state)
-    pushToast(state, 'Fog of war cleared.')
+    pushToast(state, 'Fog of war is off.')
     return true
   }
   if (text === 'fog of war') {

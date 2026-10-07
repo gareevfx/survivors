@@ -891,7 +891,7 @@ function enemyCamShowsDunmarchSight(): void {
   assert(runCommand(state, 'off enemy cam'), 'off enemy cam was rejected while already off')
   assert(!state.enemyCam, 'the off command turned enemy cam back on')
   const cleared = createMatch(2)
-  assert(runCommand(cleared, 'clear fog of war'), 'could not clear fog')
+  assert(runCommand(cleared, 'off fog of war'), 'could not turn fog off')
   assert(runCommand(cleared, 'show enemy cam'), 'enemy cam was rejected after clear fog')
   const clearedKeep = cleared.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(clearedKeep, 'missing castle')
@@ -936,18 +936,22 @@ function clearFogCommandRevealsTheMap(): void {
   assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'the map started fully revealed')
   assert(!runCommand(state, 'no such order'), 'an unknown line was accepted')
   assert(!state.fogCleared, 'an unknown command cleared the fog')
-  assert(runCommand(state, '  Clear Fog of War  '), 'Clear Fog of War was rejected')
+  assert(!runCommand(state, 'clear fog of war'), 'the old clear fog command was still accepted')
+  assert(!state.fogCleared, 'the old command revealed the map')
+  assert(runCommand(state, '  Off Fog of War  '), 'Off Fog of War was rejected')
   assert(state.fogCleared, 'the command did not mark fog cleared')
   assert(tileVisible(state, 0, 0) && tileExplored(state, MAP_W - 1, MAP_H - 1), 'a corner of the map stayed hidden')
   assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed hidden after the command')
   const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
-  assert(home && !aiTileExplored(state, home.tx + 1, home.ty + 1), 'Clear Fog of War also revealed the map for Dunmarch')
+  assert(home && !aiTileExplored(state, home.tx + 1, home.ty + 1), 'Off Fog of War also revealed the map for Dunmarch')
   step(state, 0.5)
   assert(state.fogCleared && tileVisible(state, enemy.tx, enemy.ty), 'fog returned after the command')
   const again = createMatch(2)
   assert(!again.fogCleared, 'a new match kept the cleared fog')
-  assert(runCommand(again, 'clear fog'), 'the clear fog alias was rejected')
-  assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'clear fog left part of the map dark')
+  assert(!runCommand(again, 'clear fog'), 'the old clear fog alias was accepted')
+  assert(!again.fogCleared, 'the old alias revealed the map')
+  assert(runCommand(again, 'OFF FOG OF WAR'), 'the off fog command was rejected')
+  assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'off fog of war left part of the map dark')
 }
 
 function godModeSavesNorthmark(): void {
@@ -990,7 +994,7 @@ function fogAndGodModeTurnOff(): void {
   assert(keep && enemy, 'missing castles')
   assert(runCommand(state, 'Fog of War'), 'Fog of War was rejected while already on')
   assert(!state.fogCleared && !tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'Fog of War cleared a map that was already hidden')
-  assert(runCommand(state, 'Clear Fog of War'), 'could not clear fog before turning it on')
+  assert(runCommand(state, 'Off Fog of War'), 'could not turn fog off before turning it on')
   assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the clear did not reveal Dunmarch')
   assert(runCommand(state, 'fog of war'), 'fog of war was rejected')
   assert(!state.fogCleared, 'fog of war left the map revealed')
@@ -1114,74 +1118,97 @@ function stuckWorkerRetargets(): void {
   )
 }
 
-function stuckUnitsStepToAnEmptyTile(): void {
+function unitsSteerAroundEachOther(): void {
   const state = createMatch(8)
   for (const unit of state.units) unit.hp = 0
   for (const node of state.ore) node.amount = 0
-  carveGround(state, [
+  const open: Array<[number, number]> = []
+  for (let y = 10; y <= 16; y++) {
+    for (let x = 8; x <= 24; x++) open.push([x, y])
+  }
+  carveGround(state, open)
+  rebuildBlocked(state)
+  const west = makeUnit(state, 0, 'porter', 10.5 * TILE, 13.5 * TILE)
+  const east = makeUnit(state, 1, 'porter', 20.5 * TILE, 13.5 * TILE)
+  const westStart = west.x
+  const eastStart = east.x
+  commandMove(state, [west.id], 22.5 * TILE, 13.5 * TILE, false)
+  commandMove(state, [east.id], 8.5 * TILE, 13.5 * TILE, false)
+  let maxJump = 0
+  let prevWest = { x: west.x, y: west.y }
+  let prevEast = { x: east.x, y: east.y }
+  for (let i = 0; i < 8 * 60; i++) {
+    step(state, 1 / 60)
+    const westNow = unitById(state, west.id)
+    const eastNow = unitById(state, east.id)
+    assert(westNow && eastNow, 'a passing unit disappeared')
+    maxJump = Math.max(
+      maxJump,
+      Math.hypot(westNow.x - prevWest.x, westNow.y - prevWest.y),
+      Math.hypot(eastNow.x - prevEast.x, eastNow.y - prevEast.y),
+    )
+    prevWest = { x: westNow.x, y: westNow.y }
+    prevEast = { x: eastNow.x, y: eastNow.y }
+  }
+  const passedWest = unitById(state, west.id)
+  const passedEast = unitById(state, east.id)
+  assert(passedWest && passedEast, 'missing units after they passed')
+  assert(maxJump < 24, 'a unit jumped onto another tile instead of walking around')
+  assert(passedWest.x > eastStart - TILE, 'the Northmark worker did not get past the oncoming worker')
+  assert(passedEast.x < westStart + TILE, 'the Dunmarch worker did not get past the oncoming worker')
+  assert(Math.hypot(passedWest.x - 22.5 * TILE, passedWest.y - 13.5 * TILE) < 48, 'the Northmark worker did not finish the move')
+  assert(Math.hypot(passedEast.x - 8.5 * TILE, passedEast.y - 13.5 * TILE) < 48, 'the Dunmarch worker did not finish the move')
+
+  const blocked = createMatch(9)
+  for (const unit of blocked.units) unit.hp = 0
+  for (const node of blocked.ore) node.amount = 0
+  carveGround(blocked, open)
+  rebuildBlocked(blocked)
+  const stand = makeUnit(blocked, 1, 'porter', 16.5 * TILE, 13.5 * TILE)
+  const mover = makeUnit(blocked, 0, 'porter', 10.5 * TILE, 13.5 * TILE)
+  commandMove(blocked, [mover.id], 22.5 * TILE, 13.5 * TILE, false)
+  let standJump = 0
+  let moverJump = 0
+  let prevStand = { x: stand.x, y: stand.y }
+  let prevMover = { x: mover.x, y: mover.y }
+  for (let i = 0; i < 6 * 60; i++) {
+    step(blocked, 1 / 60)
+    const standNow = unitById(blocked, stand.id)
+    const moverNow = unitById(blocked, mover.id)
+    assert(standNow && moverNow, 'a unit disappeared while steering')
+    standJump = Math.max(standJump, Math.hypot(standNow.x - prevStand.x, standNow.y - prevStand.y))
+    moverJump = Math.max(moverJump, Math.hypot(moverNow.x - prevMover.x, moverNow.y - prevMover.y))
+    prevStand = { x: standNow.x, y: standNow.y }
+    prevMover = { x: moverNow.x, y: moverNow.y }
+  }
+  const around = unitById(blocked, mover.id)
+  assert(around, 'the moving worker disappeared')
+  assert(standJump < 24 && moverJump < 24, 'a unit was nudged onto an empty tile')
+  assert(around.x > stand.x + 24, 'the worker did not walk around the unit in the way')
+
+  const jammed = createMatch(8)
+  for (const unit of jammed.units) unit.hp = 0
+  for (const node of jammed.ore) node.amount = 0
+  carveGround(jammed, [
     [8, 8],
     [7, 8],
-    [8, 12],
-    [7, 12],
   ])
-  rebuildBlocked(state)
-  const bike = makeUnit(state, 1, 'pike', 8 * TILE + 26, 8.5 * TILE)
-  const worker = makeUnit(state, 0, 'porter', 8 * TILE + 26, 12.5 * TILE)
-  commandMove(state, [bike.id], 30.5 * TILE, 8.5 * TILE, false)
-  commandMove(state, [worker.id], 30.5 * TILE, 12.5 * TILE, false)
-  for (let i = 0; i < 200; i++) step(state, 1 / 60)
-  const earlyBike = unitById(state, bike.id)
-  const earlyWorker = unitById(state, worker.id)
-  assert(
-    earlyBike != null && Math.floor(earlyBike.x / TILE) === 8 && Math.floor(earlyBike.y / TILE) === 8,
-    'bike left its tile before 4 seconds',
-  )
-  assert(
-    earlyWorker != null && Math.floor(earlyWorker.x / TILE) === 8 && Math.floor(earlyWorker.y / TILE) === 12,
-    'worker left its tile before 4 seconds',
-  )
-  let shifted = false
-  for (let i = 0; i < 80; i++) {
-    step(state, 1 / 60)
-    const bikeNow = unitById(state, bike.id)
-    const workerNow = unitById(state, worker.id)
-    const bikeTx = Math.floor((bikeNow?.x ?? 0) / TILE)
-    const bikeTy = Math.floor((bikeNow?.y ?? 0) / TILE)
-    const workerTx = Math.floor((workerNow?.x ?? 0) / TILE)
-    const workerTy = Math.floor((workerNow?.y ?? 0) / TILE)
-    if (bikeTx !== 7 || bikeTy !== 8 || workerTx !== 7 || workerTy !== 12) continue
-    shifted = true
-    break
+  rebuildBlocked(jammed)
+  const bike = makeUnit(jammed, 0, 'pike', 8 * TILE + 26, 8.5 * TILE)
+  commandMove(jammed, [bike.id], 30.5 * TILE, 8.5 * TILE, false)
+  let bikeJump = 0
+  let prevBike = { x: bike.x, y: bike.y }
+  for (let i = 0; i < 6 * 60; i++) {
+    step(jammed, 1 / 60)
+    const now = unitById(jammed, bike.id)
+    assert(now, 'the jammed bike disappeared')
+    bikeJump = Math.max(bikeJump, Math.hypot(now.x - prevBike.x, now.y - prevBike.y))
+    prevBike = { x: now.x, y: now.y }
   }
-  assert(shifted && state.time >= 4 && state.time < 5, 'stuck units were not moved onto an empty tile after 4 seconds')
-  const lateBike = unitById(state, bike.id)
-  const lateWorker = unitById(state, worker.id)
-  assert(lateWorker?.order?.type === 'move', 'unstick replaced the worker order')
-  assert(lateBike?.order?.type === 'move', 'unstick replaced the bike order')
-
-  const flown = createMatch(8)
-  for (const unit of flown.units) unit.hp = 0
-  const drone = makeUnit(flown, 0, 'drone', 6, 6)
-  drone.order = { type: 'move', x: -40, y: 6 }
-  drone.goalX = -40
-  drone.goalY = 6
-  drone.path = []
-  for (let i = 0; i < 200; i++) step(flown, 1 / 60)
-  const earlyDrone = unitById(flown, drone.id)
-  assert(
-    earlyDrone != null && Math.floor(earlyDrone.x / TILE) === 0 && Math.floor(earlyDrone.y / TILE) === 0,
-    'drone left the corner before 4 seconds',
-  )
-  let lifted = false
-  for (let i = 0; i < 80; i++) {
-    step(flown, 1 / 60)
-    const now = unitById(flown, drone.id)
-    if (Math.floor((now?.x ?? 0) / TILE) === 0 && Math.floor((now?.y ?? 0) / TILE) === 1) {
-      lifted = true
-      break
-    }
-  }
-  assert(lifted && flown.time >= 4 && flown.time < 5, 'stuck drone was not moved onto an open cell after 4 seconds')
+  const still = unitById(jammed, bike.id)
+  assert(still, 'missing jammed bike')
+  assert(bikeJump < 24, 'the jammed bike was moved onto a neighboring tile in one step')
+  assert(still.order == null || still.order.type === 'move', 'the jammed bike was given a different order')
 }
 
 function dunmarchAimsAtTheCastle(): void {
@@ -1362,7 +1389,7 @@ godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
-stuckUnitsStepToAnEmptyTile()
+unitsSteerAroundEachOther()
 dunmarchAimsAtTheCastle()
 dunmarchScoutsMineralsAndTheEnemy()
 threeMinersPerDeposit()

@@ -1,6 +1,6 @@
 import { BUILDING_STATS, MAP_H, MAP_W, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './types'
 
-/** Refresh both armies' sight. Clear Fog of War reveals the map for Northmark only. */
+/** Refresh both armies' sight. Off Fog of War reveals the map for Northmark only. */
 export function updateVision(state: MatchState): void {
   if (state.fogCleared) {
     state.explored.fill(1)

@@ -86,6 +86,7 @@ export function findPath(
   sy: number,
   gx: number,
   gy: number,
+  penalty?: Uint8Array,
 ): Array<{ tx: number; ty: number }> | null {
   const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h
   if (!inside(sx, sy) || !inside(gx, gy)) return null
@@ -116,7 +117,7 @@ export function findPath(
         p = came[p] ?? -1
       }
       path.reverse()
-      return smoothPath(blocked, w, h, [{ tx: sx, ty: sy }, ...path]).slice(1)
+      return smoothPath(blocked, w, h, [{ tx: sx, ty: sy }, ...path], penalty).slice(1)
     }
     closed[cur] = 1
     for (const [dx, dy, cost] of DIRS) {
@@ -128,7 +129,7 @@ export function findPath(
       if (dx !== 0 && dy !== 0) {
         if (blocked[at(cx + dx, cy)] || blocked[at(cx, cy + dy)]) continue
       }
-      const ng = (gScore[cur] ?? Infinity) + cost
+      const ng = (gScore[cur] ?? Infinity) + cost + (penalty?.[ni] ?? 0)
       if (ng >= (gScore[ni] ?? Infinity)) continue
       gScore[ni] = ng
       came[ni] = cur
@@ -143,6 +144,7 @@ function smoothPath(
   w: number,
   h: number,
   path: Array<{ tx: number; ty: number }>,
+  penalty?: Uint8Array,
 ): Array<{ tx: number; ty: number }> {
   if (path.length <= 2) return path
   const out: Array<{ tx: number; ty: number }> = []
@@ -153,7 +155,7 @@ function smoothPath(
   for (let i = 2; i < path.length; i++) {
     const from = path[anchor]
     const to = path[i]
-    if (!from || !to || !rayClear(blocked, w, h, from, to)) {
+    if (!from || !to || !segmentOpen(blocked, w, h, from, to, penalty)) {
       const mid = path[i - 1]
       if (mid) out.push(mid)
       anchor = i - 1
@@ -162,6 +164,40 @@ function smoothPath(
   const last = path[path.length - 1]
   if (last) out.push(last)
   return out
+}
+
+/** A shortcut may cross open ground. Soft unit costs stay on the detour instead of being cut. */
+function segmentOpen(
+  blocked: Uint8Array,
+  w: number,
+  h: number,
+  a: { tx: number; ty: number },
+  b: { tx: number; ty: number },
+  penalty?: Uint8Array,
+): boolean {
+  if (!rayClear(blocked, w, h, a, b)) return false
+  if (!penalty) return true
+  let x = a.tx
+  let y = a.ty
+  const dx = Math.abs(b.tx - a.tx)
+  const dy = Math.abs(b.ty - a.ty)
+  const sx = a.tx < b.tx ? 1 : -1
+  const sy = a.ty < b.ty ? 1 : -1
+  let err = dx - dy
+  for (let guard = 0; guard <= dx + dy + 1; guard++) {
+    if (!(x === a.tx && y === a.ty) && !(x === b.tx && y === b.ty) && (penalty[y * w + x] ?? 0) > 0) return false
+    if (x === b.tx && y === b.ty) return true
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+  }
+  return true
 }
 
 /** True when the tile segment does not cross a blocked cell or a blocked corner. */

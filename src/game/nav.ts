@@ -104,7 +104,16 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
     return true
   }
 
-  const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  const path = findPath(
+    state.blocked,
+    MAP_W,
+    MAP_H,
+    start.tx,
+    start.ty,
+    goal.tx,
+    goal.ty,
+    occupancyPenalty(state, unit),
+  )
   if (!path) {
     unit.path = []
     return false
@@ -197,6 +206,22 @@ export function gatherBlockRock(
   if (unit.owner !== 1) return rocks[0] ?? null
   const nearestDeposit = rocks.slice().sort((a, b) => rockDistance(a, node) - rockDistance(b, node))
   return nearestDeposit.find((rock) => reachableRock(state, start, rock)) ?? nearestDeposit[0] ?? null
+}
+
+/** Extra path cost on tiles where another unit of the same layer is standing. */
+function occupancyPenalty(state: MatchState, unit: Unit): Uint8Array {
+  const penalty = new Uint8Array(MAP_W * MAP_H)
+  const flying = unit.kind === 'drone'
+  for (const other of state.units) {
+    if (other.id === unit.id || other.hp <= 0) continue
+    if ((other.kind === 'drone') !== flying) continue
+    const tx = Math.floor(other.x / TILE)
+    const ty = Math.floor(other.y / TILE)
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
+    const index = ty * MAP_W + tx
+    penalty[index] = Math.min(255, (penalty[index] ?? 0) + 8)
+  }
+  return penalty
 }
 
 function clearedOfRocks(state: MatchState): Uint8Array {

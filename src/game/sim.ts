@@ -357,11 +357,29 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
     }
     const speed = UNIT_STATS[unit.kind].speed
     const stepLen = Math.min(distance, speed * left)
+    const desiredX = dx / distance
+    const desiredY = dy / distance
+    const steer = steerAround(state, unit, desiredX, desiredY, tx, ty)
     const ox = unit.x
     const oy = unit.y
-    tryMove(state, unit, (dx / distance) * stepLen, (dy / distance) * stepLen)
-    unit.facing = Math.atan2(dy, dx)
-    const moved = Math.hypot(unit.x - ox, unit.y - oy)
+    tryMove(state, unit, steer.x * stepLen, steer.y * stepLen)
+    let moved = Math.hypot(unit.x - ox, unit.y - oy)
+    if (moved < stepLen * 0.25) {
+      tryMove(state, unit, desiredX * stepLen, desiredY * stepLen)
+      moved = Math.hypot(unit.x - ox, unit.y - oy)
+    }
+    if (moved < stepLen * 0.25) {
+      const preferLeft = steer.x * -desiredY + steer.y * desiredX >= 0
+      const sideX = (preferLeft ? -desiredY : desiredY) * stepLen
+      const sideY = (preferLeft ? desiredX : -desiredX) * stepLen
+      tryMove(state, unit, sideX, sideY)
+      moved = Math.hypot(unit.x - ox, unit.y - oy)
+      if (moved < stepLen * 0.25) {
+        tryMove(state, unit, -sideX, -sideY)
+        moved = Math.hypot(unit.x - ox, unit.y - oy)
+      }
+    }
+    unit.facing = Math.atan2(moved > 0.01 ? unit.y - oy : desiredY, moved > 0.01 ? unit.x - ox : desiredX)
     if (moved < stepLen * 0.2) {
       blockedStep = true
       break
@@ -371,7 +389,7 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.anim += dt * 7
   if (unit.goalX != null && blockedStep) unit.stuckT += dt
   else unit.stuckT = 0
-  if (unit.kind !== 'drone' && unit.stuckT > 0.85 && unit.goalX != null && unit.goalY != null) {
+  if (unit.stuckT > 0.85 && unit.goalX != null && unit.goalY != null) {
     unit.stuckT = 0
     const gx = unit.goalX
     const gy = unit.goalY
@@ -413,6 +431,57 @@ function circleBlocked(state: MatchState, x: number, y: number, radius: number):
     const ty = Math.floor((y + oy) / TILE)
     if (!isWalkable(state, tx, ty)) return true
   }
+  return false
+}
+
+/** Slide the step off units ahead. Ground ignores drones, and drones ignore the ground. */
+function steerAround(
+  state: MatchState,
+  unit: Unit,
+  dx: number,
+  dy: number,
+  tx: number,
+  ty: number,
+): { x: number; y: number } {
+  const goalD = Math.hypot(tx - unit.x, ty - unit.y)
+  const scale = goalD < 22 ? 0 : goalD < 48 ? (goalD - 22) / 26 : 1
+  if (scale <= 0) return { x: dx, y: dy }
+  const radius = UNIT_STATS[unit.kind].radius
+  const flying = unit.kind === 'drone'
+  let ax = 0
+  let ay = 0
+  for (const other of state.units) {
+    if (other.id === unit.id || other.hp <= 0) continue
+    if ((other.kind === 'drone') !== flying) continue
+    if (closingOn(unit, other.id)) continue
+    const ox = other.x - unit.x
+    const oy = other.y - unit.y
+    const od = Math.hypot(ox, oy) || 0.001
+    const space = radius + UNIT_STATS[other.kind].radius + 14
+    if (od > space + 22) continue
+    const ahead = (ox * dx + oy * dy) / od
+    if (ahead < -0.15 && od > space) continue
+    const side = dx * oy - dy * ox
+    const sign = Math.abs(side) < 1 ? (unit.id < other.id ? 1 : -1) : side > 0 ? -1 : 1
+    const urgency = od < space ? 1.6 : Math.max(0, 1 - (od - space) / 22) * (ahead > 0 ? 1 : 0.35)
+    ax += -dy * sign * urgency
+    ay += dx * sign * urgency
+    if (od < space) {
+      ax -= (ox / od) * ((space - od) / space) * 1.5
+      ay -= (oy / od) * ((space - od) / space) * 1.5
+    }
+  }
+  const sx = dx + ax * scale
+  const sy = dy + ay * scale
+  const length = Math.hypot(sx, sy) || 1
+  return { x: sx / length, y: sy / length }
+}
+
+function closingOn(unit: Unit, otherId: number): boolean {
+  const order = unit.order
+  if (!order) return false
+  if (order.type === 'attack' && order.kind === 'unit' && order.targetId === otherId) return true
+  if (order.type === 'attackMove' && order.focusKind === 'unit' && order.focusId === otherId) return true
   return false
 }
 
@@ -862,72 +931,9 @@ function watchStuckUnits(state: MatchState, dt: number): void {
     }
     unit.stuckOrderT += dt
     if (unit.stuckOrderT < STUCK_REDIRECT_SECONDS) continue
-    if (nudgeStuckUnit(state, unit)) continue
     if (unit.kind === 'porter') redirectStuckPorter(state, unit)
     else repaceStuckUnit(state, unit)
   }
-}
-
-/** Shift a unit that cannot move onto a neighboring empty cell. Drones use open air; ground units need walkable ground. */
-function nudgeStuckUnit(state: MatchState, unit: Unit): boolean {
-  const spot = adjacentEmptyCell(state, unit)
-  if (!spot) return false
-  unit.x = spot.x
-  unit.y = spot.y
-  noteProgress(unit)
-  const gx = unit.goalX
-  const gy = unit.goalY
-  if (gx != null && gy != null) {
-    unit.path = []
-    setUnitDestination(state, unit, gx, gy)
-  }
-  return true
-}
-
-function adjacentEmptyCell(state: MatchState, unit: Unit): { x: number; y: number } | null {
-  const tx = Math.floor(unit.x / TILE)
-  const ty = Math.floor(unit.y / TILE)
-  const goalX = unit.goalX ?? unit.x
-  const goalY = unit.goalY ?? unit.y
-  const steps = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
-  ]
-  let best: { x: number; y: number; d: number } | null = null
-  for (const [dx, dy] of steps) {
-    const nx = tx + dx
-    const ny = ty + dy
-    if (!cellOpenFor(state, unit, nx, ny)) continue
-    const x = (nx + 0.5) * TILE
-    const y = (ny + 0.5) * TILE
-    const d = (x - goalX) ** 2 + (y - goalY) ** 2
-    if (!best || d < best.d) best = { x, y, d }
-  }
-  return best ? { x: best.x, y: best.y } : null
-}
-
-function cellOpenFor(state: MatchState, unit: Unit, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  const x = (tx + 0.5) * TILE
-  const y = (ty + 0.5) * TILE
-  if (unit.kind === 'drone') {
-    const margin = 8
-    if (x < margin || y < margin || x > MAP_PX_W - margin || y > MAP_PX_H - margin) return false
-  } else if (!isWalkable(state, tx, ty)) {
-    return false
-  }
-  for (const other of state.units) {
-    if (other.id === unit.id || other.hp <= 0) continue
-    if (unit.kind === 'drone' ? other.kind !== 'drone' : other.kind === 'drone') continue
-    if (Math.hypot(other.x - x, other.y - y) < TILE * 0.55) return false
-  }
-  return true
 }
 
 function noteProgress(unit: Unit): void {
