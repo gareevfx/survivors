@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
-import { canPlace, isWalkable } from './state'
-import { MAP_H, MAP_W, TILE, type MatchState, type Unit } from './types'
+import { canPlace, isWalkable, rockAt } from './state'
+import { MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -125,6 +125,94 @@ export function findBuildSpot(
         if (Math.abs(x - cx) !== r && Math.abs(y - cy) !== r) continue
         if (canPlace(state, kind, x, y)) return { tx: x, ty: y }
       }
+    }
+  }
+  return null
+}
+
+const APPROACH: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+]
+
+/**
+ * First gray rock on the way to this ore when no walkable route exists.
+ * An open route, however long, is left alone. Tanks are never asked.
+ */
+export function gatherBlockRock(
+  state: MatchState,
+  unit: Unit,
+  node: { tx: number; ty: number },
+): Rock | null {
+  if (unit.kind === 'howler') return null
+  const start = nearestWalkable(state, unit.x, unit.y)
+  if (!start) return null
+  const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
+  if (openGoal && findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)) {
+    return null
+  }
+  const cleared = new Uint8Array(state.blocked)
+  for (const rock of state.rocks) {
+    if (rock.hp <= 0) continue
+    cleared[rock.ty * MAP_W + rock.tx] = 0
+  }
+  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+  if (!shortGoal) return null
+  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+  if (!shortcut) return null
+  return rockAlong(state, start, shortcut)
+}
+
+function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
+  for (const [dx, dy] of APPROACH) {
+    const x = tx + dx
+    const y = ty + dy
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
+    if (blocked[y * MAP_W + x] === 0) return { tx: x, ty: y }
+  }
+  return null
+}
+
+function rockAlong(
+  state: MatchState,
+  start: { tx: number; ty: number },
+  path: Array<{ tx: number; ty: number }>,
+): Rock | null {
+  let prev = start
+  for (const step of path) {
+    const rock = firstRockOnSegment(state, prev.tx, prev.ty, step.tx, step.ty)
+    if (rock) return rock
+    prev = step
+  }
+  return null
+}
+
+function firstRockOnSegment(state: MatchState, x0: number, y0: number, x1: number, y1: number): Rock | null {
+  const dx = Math.abs(x1 - x0)
+  const dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  let x = x0
+  let y = y0
+  for (let guard = 0; guard <= dx + dy + 1; guard++) {
+    const rock = rockAt(state, x, y)
+    if (rock) return rock
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
     }
   }
   return null

@@ -1,5 +1,5 @@
 import { updateAi } from './ai'
-import { nearestParking, setUnitDestination, stopMoving } from './nav'
+import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
   buildingById,
   buildingCenter,
@@ -220,10 +220,10 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
     if (unit.goalX == null) {
       const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y)
       if (!spot) {
-        unit.order = null
+        if (!clearBlockedGather(state, unit, node)) unit.order = null
         return
       }
-      setUnitDestination(state, unit, spot.x, spot.y)
+      if (!setUnitDestination(state, unit, spot.x, spot.y)) clearBlockedGather(state, unit, node)
     }
     return
   }
@@ -268,6 +268,26 @@ function refreshConstruct(state: MatchState, unit: Unit, order: Extract<Order, {
 function distToTile(unit: Unit, tx: number, ty: number): number {
   const rect = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE }
   return distToRect(unit.x, unit.y, rect)
+}
+
+function clearBlockedGather(state: MatchState, unit: Unit, node: { id: number; tx: number; ty: number }): boolean {
+  if (unit.owner !== 0 || unit.kind !== 'porter') return false
+  const rock = gatherBlockRock(state, unit, node)
+  if (!rock) return false
+  unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: node.id }
+  unit.nodeMemory = node.id
+  stopMoving(unit)
+  return true
+}
+
+function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
+  const node = state.ore.find((entry) => entry.id === nodeId && entry.amount > 0)
+  if (!node) return
+  const rock = gatherBlockRock(state, unit, node)
+  unit.nodeMemory = nodeId
+  if (rock) unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: nodeId }
+  else unit.order = { type: 'gather', nodeId, phase: unit.cargo > 0 ? 'return' : 'approach' }
+  stopMoving(unit)
 }
 
 function nearestCompleteKeep(state: MatchState, owner: 0 | 1, x: number, y: number): Building | null {
@@ -420,6 +440,7 @@ function advanceGather(state: MatchState, dt: number): void {
       unit.gatherTimer = 0
       if (node.amount <= 0) {
         burst(state, (node.tx + 0.5) * TILE, (node.ty + 0.5) * TILE, '#e6c15a', 6)
+        if (state.selectedOre === node.id) state.selectedOre = null
         state.ore = state.ore.filter((entry) => entry.amount > 0)
         rebuildBlocked(state)
       }
@@ -751,11 +772,14 @@ function clearBrokenRocks(state: MatchState): void {
     burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, '#b7b1a6', 7)
   }
   state.rocks = state.rocks.filter((rock) => rock.hp > 0)
+  rebuildBlocked(state)
   for (const unit of state.units) {
     if (unit.order?.type === 'attack' && unit.order.kind === 'rock' && deadIds.has(unit.order.targetId)) {
+      const resume = unit.order.resumeNode
       unit.order = null
       unit.idleAcquire = false
       stopMoving(unit)
+      if (resume != null && unit.kind === 'porter' && unit.hp > 0) resumeGather(state, unit, resume)
     }
     if (
       unit.order?.type === 'attackMove' &&
@@ -767,7 +791,6 @@ function clearBrokenRocks(state: MatchState): void {
       unit.order.focusKind = null
     }
   }
-  rebuildBlocked(state)
   for (const unit of state.units) {
     if (unit.hp <= 0 || unit.goalX == null || unit.goalY == null) continue
     setUnitDestination(state, unit, unit.goalX, unit.goalY)

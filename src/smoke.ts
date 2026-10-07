@@ -3,6 +3,7 @@ import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
 import { BUILDING_STATS, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, type MatchState } from './game/types'
+import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -69,6 +70,10 @@ function gatherWorks(): void {
     porters.map((unit) => unit.id),
     node.id,
   )
+  for (const porter of porters) {
+    const order = unitById(state, porter.id)?.order
+    assert(order?.type === 'gather', 'reachable ore sent a miner to break rock')
+  }
   for (let i = 0; i < 20 * 30; i++) step(state, 1 / 30)
   assert(state.oreHeld[0] > STARTING_ORE, `ore did not increase (${state.oreHeld[0]})`)
 }
@@ -318,6 +323,72 @@ function aiPortersBreakRockForOre(): void {
   )
 }
 
+function oreSelectionShowsAmount(): void {
+  const state = createMatch(3)
+  const node = state.ore.find((entry) => entry.amount > 0)
+  assert(node, 'missing ore')
+  state.selectedOre = node.id
+  const text = describeSelection(state)
+  assert(text.includes('Ore'), 'ore panel missing title')
+  assert(text.includes(`${node.amount} remaining`), `ore panel missing amount: ${text}`)
+  node.amount = 80
+  assert(describeSelection(state).includes('80 remaining'), 'ore panel did not follow the amount')
+}
+
+function minersClearRockToGather(): void {
+  const state = createMatch(9)
+  const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
+  assert(node, 'no southern ore')
+  for (const ore of state.ore) {
+    if (ore.id !== node.id) ore.amount = 0
+  }
+  const wallY = 24
+  for (let tx = 0; tx < MAP_W; tx++) {
+    if (footprintBlocks(state, tx, wallY)) continue
+    if (state.tiles[wallY * MAP_W + tx] === 1) continue
+    state.tiles[wallY * MAP_W + tx] = 1
+    state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
+  }
+  rebuildBlocked(state)
+  let spot: { tx: number; ty: number } | null = null
+  for (let tx = 4; tx < MAP_W - 4 && !spot; tx++) {
+    if (isWalkable(state, tx, 20)) spot = { tx, ty: 20 }
+  }
+  assert(spot, 'no open ground north of the ore wall')
+  const miner = makeUnit(state, 0, 'porter', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
+  const tank = makeUnit(state, 0, 'howler', (spot.tx + 1.5) * TILE, (spot.ty + 0.5) * TILE)
+  commandGather(state, [miner.id, tank.id], node.id)
+  const ordered = unitById(state, miner.id)
+  assert(
+    ordered?.order?.type === 'attack' && ordered.order.kind === 'rock' && ordered.order.resumeNode === node.id,
+    'miner did not attack the rock sealing the ore',
+  )
+  const tankOrder = unitById(state, tank.id)?.order
+  assert(!(tankOrder?.type === 'attack' && tankOrder.kind === 'rock'), 'tank was sent to break rock')
+  const targetId = ordered.order.targetId
+  let broke = false
+  for (let i = 0; i < 40 * 60; i++) {
+    step(state, 1 / 60)
+    const tankNow = unitById(state, tank.id)?.order
+    assert(!(tankNow?.type === 'attack' && tankNow.kind === 'rock'), 'tank attacked a rock while miners gathered')
+    if (!state.rocks.some((rock) => rock.id === targetId)) {
+      broke = true
+      break
+    }
+  }
+  assert(broke, 'miner did not break the rock sealing the ore')
+  let resumed = false
+  for (let i = 0; i < 3 * 60; i++) {
+    step(state, 1 / 60)
+    const order = unitById(state, miner.id)?.order
+    if (order?.type === 'gather' && order.nodeId === node.id) {
+      resumed = true
+      break
+    }
+  }
+  assert(resumed, 'miner did not go back to gathering after the rock fell')
+}
+
 function aiIgnoresRocksOnOpenRoute(): void {
   const state = createMatch(6)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -421,6 +492,8 @@ howlerCannotBreakRock()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 aiPortersBreakRockForOre()
+oreSelectionShowsAmount()
+minersClearRockToGather()
 aiIgnoresRocksOnOpenRoute()
 pikeChipsRock()
 attacksBuildings()

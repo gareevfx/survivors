@@ -1,6 +1,6 @@
 # Ridgekeep
 
-A single-player real-time strategy skirmish in the browser. Northmark and Dunmarch each hold a Castle on a ridge of ore and rock. Gather ore, raise a Factory and Silos, train miners, pikes, and howlers, and destroy the enemy Castle.
+A single-player real-time strategy skirmish in the browser. Northmark and Dunmarch each hold a Castle on a ridge of ore and rock. Gather ore, raise a Factory and Silos, train miners, bikes, and tanks, and destroy the enemy Castle.
 
 The factions, names, and shapes are original. The map is drawn with canvas geometry — there is no borrowed art.
 
@@ -30,8 +30,8 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 2. They mine, walk the ore back to your Castle, and repeat. The count is in the top bar.
 3. Select a miner (or the Castle) and place a **Factory**. A miner walks over and builds it.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
-5. Select the Factory and train **pikes** (short spears) and **howlers** (long reach).
-6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with miners or pikes to break it — howlers cannot — and the stone stops blocking once it shatters.
+5. Select the Factory and train **bikes** (short reach) and **tanks** (long reach).
+6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with miners or bikes to break it — tanks cannot — and the stone stops blocking once it shatters. Left-click an ore patch to see how much is left. Miners sent to a sealed patch break the rocks in the way, then haul.
 7. Destroy the Dunmarch Castle to win. If your Castle falls, the skirmish is lost.
 
 ## Controls
@@ -43,11 +43,12 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 | Move | Right-click ground, or the Move button then left-click |
 | Attack | Right-click an enemy or gray rock |
 | Attack-move | `Q`, then left-click |
-| Gather | Right-click ore with miners selected |
+| Gather | Right-click ore with miners selected. They break gray rock that seals that patch. |
+| Ore amount | Left-click an ore patch |
 | Stop | `X` |
 | Factory / Silo | `Y` / `L`, then left-click the map |
 | Train miner | Select the Castle, `P` |
-| Train pike / howler | Select the Factory, `K` / `J` |
+| Train bike / tank | Select the Factory, `K` / `J` |
 | Rally point | Select a building, right-click the ground |
 | Cancel placement or clear selection | `Esc` or right-click |
 | Pan | `WASD` or arrow keys, or move the pointer to the screen edge |
@@ -65,7 +66,7 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 ## Known limitations
 
 - No fog of war, save games, or multiplayer.
-- One map, one ore type, and one enemy script. Dunmarch mines, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends pikes to break the stone (miners, when it has no free pike), then resumes the attack. Howlers never damage rock. The same rule opens ore: a sealed haul is always cleared by miners, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Your own miners and pikes break rock only when you right-click it.
+- One map, one ore type, and one enemy script. Dunmarch mines, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends bikes to break the stone (miners, when it has no free bike), then resumes the attack. Tanks never damage rock. The same rule opens ore: a sealed haul is always cleared by miners, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Your bikes break rock only when you right-click it. Your miners do that too, and they also break rock that seals a patch you told them to gather.
 - Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
 - Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Miners shoot back at point-blank range but keep hauling unless they were idle.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.

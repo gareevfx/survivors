@@ -82,6 +82,7 @@ function selectIdlePorters(): void {
   }
   match.selectedUnits = ids
   match.selectedBuilding = null
+  match.selectedOre = null
   match.events.push({ type: 'select' })
   const first = unitById(match, ids[0] ?? -1)
   if (first) focus(first.x, first.y)

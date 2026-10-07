@@ -103,10 +103,11 @@ export function attachInput(opts: {
     if (error) pushToast(state, error)
   }
 
-  function clearSelection(state: MatchState): void {
-    state.selectedUnits = []
-    state.selectedBuilding = null
-  }
+function clearSelection(state: MatchState): void {
+  state.selectedUnits = []
+  state.selectedBuilding = null
+  state.selectedOre = null
+}
 
   function selectUnit(state: MatchState, id: number, shift: boolean): void {
     const unit = unitById(state, id)
@@ -115,6 +116,7 @@ export function attachInput(opts: {
       return
     }
     state.selectedBuilding = null
+    state.selectedOre = null
     if (shift) {
       const index = state.selectedUnits.indexOf(id)
       if (index >= 0) state.selectedUnits.splice(index, 1)
@@ -195,6 +197,7 @@ export function attachInput(opts: {
             })
             .map((other) => other.id)
           state.selectedBuilding = null
+          state.selectedOre = null
           state.events.push({ type: 'select' })
         }
       } else {
@@ -211,6 +214,15 @@ export function attachInput(opts: {
       }
       state.selectedBuilding = building.id
       state.selectedUnits = []
+      state.selectedOre = null
+      state.events.push({ type: 'select' })
+      lastClick = { t: performance.now(), id: -1 }
+      return
+    }
+    if (hit.type === 'ore') {
+      state.selectedOre = hit.id
+      state.selectedUnits = []
+      state.selectedBuilding = null
       state.events.push({ type: 'select' })
       lastClick = { t: performance.now(), id: -1 }
     }
@@ -288,9 +300,11 @@ export function attachInput(opts: {
     }
     if (ids.length) {
       state.selectedBuilding = null
+      state.selectedOre = null
       state.events.push({ type: 'select' })
     } else if (!shift) {
       state.selectedBuilding = null
+      state.selectedOre = null
     }
   }
 
@@ -491,6 +505,13 @@ export function attachInput(opts: {
           return
         }
       }
+      if (state.selectedOre != null) {
+        const node = state.ore.find((entry) => entry.id === state.selectedOre && entry.amount > 0)
+        if (node) {
+          opts.focusPoint((node.tx + 0.5) * TILE, (node.ty + 0.5) * TILE)
+          return
+        }
+      }
       const keep = playerKeep(state)
       if (keep) {
         const center = buildingCenter(keep)
@@ -514,6 +535,7 @@ export function attachInput(opts: {
       if (!ids.length) return
       state.selectedUnits = ids.slice()
       state.selectedBuilding = null
+      state.selectedOre = null
       state.events.push({ type: 'select' })
       if (lastClick.id === -100 - n && performance.now() - lastClick.t < 350) {
         const members = ids

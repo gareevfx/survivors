@@ -79,7 +79,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     }
   }
 
-  if (inspect) inspect.innerHTML = describe(state)
+  if (inspect) inspect.innerHTML = describeSelection(state)
   if (toasts) {
     toasts.innerHTML = state.toasts.map((toast) => `<div class="toast">${escapeHtml(toast.text)}</div>`).join('')
   }
@@ -280,7 +280,7 @@ function paintCommands(commands: Cmd[]): void {
   }
 }
 
-function describe(state: MatchState): string {
+export function describeSelection(state: MatchState): string {
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building && state.selectedUnits.length === 0) {
     const stats = BUILDING_STATS[building.kind]
@@ -308,6 +308,15 @@ function describe(state: MatchState): string {
     `
   }
 
+  const ore = state.selectedOre != null ? state.ore.find((node) => node.id === state.selectedOre) : undefined
+  if (ore && state.selectedUnits.length === 0) {
+    return `
+      <p class="eyebrow">Northmark</p>
+      <h2>Ore</h2>
+      <p class="meta">${ore.amount} remaining</p>
+    `
+  }
+
   const units = state.selectedUnits
     .map((id) => unitById(state, id))
     .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.hp > 0)
@@ -315,7 +324,7 @@ function describe(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select miners and right-click ore. Build a Factory, train pikes and howlers, and destroy the red Castle. Miners and pikes break gray rock: select them and right-click the stone.</p>
+      <p class="meta">Select miners and right-click ore. Build a Factory, train bikes and tanks, and destroy the red Castle. Miners and bikes break gray rock: select them and right-click the stone. Click an ore patch to see how much is left.</p>
     `
   }
   if (units.length === 1) {

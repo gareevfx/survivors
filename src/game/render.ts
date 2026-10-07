@@ -136,7 +136,7 @@ export function renderWorld(
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    drawOre(ctx, x, y)
+    drawOre(ctx, x, y, state.selectedOre === node.id)
   }
 
   if (state.tutorial) drawOreHint(ctx, state)
@@ -218,7 +218,16 @@ export function renderWorld(
   return { viewW, viewH }
 }
 
-function drawOre(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+function drawOre(ctx: CanvasRenderingContext2D, x: number, y: number, selected = false): void {
+  if (selected) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.ellipse(x, y + 4, 16, 9, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  }
   const crystals: Array<[number, number, number, string]> = [
     [0, -6, 7, '#f0c857'],
     [-7, 4, 5.5, '#d9a63a'],

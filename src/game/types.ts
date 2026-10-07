@@ -10,7 +10,7 @@ export const PLAYER_KEEP_TY = 36
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420
-/** Pikes and miners chip gray rock when ordered. Howlers cannot damage it. */
+/** Bikes and miners chip gray rock when ordered. Tanks cannot damage it. */
 export const ROCK_HP = 56
 export const STARTING_ORE = 120
 export const SUPPLY_MAX = 60
@@ -58,8 +58,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     projectileRadius: 2.4,
   },
   pike: {
-    label: 'Pike',
-    blurb: 'Quick infantry with a short spear. Right-click gray rock to break it.',
+    label: 'Bike',
+    blurb: 'Quick rider with a short reach. Right-click gray rock to break it.',
     hp: 58,
     speed: 104,
     radius: 10,
@@ -74,8 +74,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     projectileRadius: 2.2,
   },
   howler: {
-    label: 'Howler',
-    blurb: 'Slow slinger with a long reach.',
+    label: 'Tank',
+    blurb: 'Slow gunner with a long reach.',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -115,7 +115,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains pikes and howlers.',
+    blurb: 'Trains bikes and tanks.',
     w: 3,
     h: 2,
     hp: 720,
@@ -147,7 +147,7 @@ export type Order =
       focusId: number | null
       focusKind: TargetKind | null
     }
-  | { type: 'attack'; targetId: number; kind: TargetKind }
+  | { type: 'attack'; targetId: number; kind: TargetKind; resumeNode?: number }
   | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return' }
   | { type: 'construct'; buildingId: number }
 
@@ -283,6 +283,7 @@ export interface MatchState {
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
   selectedBuilding: number | null
+  selectedOre: number | null
   placement: BuildingKind | null
   attackMoveArmed: boolean
   moveArmed: boolean

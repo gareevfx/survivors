@@ -269,6 +269,7 @@ export function createMatch(seed: number): MatchState {
     outcome: null,
     selectedUnits: [],
     selectedBuilding: null,
+    selectedOre: null,
     placement: null,
     attackMoveArmed: false,
     moveArmed: false,

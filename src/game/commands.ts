@@ -1,4 +1,4 @@
-import { findBuildSpot, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { findBuildSpot, gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
   buildingById,
   buildingCenter,
@@ -148,6 +148,13 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
     unit.idleAcquire = false
     stopMoving(unit)
   }
+  for (const unit of porters) {
+    if (unit.cargo > 0) continue
+    const rock = gatherBlockRock(state, unit, node)
+    if (!rock) continue
+    unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: nodeId }
+    stopMoving(unit)
+  }
   if (others.length) {
     commandMove(
       state,
@@ -274,6 +281,7 @@ export function tryPlace(
     state.moveArmed = false
     state.selectedBuilding = building.id
     state.selectedUnits = []
+    state.selectedOre = null
     state.events.push({ type: 'build' })
     pushToast(state, `Raising a ${stats.label}.`)
   }
