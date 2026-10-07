@@ -295,7 +295,7 @@ export function describeSelection(state: MatchState): string {
       ? `Construction ${Math.floor(building.progress * 100)}%${
           state.units.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id)
             ? ''
-            : ' · bring a miner'
+            : ' · paused, still building'
         }`
       : stats.blurb
     return `

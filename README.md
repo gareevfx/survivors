@@ -28,7 +28,7 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 
 1. Select the miners (click or drag a box) and right-click a gold ore patch. Up to three miners work that patch. Any extras walk to the nearest patch that still has room. If gray rock seals a patch, those miners break it, then haul.
 2. They mine, walk the ore back to your Castle, and repeat. The count is in the top bar.
-3. Select a miner (or the Castle) and place a **Factory**. A miner walks over and builds it.
+3. Select a miner (or the Castle) and place a **Factory**. It keeps building even while the site reads **Paused** (no miner standing on it). A second miner on site speeds the work.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
 5. Select the Factory and train **bikes** (short reach) and **tanks** (long reach).
 6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with miners or bikes to break it — tanks cannot — and the stone stops blocking once it shatters. Left-click an ore patch to see how much is left. Miners sent to a sealed patch break the rocks in the way, then haul.

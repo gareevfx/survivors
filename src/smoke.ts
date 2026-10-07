@@ -115,6 +115,36 @@ function buildAndTrain(): void {
   )
 }
 
+function pausedConstructionStillAdvances(): void {
+  const state = createMatch(11)
+  state.oreHeld[0] = 800
+  const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
+  let spot: { tx: number; ty: number } | null = null
+  for (let ty = 30; ty < 44 && !spot; ty++) {
+    for (let tx = 2; tx < 16; tx++) {
+      if (canPlace(state, 'yard', tx, ty)) {
+        spot = { tx, ty }
+        break
+      }
+    }
+  }
+  assert(spot, 'no yard site for paused build')
+  const placed = tryPlace(state, 0, 'yard', spot.tx, spot.ty, porters.map((unit) => unit.id))
+  assert(placed === null, placed ?? 'place failed')
+  const yard = state.buildings.find((building) => building.owner === 0 && building.kind === 'yard' && !building.complete)
+  assert(yard, 'yard was not started')
+  for (const unit of state.units) {
+    if (unit.order?.type === 'construct') unit.order = null
+  }
+  const before = yard.progress
+  step(state, 1)
+  assert(yard.progress > before, 'paused factory did not gain progress')
+  assert(!yard.complete, 'paused factory finished in one second')
+  const buildSeconds = BUILDING_STATS.yard.buildTime
+  for (let i = 0; i < buildSeconds; i++) step(state, 1)
+  assert(yard.complete, 'paused factory never finished')
+}
+
 function howlerCannotBreakRock(): void {
   const state = createMatch(9)
   const offsets: Array<[number, number]> = [
@@ -568,6 +598,7 @@ routeExists()
 gatherWorks()
 buildAndTrain()
 howlerCannotBreakRock()
+pausedConstructionStillAdvances()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 aiPortersBreakRockForOre()
