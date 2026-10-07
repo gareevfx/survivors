@@ -45,7 +45,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Worker',
-    blurb: 'Hauls minerals through gray rock and raises structures. Right-click gray rock to break it.',
+    blurb: 'Hauls minerals and raises structures. Breaks gray rock that seals a minerals patch.',
     hp: 42,
     speed: 86,
     radius: 9,

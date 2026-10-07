@@ -2,8 +2,8 @@ import { updateAi } from './ai'
 import { assignMiners, fillOpenGatherSlots } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
-  blocksMovement,
   buildingById,
+  isWalkable,
   buildingCenter,
   buildingRect,
   buildingTarget,
@@ -217,7 +217,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
       return
     }
     if (unit.goalX == null) {
-      const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y, unit.kind)
+      const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y)
       if (!spot) {
         if (!clearBlockedGather(state, unit, node)) unit.order = null
         return
@@ -238,7 +238,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
   }
   if (unit.goalX == null) {
     const stats = BUILDING_STATS.keep
-    const spot = nearestParking(state, keep.tx, keep.ty, stats.w, stats.h, unit.x, unit.y, unit.kind)
+    const spot = nearestParking(state, keep.tx, keep.ty, stats.w, stats.h, unit.x, unit.y)
     if (spot) setUnitDestination(state, unit, spot.x, spot.y)
   }
 }
@@ -259,7 +259,7 @@ function refreshConstruct(state: MatchState, unit: Unit, order: Extract<Order, {
   }
   if (unit.goalX == null) {
     const stats = BUILDING_STATS[building.kind]
-    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y, unit.kind)
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
     if (spot) setUnitDestination(state, unit, spot.x, spot.y)
   }
 }
@@ -270,7 +270,7 @@ function distToTile(unit: Unit, tx: number, ty: number): number {
 }
 
 function clearBlockedGather(state: MatchState, unit: Unit, node: { id: number; tx: number; ty: number }): boolean {
-  if (unit.owner !== 0 || unit.kind !== 'porter') return false
+  if (unit.kind !== 'porter') return false
   const rock = gatherBlockRock(state, unit, node)
   if (!rock) return false
   unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: node.id }
@@ -364,19 +364,19 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
 
 function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
   const radius = UNIT_STATS[unit.kind].radius * 0.45
-  if (!circleBlocked(state, unit, unit.x + dx, unit.y + dy, radius)) {
+  if (!circleBlocked(state, unit.x + dx, unit.y + dy, radius)) {
     unit.x += dx
     unit.y += dy
     return
   }
-  if (!circleBlocked(state, unit, unit.x + dx, unit.y, radius)) {
+  if (!circleBlocked(state, unit.x + dx, unit.y, radius)) {
     unit.x += dx
     return
   }
-  if (!circleBlocked(state, unit, unit.x, unit.y + dy, radius)) unit.y += dy
+  if (!circleBlocked(state, unit.x, unit.y + dy, radius)) unit.y += dy
 }
 
-function circleBlocked(state: MatchState, unit: Unit, x: number, y: number, radius: number): boolean {
+function circleBlocked(state: MatchState, x: number, y: number, radius: number): boolean {
   const samples: Array<[number, number]> = [
     [0, 0],
     [radius, 0],
@@ -387,7 +387,7 @@ function circleBlocked(state: MatchState, unit: Unit, x: number, y: number, radi
   for (const [ox, oy] of samples) {
     const tx = Math.floor((x + ox) / TILE)
     const ty = Math.floor((y + oy) / TILE)
-    if (blocksMovement(state, unit.kind, tx, ty)) return true
+    if (!isWalkable(state, tx, ty)) return true
   }
   return false
 }

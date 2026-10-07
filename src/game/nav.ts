@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
-import { blocksMovement, canPlace, rockAt } from './state'
-import { MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit, type UnitKind } from './types'
+import { canPlace, isWalkable, rockAt } from './state'
+import { MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -13,32 +13,19 @@ export function nearestWalkable(
   state: MatchState,
   x: number,
   y: number,
-  kind: UnitKind | null = null,
 ): { tx: number; ty: number } | null {
   const sx = Math.floor(x / TILE)
   const sy = Math.floor(y / TILE)
-  if (!blocksMovement(state, kind, sx, sy)) return { tx: sx, ty: sy }
+  if (isWalkable(state, sx, sy)) return { tx: sx, ty: sy }
   for (let rad = 1; rad <= 8; rad++) {
     for (let ty = sy - rad; ty <= sy + rad; ty++) {
       for (let tx = sx - rad; tx <= sx + rad; tx++) {
         if (Math.abs(tx - sx) !== rad && Math.abs(ty - sy) !== rad) continue
-        if (!blocksMovement(state, kind, tx, ty)) return { tx, ty }
+        if (isWalkable(state, tx, ty)) return { tx, ty }
       }
     }
   }
   return null
-}
-
-/** Path grid for this unit. Workers treat rock tiles as open; everyone else uses the shared grid. */
-export function movementGrid(state: MatchState, unit: Unit): Uint8Array {
-  if (unit.kind !== 'porter') return state.blocked
-  const grid = new Uint8Array(state.blocked)
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      if (!blocksMovement(state, 'porter', tx, ty)) grid[ty * MAP_W + tx] = 0
-    }
-  }
-  return grid
 }
 
 /** Closest open tile on the ring around a footprint. */
@@ -50,11 +37,10 @@ export function nearestParking(
   h: number,
   fromX: number,
   fromY: number,
-  kind: UnitKind | null = null,
 ): { x: number; y: number } | null {
   let best: { x: number; y: number; d: number } | null = null
   const consider = (x: number, y: number, penScale: number) => {
-    if (blocksMovement(state, kind, x, y)) return
+    if (!isWalkable(state, x, y)) return
     const wx = (x + 0.5) * TILE
     const wy = (y + 0.5) * TILE
     let pen = 0
@@ -90,9 +76,9 @@ export function nearestParking(
 export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy: number): boolean {
   const goalTileX = Math.floor(gx / TILE)
   const goalTileY = Math.floor(gy / TILE)
-  const goalOpen = !blocksMovement(state, unit.kind, goalTileX, goalTileY)
-  const start = nearestWalkable(state, unit.x, unit.y, unit.kind)
-  const goal = goalOpen ? { tx: goalTileX, ty: goalTileY } : nearestWalkable(state, gx, gy, unit.kind)
+  const goalOpen = isWalkable(state, goalTileX, goalTileY)
+  const start = nearestWalkable(state, unit.x, unit.y)
+  const goal = goalOpen ? { tx: goalTileX, ty: goalTileY } : nearestWalkable(state, gx, gy)
   if (!start || !goal) {
     unit.path = []
     unit.goalX = gx
@@ -110,7 +96,7 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
     return true
   }
 
-  const path = findPath(movementGrid(state, unit), MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
   if (!path) {
     unit.path = []
     return false
@@ -156,15 +142,15 @@ const APPROACH: ReadonlyArray<readonly [number, number]> = [
 ]
 
 /**
- * First gray rock on the way to this ore when the normal grid has no route.
- * Workers path through rock, so this is only a fallback when the approach still fails.
+ * First gray rock on the way to this ore when no walkable route exists.
+ * An open route, however long, is left alone. Only workers clear stone.
  */
 export function gatherBlockRock(
   state: MatchState,
   unit: Unit,
   node: { tx: number; ty: number },
 ): Rock | null {
-  if (unit.kind === 'howler') return null
+  if (unit.kind !== 'porter') return null
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return null
   const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)

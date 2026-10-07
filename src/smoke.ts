@@ -1,5 +1,4 @@
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
-import { movementGrid } from './game/nav'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
@@ -327,7 +326,7 @@ function porterBreaksRockWhenOrdered(): void {
   assert((still?.hp ?? 0) < before, 'ordered worker did not damage the rock')
 }
 
-function workersReachMineralsThroughRocks(): void {
+function workersBreakRockToReachMinerals(): void {
   const state = createMatch(9)
   const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
   assert(node, 'no southern minerals')
@@ -374,34 +373,43 @@ function workersReachMineralsThroughRocks(): void {
   assert(south, 'no open ground south of the wall')
   assert(
     findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty) === null,
-    'combat path crossed the minerals wall',
+    'workers could path across the minerals wall',
   )
-  const through = findPath(movementGrid(state, origin), MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty)
-  assert(through, 'worker path did not cross the minerals wall')
   state.oreHeld[1] = 40
   state.aiAttacking = false
   step(state, 0.5)
-  const gatherer = porters.map((unit) => unitById(state, unit.id)).find((unit) => unit?.order?.type === 'gather')
-  assert(gatherer?.order?.type === 'gather', 'workers did not gather through the rock wall')
-  assert(
-    !porters.some((unit) => unit.order?.type === 'attack' && unit.order.kind === 'rock'),
-    'workers attacked rock instead of walking through it',
-  )
-  const wallHp = state.rocks.filter((rock) => rock.ty === wallY).map((rock) => rock.hp)
-  let reached = false
-  for (let i = 0; i < 25 * 30; i++) {
-    step(state, 1 / 30)
-    if (porters.some((unit) => unit.cargo > 0 || Math.floor(unit.y / TILE) > wallY)) {
-      reached = true
+  const breaker = porters
+    .map((unit) => unitById(state, unit.id))
+    .find((unit) => unit?.order?.type === 'attack' && unit.order.kind === 'rock')
+  assert(breaker?.order?.type === 'attack' && breaker.order.kind === 'rock', 'workers did not attack a rock sealing the minerals')
+  const targetId = breaker.order.targetId
+  let broke = false
+  for (let i = 0; i < 40 * 60; i++) {
+    step(state, 1 / 60)
+    const crossed = porters.some((unit) => Math.floor(unit.y / TILE) > wallY)
+    if (crossed && state.rocks.some((rock) => rock.id === targetId)) {
+      assert(false, 'worker crossed the wall before the rock fell')
+    }
+    if (!state.rocks.some((rock) => rock.id === targetId)) {
+      broke = true
       break
     }
   }
-  assert(reached, 'workers did not cross the rock wall to the minerals')
-  const after = state.rocks.filter((rock) => rock.ty === wallY)
-  assert(
-    after.length === wallHp.length && after.every((rock, index) => rock.hp === wallHp[index]),
-    'workers destroyed rock on the way to minerals',
-  )
+  assert(broke, 'workers did not break the rock sealing the minerals')
+  let resumed = false
+  for (let i = 0; i < 5 * 60; i++) {
+    step(state, 1 / 60)
+    const order = unitById(state, breaker.id)?.order
+    if (order?.type === 'gather' || (order?.type === 'attack' && order.kind === 'rock' && order.targetId !== targetId)) {
+      resumed = true
+      break
+    }
+    if (order?.type !== 'attack') {
+      resumed = true
+      break
+    }
+  }
+  assert(resumed, 'worker did not resume after opening the minerals path')
 }
 
 function assignedDeposit(unit: { order: { type: string; nodeId?: number; kind?: string; resumeNode?: number } | null }): number | null {
@@ -526,24 +534,38 @@ function minersClearRockToGather(): void {
   const tank = makeUnit(state, 0, 'howler', (spot.tx + 1.5) * TILE, (spot.ty + 0.5) * TILE)
   commandGather(state, [miner.id, tank.id], node.id)
   const ordered = unitById(state, miner.id)
-  assert(ordered?.order?.type === 'gather' && ordered.order.nodeId === node.id, 'worker did not gather through the rock wall')
+  assert(
+    ordered?.order?.type === 'attack' && ordered.order.kind === 'rock' && ordered.order.resumeNode === node.id,
+    'worker did not attack the rock sealing the minerals',
+  )
   const tankOrder = unitById(state, tank.id)?.order
   assert(!(tankOrder?.type === 'attack' && tankOrder.kind === 'rock'), 'tank was sent to break rock')
-  const wallBefore = state.rocks.filter((rock) => rock.ty === wallY).reduce((sum, rock) => sum + rock.hp, 0)
-  let reached = false
-  for (let i = 0; i < 25 * 30; i++) {
-    step(state, 1 / 30)
+  const targetId = ordered.order.targetId
+  let broke = false
+  for (let i = 0; i < 45 * 60; i++) {
+    step(state, 1 / 60)
     const tankNow = unitById(state, tank.id)?.order
     assert(!(tankNow?.type === 'attack' && tankNow.kind === 'rock'), 'tank attacked a rock while workers gathered')
     const worker = unitById(state, miner.id)
-    if (worker && (worker.cargo > 0 || Math.floor(worker.y / TILE) > wallY)) {
-      reached = true
+    if (worker && Math.floor(worker.y / TILE) > wallY && state.rocks.some((rock) => rock.id === targetId)) {
+      assert(false, 'worker crossed the wall before the rock fell')
+    }
+    if (!state.rocks.some((rock) => rock.id === targetId)) {
+      broke = true
       break
     }
   }
-  assert(reached, 'worker did not walk through rock to the minerals')
-  const wallAfter = state.rocks.filter((rock) => rock.ty === wallY).reduce((sum, rock) => sum + rock.hp, 0)
-  assert(wallAfter === wallBefore, 'worker broke rock instead of walking through it')
+  assert(broke, 'worker did not break the rock sealing the minerals')
+  let resumed = false
+  for (let i = 0; i < 5 * 60; i++) {
+    step(state, 1 / 60)
+    const order = unitById(state, miner.id)?.order
+    if (order?.type === 'gather' && order.nodeId === node.id) {
+      resumed = true
+      break
+    }
+  }
+  assert(resumed, 'worker did not go back to gathering after the rock fell')
 }
 
 function aiIgnoresRocksOnOpenRoute(): void {
@@ -701,7 +723,7 @@ howlerCannotBreakRock()
 constructionPausesUntilWorkerReturns()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
-workersReachMineralsThroughRocks()
+workersBreakRockToReachMinerals()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()
