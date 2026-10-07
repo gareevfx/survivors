@@ -1,4 +1,4 @@
-import { findBuildSpot, gatherBlockRock, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { depositKnown } from './vision'
 import {
   buildingById,
@@ -51,6 +51,19 @@ function depositDistance(unit: Unit, node: { tx: number; ty: number }): number {
   return dx * dx + dy * dy
 }
 
+/**
+ * Rank a revealed deposit. Open ground beats any sealed patch. Dunmarch uses
+ * path length; Northmark uses straight-line distance inside that same split.
+ * Unreachable deposits sort last.
+ */
+function revealedScore(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const access = haulCost(state, unit, node)
+  if (!Number.isFinite(access)) return 2_000_000_000 + depositDistance(unit, node)
+  if (unit.owner === 1) return access
+  if (access >= 1_000_000) return 1_000_000_000 + depositDistance(unit, node)
+  return depositDistance(unit, node)
+}
+
 function noteProgress(unit: Unit): void {
   unit.stuckOrderT = 0
   unit.stuckX = unit.x
@@ -78,10 +91,46 @@ function giveDeposit(state: MatchState, unit: Unit, node: { id: number; tx: numb
   stopMoving(unit)
 }
 
+function pickMinerTarget(
+  state: MatchState,
+  miners: Unit[],
+  room: (id: number) => boolean,
+  mode: 'revealed' | 'buried',
+): { index: number; node: { id: number; tx: number; ty: number } } | null {
+  let bestIndex = -1
+  let bestNode: { id: number; tx: number; ty: number } | null = null
+  let bestD = Infinity
+  for (let i = 0; i < miners.length; i++) {
+    const unit = miners[i]
+    if (!unit) continue
+    for (const node of state.ore) {
+      if (!room(node.id)) continue
+      if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
+      const known = depositKnown(state, unit.owner, node.tx, node.ty)
+      let distance = Infinity
+      if (mode === 'revealed') {
+        if (!known) continue
+        distance = revealedScore(state, unit, node)
+      } else {
+        distance = harvestTime(state, unit, node)
+      }
+      if (distance < bestD) {
+        bestD = distance
+        bestIndex = i
+        bestNode = node
+      }
+    }
+  }
+  if (!bestNode || bestIndex < 0) return null
+  return { index: bestIndex, node: bestNode }
+}
+
 /**
  * Send these miners to ore. A clicked deposit fills first, up to MINERS_PER_DEPOSIT,
- * counting miners already working it. Everyone else takes the nearest deposit that
- * still has ore and a free slot. Miners with no slot wait (nodeMemory 0) until one opens.
+ * counting miners already working it. Everyone else takes the nearest revealed
+ * deposit they can reach. When no revealed minerals remain, they open the buried
+ * patch that takes the least travel and rock-breaking time. Miners with no slot
+ * wait (nodeMemory 0) until one opens.
  */
 export function assignMiners(state: MatchState, miners: Unit[], preferredId: number | null): void {
   const crew = miners.filter((unit) => unit.hp > 0 && unit.kind === 'porter')
@@ -117,30 +166,14 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
     }
   }
 
+  const revealedRemain = state.ore.some((node) => node.amount > 0 && depositKnown(state, owner, node.tx, node.ty))
   const left = [...pending]
   while (left.length) {
-    let bestIndex = -1
-    let bestNode: { id: number; tx: number; ty: number } | null = null
-    let bestD = Infinity
-    for (let i = 0; i < left.length; i++) {
-      const unit = left[i]
-      if (!unit) continue
-      for (const node of state.ore) {
-        if (!room(node.id)) continue
-        if (!depositKnown(state, owner, node.tx, node.ty)) continue
-        if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
-        const distance = owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
-        if (distance < bestD) {
-          bestD = distance
-          bestIndex = i
-          bestNode = node
-        }
-      }
-    }
-    if (!bestNode || bestIndex < 0) break
-    const unit = left.splice(bestIndex, 1)[0]
+    const picked = revealedRemain ? pickMinerTarget(state, left, room, 'revealed') : pickMinerTarget(state, left, room, 'buried')
+    if (!picked) break
+    const unit = left.splice(picked.index, 1)[0]
     if (!unit) break
-    claim(unit, bestNode)
+    claim(unit, picked.node)
   }
   for (const unit of left) {
     unit.order = null
@@ -229,17 +262,29 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
     if (id == null) continue
     counts.set(id, (counts.get(id) ?? 0) + 1)
   }
+  const revealedRemain = state.ore.some(
+    (node) => node.amount > 0 && node.id !== excludeId && depositKnown(state, unit.owner, node.tx, node.ty),
+  )
   let best: { id: number; tx: number; ty: number } | null = null
   let bestD = Infinity
   for (const node of state.ore) {
     if (node.amount <= 0) continue
     if (excludeId != null && node.id === excludeId) continue
-    if (!depositKnown(state, unit.owner, node.tx, node.ty)) continue
     if ((counts.get(node.id) ?? 0) >= MINERS_PER_DEPOSIT) continue
-    const raw = unit.owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
-    const distance = Number.isFinite(raw) ? raw : 1_000_000_000 + depositDistance(unit, node)
-    if (distance < bestD) {
-      bestD = distance
+    if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
+    const known = depositKnown(state, unit.owner, node.tx, node.ty)
+    if (revealedRemain) {
+      if (!known) continue
+      const distance = revealedScore(state, unit, node)
+      if (distance < bestD) {
+        bestD = distance
+        best = node
+      }
+      continue
+    }
+    const time = harvestTime(state, unit, node)
+    if (time < bestD) {
+      bestD = time
       best = node
     }
   }

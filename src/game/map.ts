@@ -1,28 +1,73 @@
 import { findPath } from './pathfind'
 import { mulberry32 } from './rng'
-import { MAP_H, MAP_W, PLAYER_KEEP_TX, PLAYER_KEEP_TY } from './types'
+import { BUILDING_STATS, MAP_H, MAP_W } from './types'
 
 export interface OreSpawn {
   tx: number
   ty: number
 }
 
-function protect(tx: number, ty: number): boolean {
-  const player = tx >= 2 && tx <= 18 && ty >= 28 && ty <= 42
-  const enemy = tx >= MAP_W - 19 && tx <= MAP_W - 3 && ty >= 2 && ty <= 16
-  return player || enemy
+export interface KeepSite {
+  tx: number
+  ty: number
 }
 
-function stampRock(tiles: Uint8Array, tx: number, ty: number): void {
-  if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return
-  if (protect(tx, ty)) return
-  tiles[ty * MAP_W + tx] = 1
+const KEEP_W = BUILDING_STATS.keep.w
+const KEEP_H = BUILDING_STATS.keep.h
+
+/**
+ * Opposite corners are the longest camps on this map. Northmark takes the southern
+ * site of a random pair near that maximum, so each match shifts but the two Castles
+ * stay as far apart as the corners allow.
+ */
+export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite } {
+  const rng = mulberry32(seed + 0x51ed)
+  const margin = 2
+  const slack = 6
+  const southWest = window(margin, MAP_H - margin - KEEP_H - 8, margin + 10, MAP_H - margin - KEEP_H)
+  const southEast = window(MAP_W - margin - KEEP_W - 10, MAP_H - margin - KEEP_H - 8, MAP_W - margin - KEEP_W, MAP_H - margin - KEEP_H)
+  const northWest = window(margin, margin, margin + 10, margin + 8)
+  const northEast = window(MAP_W - margin - KEEP_W - 10, margin, MAP_W - margin - KEEP_W, margin + 8)
+  const pairings = [
+    [southWest, northEast],
+    [southEast, northWest],
+  ]
+  let max = 0
+  const pairs: Array<{ player: KeepSite; enemy: KeepSite; distance: number }> = []
+  for (const [south, north] of pairings) {
+    for (const player of south) {
+      for (const enemy of north) {
+        const distance = centerDistance(player, enemy)
+        if (distance > max) max = distance
+        pairs.push({ player, enemy, distance })
+      }
+    }
+  }
+  const far = pairs.filter((pair) => pair.distance >= max - slack)
+  const pick = far[Math.floor(rng() * far.length)] ?? pairs[0]
+  if (!pick) return { player: { tx: margin, ty: MAP_H - margin - KEEP_H }, enemy: { tx: MAP_W - margin - KEEP_W, ty: margin } }
+  return { player: pick.player, enemy: pick.enemy }
+}
+
+function window(x0: number, y0: number, x1: number, y1: number): KeepSite[] {
+  const sites: KeepSite[] = []
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) sites.push({ tx, ty })
+  }
+  return sites
+}
+
+function centerDistance(a: KeepSite, b: KeepSite): number {
+  const dx = a.tx + KEEP_W / 2 - (b.tx + KEEP_W / 2)
+  const dy = a.ty + KEEP_H / 2 - (b.ty + KEEP_H / 2)
+  return Math.hypot(dx, dy)
 }
 
 function carve(
   tiles: Uint8Array,
   blocked: Uint8Array,
   ore: OreSpawn[],
+  guarded: (tx: number, ty: number) => boolean,
   x0: number,
   y0: number,
   x1: number,
@@ -42,10 +87,10 @@ function carve(
         const tx = x + ox
         const ty = y + oy
         if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
-        if (protect(tx, ty)) continue
+        if (guarded(tx, ty)) continue
         tiles[ty * MAP_W + tx] = 0
         blocked[ty * MAP_W + tx] = 0
-        const idx = ore.findIndex((o) => o.tx === tx && o.ty === ty)
+        const idx = ore.findIndex((spot) => spot.tx === tx && spot.ty === ty)
         if (idx >= 0) ore.splice(idx, 1)
       }
     }
@@ -62,116 +107,137 @@ function carve(
   }
 }
 
-export function generateBattlefield(seed: number): { tiles: Uint8Array; ore: OreSpawn[] } {
+export function generateBattlefield(
+  seed: number,
+  player: KeepSite,
+  enemy: KeepSite,
+): { tiles: Uint8Array; ore: OreSpawn[] } {
   const rng = mulberry32(seed)
   const tiles = new Uint8Array(MAP_W * MAP_H)
+  const camps = [player, enemy]
+  const guarded = (tx: number, ty: number) => camps.some((site) => inCamp(site, tx, ty))
 
-  for (let i = 0; i < 52; i++) {
+  for (let i = 0; i < 96; i++) {
     const cx = 2 + Math.floor(rng() * (MAP_W - 4))
     const cy = 2 + Math.floor(rng() * (MAP_H - 4))
     const rad = 1.15 + rng() * 2.3
     for (let y = -4; y <= 4; y++) {
       for (let x = -4; x <= 4; x++) {
         if (x * x + y * y > rad * rad) continue
-        stampRock(tiles, cx + x, cy + y)
-        stampRock(tiles, MAP_W - 1 - (cx + x), MAP_H - 1 - (cy + y))
+        const tx = cx + x
+        const ty = cy + y
+        if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue
+        if (guarded(tx, ty)) continue
+        tiles[ty * MAP_W + tx] = 1
       }
     }
   }
 
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (protect(tx, ty)) tiles[ty * MAP_W + tx] = 0
+      if (guarded(tx, ty)) tiles[ty * MAP_W + tx] = 0
     }
   }
 
   const ore: OreSpawn[] = []
   const add = (tx: number, ty: number) => {
-    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return
+    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return
+    if (camps.some((site) => coversFootprint(site, tx, ty))) return
     tiles[ty * MAP_W + tx] = 0
-    if (!ore.some((o) => o.tx === tx && o.ty === ty)) ore.push({ tx, ty })
+    if (!ore.some((spot) => spot.tx === tx && spot.ty === ty)) ore.push({ tx, ty })
   }
-
-  const clusters: Array<Array<[number, number]>> = [
-    [
-      [12, 30],
-      [13, 30],
-      [14, 30],
-      [12, 31],
-      [13, 31],
-      [14, 31],
-      [12, 32],
-      [13, 32],
-    ],
-    [
-      [22, 33],
-      [23, 33],
-      [24, 33],
-      [22, 34],
-      [23, 34],
-      [24, 34],
-    ],
-    [
-      [28, 8],
-      [29, 8],
-      [30, 8],
-      [28, 9],
-      [29, 9],
-    ],
-    [
-      [30, 36],
-      [31, 36],
-      [32, 36],
-      [30, 37],
-      [31, 37],
-    ],
-    [
-      [36, 14],
-      [37, 14],
-      [38, 14],
-      [36, 15],
-      [37, 15],
-    ],
-    [
-      [36, 28],
-      [37, 28],
-      [38, 28],
-      [36, 29],
-      [37, 29],
-    ],
-    [
-      [46, 18],
-      [47, 18],
-      [48, 18],
-      [46, 19],
-      [47, 19],
-      [48, 19],
-      [47, 20],
-      [48, 20],
-    ],
-  ]
-  for (const cluster of clusters) {
-    for (const [x, y] of cluster) {
-      add(x, y)
-      add(MAP_W - 1 - x, MAP_H - 1 - y)
+  const addBlock = (tx: number, ty: number, w: number, h: number) => {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) add(tx + x, ty + y)
     }
   }
 
-  const startX = PLAYER_KEEP_TX + 4
-  const startY = PLAYER_KEEP_TY + 4
-  const goalX = MAP_W - 1 - startX
-  const goalY = MAP_H - 1 - startY
-  tiles[startY * MAP_W + startX] = 0
-  tiles[goalY * MAP_W + goalX] = 0
+  addBlock(homeOrigin(player, enemy).tx, homeOrigin(player, enemy).ty, 3, 3)
+  addBlock(homeOrigin(enemy, player).tx, homeOrigin(enemy, player).ty, 3, 3)
 
+  const expansions: Array<[number, number]> = [
+    [24, 10],
+    [36, 8],
+    [48, 11],
+    [22, 20],
+    [34, 18],
+    [46, 21],
+    [28, 30],
+    [40, 27],
+    [52, 31],
+    [18, 16],
+    [58, 16],
+  ]
+  for (const [tx, ty] of expansions) {
+    if (nearCamp(player, tx, ty) || nearCamp(enemy, tx, ty)) continue
+    addBlock(tx, ty, 3, 2)
+  }
+
+  const start = campAnchor(player)
+  const goal = campAnchor(enemy)
+  tiles[start.ty * MAP_W + start.tx] = 0
+  tiles[goal.ty * MAP_W + goal.tx] = 0
   const blocked = new Uint8Array(tiles)
   for (const node of ore) blocked[node.ty * MAP_W + node.tx] = 1
-  blocked[startY * MAP_W + startX] = 0
-  blocked[goalY * MAP_W + goalX] = 0
-
-  if (!findPath(blocked, MAP_W, MAP_H, startX, startY, goalX, goalY)) {
-    carve(tiles, blocked, ore, startX, startY, goalX, goalY)
+  blocked[start.ty * MAP_W + start.tx] = 0
+  blocked[goal.ty * MAP_W + goal.tx] = 0
+  if (!findPath(blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)) {
+    carve(tiles, blocked, ore, guarded, start.tx, start.ty, goal.tx, goal.ty)
   }
 
   return { tiles, ore }
+}
+
+function inCamp(site: KeepSite, tx: number, ty: number): boolean {
+  return tx >= site.tx - 6 && tx <= site.tx + KEEP_W + 5 && ty >= site.ty - 6 && ty <= site.ty + KEEP_H + 5
+}
+
+function coversFootprint(site: KeepSite, tx: number, ty: number): boolean {
+  return tx >= site.tx && ty >= site.ty && tx < site.tx + KEEP_W && ty < site.ty + KEEP_H
+}
+
+function nearCamp(site: KeepSite, tx: number, ty: number): boolean {
+  const dx = tx - (site.tx + KEEP_W / 2)
+  const dy = ty - (site.ty + KEEP_H / 2)
+  return dx * dx + dy * dy < 15 * 15
+}
+
+/** A 3×3 patch just outside the Castle, toward the other base, inside starting sight. */
+function homeOrigin(site: KeepSite, other: KeepSite): KeepSite {
+  const dirX = Math.sign(other.tx - site.tx) || 1
+  const dirY = Math.sign(other.ty - site.ty) || -1
+  const tx = dirX > 0 ? site.tx + KEEP_W + 1 : site.tx - 3
+  const ty = dirY > 0 ? site.ty + KEEP_H + 1 : site.ty - 3
+  return {
+    tx: Math.max(1, Math.min(MAP_W - 4, tx)),
+    ty: Math.max(1, Math.min(MAP_H - 4, ty)),
+  }
+}
+
+function campAnchor(site: KeepSite): KeepSite {
+  return {
+    tx: Math.max(1, Math.min(MAP_W - 2, site.tx + 1)),
+    ty: Math.max(1, Math.min(MAP_H - 2, site.ty + 1)),
+  }
+}
+
+/** Four worker tiles on the ring around a Castle, preferring the side away from the other camp. */
+export function workerCamp(site: KeepSite, other: KeepSite, ore: OreSpawn[]): Array<[number, number]> {
+  const spots: Array<[number, number]> = []
+  for (let y = site.ty - 1; y <= site.ty + KEEP_H; y++) {
+    for (let x = site.tx - 1; x <= site.tx + KEEP_W; x++) {
+      if (x >= site.tx && x < site.tx + KEEP_W && y >= site.ty && y < site.ty + KEEP_H) continue
+      if (x < 1 || y < 1 || x >= MAP_W - 1 || y >= MAP_H - 1) continue
+      if (ore.some((spot) => spot.tx === x && spot.ty === y)) continue
+      spots.push([x, y])
+    }
+  }
+  const ox = other.tx - site.tx
+  const oy = other.ty - site.ty
+  spots.sort((a, b) => {
+    const da = (a[0] - site.tx) * ox + (a[1] - site.ty) * oy
+    const db = (b[0] - site.tx) * ox + (b[1] - site.ty) * oy
+    return da - db
+  })
+  return spots.slice(0, 4)
 }

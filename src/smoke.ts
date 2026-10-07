@@ -76,7 +76,7 @@ function gatherWorks(): void {
   let best = Infinity
   for (const ore of state.ore) {
     const d = (ore.tx * TILE - (porters[0]?.x ?? 0)) ** 2 + (ore.ty * TILE - (porters[0]?.y ?? 0)) ** 2
-    if (ore.ty > 28 && ore.tx < 20 && d < best) {
+    if (d < best) {
       best = d
       node = ore
     }
@@ -101,15 +101,7 @@ function buildAndTrain(): void {
   const state = createMatch(11)
   state.oreHeld[0] = 800
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
-  let spot: { tx: number; ty: number } | null = null
-  for (let ty = 30; ty < 44 && !spot; ty++) {
-    for (let tx = 2; tx < 16; tx++) {
-      if (canPlace(state, 'yard', tx, ty)) {
-        spot = { tx, ty }
-        break
-      }
-    }
-  }
+  const spot = yardNearHome(state)
   assert(spot, 'no yard site')
   const placed = tryPlace(
     state,
@@ -131,6 +123,21 @@ function buildAndTrain(): void {
   )
 }
 
+function yardNearHome(state: MatchState): { tx: number; ty: number } | null {
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  if (!keep) return null
+  for (let rad = 2; rad <= 14; rad++) {
+    for (let ty = keep.ty - rad; ty <= keep.ty + 3 + rad; ty++) {
+      for (let tx = keep.tx - rad; tx <= keep.tx + 3 + rad; tx++) {
+        const edge = tx === keep.tx - rad || ty === keep.ty - rad || tx === keep.tx + 3 + rad || ty === keep.ty + 3 + rad
+        if (!edge) continue
+        if (canPlace(state, 'yard', tx, ty)) return { tx, ty }
+      }
+    }
+  }
+  return null
+}
+
 function distToBuilding(unit: { x: number; y: number }, building: Building): number {
   const rect = buildingRect(building)
   const cx = Math.max(rect.x, Math.min(unit.x, rect.x + rect.w))
@@ -142,15 +149,7 @@ function constructionPausesUntilWorkerReturns(): void {
   const state = createMatch(11)
   state.oreHeld[0] = 800
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
-  let spot: { tx: number; ty: number } | null = null
-  for (let ty = 30; ty < 44 && !spot; ty++) {
-    for (let tx = 2; tx < 16; tx++) {
-      if (canPlace(state, 'yard', tx, ty)) {
-        spot = { tx, ty }
-        break
-      }
-    }
-  }
+  const spot = yardNearHome(state)
   assert(spot, 'no yard site for paused build')
   const placed = tryPlace(state, 0, 'yard', spot.tx, spot.ty, porters.map((unit) => unit.id))
   assert(placed === null, placed ?? 'place failed')
@@ -351,7 +350,7 @@ function porterBreaksRockWhenOrdered(): void {
 
 function workersBreakRockToReachMinerals(): void {
   const state = createMatch(9)
-  const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
+  const node = state.ore.find((entry) => entry.ty > 28 && entry.amount > 0)
   assert(node, 'no southern minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
@@ -537,7 +536,7 @@ function oreSelectionShowsAmount(): void {
 
 function minersClearRockToGather(): void {
   const state = createMatch(9)
-  const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
+  const node = state.ore.find((entry) => entry.ty > 28 && entry.amount > 0)
   assert(node, 'no southern minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
@@ -879,10 +878,22 @@ function enemyCamShowsDunmarchSight(): void {
   assert(!viewUnitSeen(state, spy), 'a Northmark unit outside Dunmarch sight stayed drawn')
   const foe = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
   assert(foe && viewUnitSeen(state, foe), 'a Dunmarch unit was hidden on enemy cam')
-  assert(!aiTileExplored(state, 0, 0) && !aiTileVisible(state, 0, 0), 'the corner started inside Dunmarch sight')
-  state.aiExplored[0] = 1
-  assert(viewGroundShown(state, 0, 0) && !viewTileVisible(state, 0, 0), 'enemy shroud hid rocks and minerals')
-  assert(!viewGroundShown(state, 2, 2), 'black ground on enemy cam still shows rocks and minerals')
+  let shroud: { tx: number; ty: number } | null = null
+  let black: { tx: number; ty: number } | null = null
+  for (let ty = 0; ty < MAP_H && (!shroud || !black); ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (aiTileExplored(state, tx, ty) || aiTileVisible(state, tx, ty)) continue
+      if (!shroud) shroud = { tx, ty }
+      else if (tx !== shroud.tx || ty !== shroud.ty) {
+        black = { tx, ty }
+        break
+      }
+    }
+  }
+  assert(shroud && black, 'the map started fully inside Dunmarch sight')
+  state.aiExplored[shroud.ty * MAP_W + shroud.tx] = 1
+  assert(viewGroundShown(state, shroud.tx, shroud.ty) && !viewTileVisible(state, shroud.tx, shroud.ty), 'enemy shroud hid rocks and minerals')
+  assert(!viewGroundShown(state, black.tx, black.ty), 'black ground on enemy cam still shows rocks and minerals')
   assert(runCommand(state, 'Off Enemy Cam'), 'off enemy cam was rejected')
   assert(!state.enemyCam, 'off enemy cam left the mode on')
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark sight did not return')
@@ -1244,11 +1255,15 @@ function dunmarchAimsAtTheCastle(): void {
   const sight = createMatch(4)
   const home = sight.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(home, 'missing the player castle')
-  const nearSilo = makeBuilding(sight, 0, 'silo', 6, 28, true)
+  const siloTx = home.tx + 5 + 2 < MAP_W ? home.tx + 5 : home.tx - 4
+  const nearSilo = makeBuilding(sight, 0, 'silo', siloTx, home.ty, true)
   const homePoint = { x: (home.tx + 1.5) * TILE, y: (home.ty + 1.5) * TILE }
   const nearPoint = { x: (nearSilo.tx + 1) * TILE, y: (nearSilo.ty + 1) * TILE }
   sight.aiSpotted.push({ id: home.id, x: homePoint.x, y: homePoint.y }, { id: nearSilo.id, x: nearPoint.x, y: nearPoint.y })
-  const eye = makeUnit(sight, 1, 'pike', nearPoint.x, nearPoint.y + 70)
+  for (const unit of sight.units) {
+    if (unit.owner === 0) unit.hp = 0
+  }
+  const eye = makeUnit(sight, 1, 'pike', (homePoint.x + nearPoint.x) / 2, (homePoint.y + nearPoint.y) / 2)
   commandMove(sight, [eye.id], homePoint.x, homePoint.y, true)
   for (let i = 0; i < 8; i++) step(sight, 1 / 60)
   const aimed = unitById(sight, eye.id)?.order
@@ -1361,7 +1376,7 @@ function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   worker.order = null
   worker.nodeMemory = 0
   assignMiners(state, [worker], null)
-  assert(worker.order == null, 'worker took a mineral that was never revealed')
+  assert(assignedDeposit(worker) === unseen.id, 'worker ignored buried minerals after the revealed patch was empty')
 
   const before = state.aiExplored.reduce((sum, bit) => sum + bit, 0)
   for (let i = 0; i < 12 * 30; i++) step(state, 1 / 30)
@@ -1371,8 +1386,67 @@ function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   assert(!state.aiSpotted.some((spot) => spot.id === keep.id), 'Dunmarch recorded the Castle without seeing it')
 }
 
+function castlesSpawnFarApart(): void {
+  const camps = new Set<string>()
+  let closest = Infinity
+  for (let seed = 1; seed <= 8; seed++) {
+    const state = createMatch(seed)
+    const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+    const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+    assert(home && enemy, 'missing a castle')
+    const apart = Math.hypot(home.tx + 1.5 - (enemy.tx + 1.5), home.ty + 1.5 - (enemy.ty + 1.5))
+    if (apart < closest) closest = apart
+    camps.add(`${home.tx},${home.ty},${enemy.tx},${enemy.ty}`)
+    assert(home.ty > enemy.ty, 'the camps were not on opposite ends of the map')
+    const overlap =
+      home.tx < enemy.tx + 3 && enemy.tx < home.tx + 3 && home.ty < enemy.ty + 3 && enemy.ty < home.ty + 3
+    assert(!overlap, 'the castles overlapped')
+    const workers = (owner: number) =>
+      state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0).length
+    assert(workers(0) === 4 && workers(1) === 4, 'a camp did not start with four workers')
+  }
+  assert(closest > 65, `castles spawned too close (${closest.toFixed(1)} tiles)`)
+  assert(camps.size >= 2, 'castle placement did not change between matches')
+}
+
+function buriedMineralsPreferTheFasterRock(): void {
+  const state = createMatch(8)
+  for (const unit of state.units) unit.hp = 0
+  for (const node of state.ore) node.amount = 0
+  const open: Array<[number, number]> = []
+  for (let x = 10; x <= 14; x++) open.push([x, 10])
+  for (let y = 11; y <= 18; y++) open.push([10, y])
+  open.push([11, 18], [12, 18])
+  carveGround(state, open)
+  const near = { id: state.nextId++, tx: 16, ty: 10, amount: 420 }
+  const far = { id: state.nextId++, tx: 16, ty: 18, amount: 420 }
+  state.ore.push(near, far)
+  rebuildBlocked(state)
+  const worker = makeUnit(state, 0, 'porter', 10.5 * TILE, 10.5 * TILE)
+  assignMiners(state, [worker], null)
+  assert(assignedDeposit(worker) === near.id, 'Northmark did not open the faster buried minerals')
+  assert(worker.order?.type === 'attack' && worker.order.kind === 'rock', 'Northmark walked through rock to buried minerals')
+  const foe = makeUnit(state, 1, 'porter', 10.5 * TILE, 10.5 * TILE)
+  assignMiners(state, [foe], null)
+  assert(assignedDeposit(foe) === near.id, 'Dunmarch did not open the faster buried minerals')
+  const revealed = { id: state.nextId++, tx: 12, ty: 10, amount: 420 }
+  state.ore.push(revealed)
+  state.explored[10 * MAP_W + 12] = 1
+  state.aiExplored[10 * MAP_W + 12] = 1
+  worker.order = null
+  worker.nodeMemory = 0
+  foe.order = null
+  foe.nodeMemory = 0
+  assignMiners(state, [worker], null)
+  assignMiners(state, [foe], null)
+  assert(assignedDeposit(worker) === revealed.id, 'Northmark left a revealed patch for buried minerals')
+  assert(assignedDeposit(foe) === revealed.id, 'Dunmarch left a revealed patch for buried minerals')
+}
+
 pathAroundWall()
 routeExists()
+castlesSpawnFarApart()
+buriedMineralsPreferTheFasterRock()
 gatherWorks()
 buildAndTrain()
 howlerCannotBreakRock()

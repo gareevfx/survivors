@@ -1,12 +1,10 @@
-import { generateBattlefield } from './map'
+import { generateBattlefield, pickKeepSites, workerCamp } from './map'
 import { updateVision } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
   MAP_W,
   ORE_NODE_AMOUNT,
-  PLAYER_KEEP_TX,
-  PLAYER_KEEP_TY,
   ROCK_HP,
   STARTING_ORE,
   SUPPLY_MAX,
@@ -246,16 +244,9 @@ export function makeBuilding(
   return building
 }
 
-function mirrorFootprint(tx: number, ty: number, w: number, h: number): { tx: number; ty: number } {
-  return { tx: MAP_W - (tx + w), ty: MAP_H - (ty + h) }
-}
-
-function mirrorTile(tx: number, ty: number): { tx: number; ty: number } {
-  return { tx: MAP_W - 1 - tx, ty: MAP_H - 1 - ty }
-}
-
 export function createMatch(seed: number): MatchState {
-  const field = generateBattlefield(seed)
+  const camps = pickKeepSites(seed)
+  const field = generateBattlefield(seed, camps.player, camps.enemy)
   const state: MatchState = {
     seed,
     tiles: field.tiles,
@@ -319,28 +310,33 @@ export function createMatch(seed: number): MatchState {
     }
   }
 
-  const keepStats = BUILDING_STATS.keep
-  makeBuilding(state, 0, 'keep', PLAYER_KEEP_TX, PLAYER_KEEP_TY, true)
-  const enemyOrigin = mirrorFootprint(PLAYER_KEEP_TX, PLAYER_KEEP_TY, keepStats.w, keepStats.h)
-  const enemyKeep = makeBuilding(state, 1, 'keep', enemyOrigin.tx, enemyOrigin.ty, true)
-  enemyKeep.rallyY = enemyOrigin.ty * TILE - 18
+  const homeKeep = makeBuilding(state, 0, 'keep', camps.player.tx, camps.player.ty, true)
+  const enemyKeep = makeBuilding(state, 1, 'keep', camps.enemy.tx, camps.enemy.ty, true)
+  aimRally(homeKeep, camps.enemy)
+  aimRally(enemyKeep, camps.player)
 
-  const porterTiles: Array<[number, number]> = [
-    [9, 38],
-    [10, 38],
-    [11, 38],
-    [12, 38],
-  ]
-  for (const [tx, ty] of porterTiles) {
+  for (const [tx, ty] of workerCamp(camps.player, camps.enemy, field.ore)) {
     makeUnit(state, 0, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
-    const mirrored = mirrorTile(tx, ty)
-    makeUnit(state, 1, 'porter', (mirrored.tx + 0.5) * TILE, (mirrored.ty + 0.5) * TILE)
+  }
+  for (const [tx, ty] of workerCamp(camps.enemy, camps.player, field.ore)) {
+    makeUnit(state, 1, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
   }
 
   rebuildBlocked(state)
   recomputeSupply(state)
   updateVision(state)
   return state
+}
+
+function aimRally(building: Building, toward: { tx: number; ty: number }): void {
+  const stats = BUILDING_STATS[building.kind]
+  const x = (building.tx + stats.w / 2) * TILE
+  const y = (building.ty + stats.h / 2) * TILE
+  const dx = (toward.tx + stats.w / 2) * TILE - x
+  const dy = (toward.ty + stats.h / 2) * TILE - y
+  const length = Math.hypot(dx, dy) || 1
+  building.rallyX = x + (dx / length) * 78
+  building.rallyY = y + (dy / length) * 78
 }
 
 export function playerKeep(state: MatchState): Building | undefined {

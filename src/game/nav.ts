@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
 import { canPlace, isWalkable, rockAt } from './state'
-import { MAP_H, MAP_PX_H, MAP_PX_W, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
+import { GATHER_TIME, MAP_H, MAP_PX_H, MAP_PX_W, MAP_W, ROCK_HP, TILE, UNIT_STATS, type MatchState, type Rock, type Unit } from './types'
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -176,6 +176,25 @@ export function haulCost(state: MatchState, unit: Unit, node: { tx: number; ty: 
   const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
   if (!shortcut) return Number.POSITIVE_INFINITY
   return 1_000_000 + routeLength(start, shortcut)
+}
+
+/**
+ * Seconds until the first load can be picked up: walk the rock-ignoring route,
+ * chip every rock on it, then gather once. Lower is sooner.
+ */
+export function harvestTime(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const start = nearestWalkable(state, unit.x, unit.y)
+  if (!start) return Number.POSITIVE_INFINITY
+  const cleared = clearedOfRocks(state)
+  const goal = adjacentOpen(cleared, node.tx, node.ty)
+  if (!goal) return Number.POSITIVE_INFINITY
+  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  if (!shortcut) return Number.POSITIVE_INFINITY
+  const stats = UNIT_STATS.porter
+  const shots = Math.ceil(ROCK_HP / Math.max(1, stats.damage))
+  const travel = (routeLength(start, shortcut) * TILE) / stats.speed
+  const breaking = rocksAlong(state, start, shortcut).length * shots * stats.cooldown
+  return travel + breaking + GATHER_TIME
 }
 
 /**
