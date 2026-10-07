@@ -319,6 +319,8 @@ export interface MatchState {
   aiScout: number
   /** When set, the player's fog stays off for the rest of this match. Dunmarch still scouts. */
   fogCleared: boolean
+  /** When set, the map is drawn with Dunmarch's fog instead of Northmark's. */
+  enemyCam: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean
   ore: OreNode[]

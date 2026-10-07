@@ -1,7 +1,7 @@
 import type { Camera } from './camera'
 import { hash2 } from './rng'
 import { buildingCenter, buildingRect, playerKeep } from './state'
-import { buildingSeen, groundShown, tileExplored, tileVisible, unitSeen } from './vision'
+import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
@@ -118,7 +118,7 @@ export function renderWorld(
 
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
-    if (!groundShown(state, rock.tx, rock.ty)) continue
+    if (!viewGroundShown(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -135,7 +135,7 @@ export function renderWorld(
   }
 
   for (const node of state.ore) {
-    if (!groundShown(state, node.tx, node.ty)) continue
+    if (!viewGroundShown(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -146,7 +146,7 @@ export function renderWorld(
 
   const buildings = state.buildings.slice().sort((a, b) => a.ty - b.ty)
   for (const building of buildings) {
-    if (!buildingSeen(state, building)) continue
+    if (!viewBuildingSeen(state, building)) continue
     const rect = buildingRect(building)
     if (rect.x > view.r || rect.y > view.b || rect.x + rect.w < view.l || rect.y + rect.h < view.t) continue
     drawBuilding(ctx, state, building)
@@ -157,14 +157,15 @@ export function renderWorld(
   const selected = new Set(state.selectedUnits)
   const units = state.units.slice().sort((a, b) => a.y - b.y)
   for (const unit of units) {
-    if (!unitSeen(state, unit)) continue
+    if (!viewUnitSeen(state, unit)) continue
     if (unit.x < view.l || unit.y < view.t || unit.x > view.r || unit.y > view.b) continue
     if (selected.has(unit.id)) drawOrderLine(ctx, unit)
     drawUnit(ctx, state, unit, selected.has(unit.id))
   }
 
+  const viewer = state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
-    if (shot.owner !== 0 && !tileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
+    if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
     ctx.fillStyle = shot.owner === 0 ? '#e9f7ff' : '#ffd2c8'
     ctx.beginPath()
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
@@ -172,7 +173,7 @@ export function renderWorld(
   }
 
   for (const particle of state.particles) {
-    if (!tileVisible(state, Math.floor(particle.x / TILE), Math.floor(particle.y / TILE))) continue
+    if (!viewTileVisible(state, Math.floor(particle.x / TILE), Math.floor(particle.y / TILE))) continue
     const alpha = Math.max(0, particle.life / particle.max)
     ctx.globalAlpha = alpha
     if (particle.text) {
@@ -202,7 +203,7 @@ export function renderWorld(
   }
 
   const rally = state.selectedBuilding != null ? state.buildings.find((b) => b.id === state.selectedBuilding) : undefined
-  if (rally && rally.owner === 0) {
+  if (rally && rally.owner === 0 && viewBuildingSeen(state, rally)) {
     ctx.strokeStyle = 'rgba(159, 216, 255, 0.8)'
     ctx.fillStyle = '#9fd8ff'
     ctx.beginPath()
@@ -238,8 +239,8 @@ function drawFog(
   const y1 = Math.min(MAP_H - 1, Math.floor(view.b / TILE))
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
-      if (tileVisible(state, tx, ty)) continue
-      ctx.fillStyle = tileExplored(state, tx, ty) ? 'rgba(6, 8, 6, 0.58)' : '#070806'
+      if (viewTileVisible(state, tx, ty)) continue
+      ctx.fillStyle = viewTileExplored(state, tx, ty) ? 'rgba(6, 8, 6, 0.58)' : '#070806'
       ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE)
     }
   }
@@ -288,7 +289,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   const origin = buildingCenter(keep)
   let best: { x: number; y: number; d: number } | null = null
   for (const node of state.ore) {
-    if (!groundShown(state, node.tx, node.ty)) continue
+    if (!viewGroundShown(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     const d = (x - origin.x) ** 2 + (y - origin.y) ** 2
@@ -702,25 +703,25 @@ export function renderMinimap(
   const oy = frame.y
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (!tileExplored(state, tx, ty)) continue
-      ctx.fillStyle = tileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
+      if (!viewTileExplored(state, tx, ty)) continue
+      ctx.fillStyle = viewTileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#3a3832'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (!tileExplored(state, tx, ty)) continue
+      if (!viewTileExplored(state, tx, ty)) continue
       if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#e6c15a'
   for (const node of state.ore) {
-    if (!groundShown(state, node.tx, node.ty)) continue
+    if (!viewGroundShown(state, node.tx, node.ty)) continue
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
   }
   for (const building of state.buildings) {
-    if (!buildingSeen(state, building)) continue
+    if (!viewBuildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
     ctx.fillStyle = building.owner === 0 ? '#7ecfff' : '#ff7d70'
     ctx.globalAlpha = building.complete ? 1 : 0.55
@@ -728,7 +729,7 @@ export function renderMinimap(
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {
-    if (!unitSeen(state, unit)) continue
+    if (!viewUnitSeen(state, unit)) continue
     ctx.fillStyle = unit.owner === 0 ? '#d8f4ff' : '#ffd0c8'
     const px = ox + (unit.x / TILE) * sx
     const py = oy + (unit.y / TILE) * sy
@@ -737,7 +738,7 @@ export function renderMinimap(
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (!tileExplored(state, tx, ty) || tileVisible(state, tx, ty)) continue
+      if (!viewTileExplored(state, tx, ty) || viewTileVisible(state, tx, ty)) continue
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }

@@ -60,6 +60,35 @@ export function groundShown(state: MatchState, tx: number, ty: number): boolean 
   return tileExplored(state, tx, ty)
 }
 
+/** Sight used for drawing. Enemy cam shows Dunmarch's fog instead of Northmark's. */
+export function viewTileVisible(state: MatchState, tx: number, ty: number): boolean {
+  return state.enemyCam ? aiTileVisible(state, tx, ty) : tileVisible(state, tx, ty)
+}
+
+export function viewTileExplored(state: MatchState, tx: number, ty: number): boolean {
+  return state.enemyCam ? aiTileExplored(state, tx, ty) : tileExplored(state, tx, ty)
+}
+
+export function viewGroundShown(state: MatchState, tx: number, ty: number): boolean {
+  return viewTileExplored(state, tx, ty)
+}
+
+export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
+  if (unit.owner === (state.enemyCam ? 1 : 0)) return true
+  return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
+}
+
+export function viewBuildingSeen(state: MatchState, building: Building): boolean {
+  if (building.owner === (state.enemyCam ? 1 : 0)) return true
+  const stats = BUILDING_STATS[building.kind]
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (viewTileVisible(state, building.tx + x, building.ty + y)) return true
+    }
+  }
+  return false
+}
+
 /** A deposit automatic gathering may use. Explored ground counts even under the shroud. */
 export function depositKnown(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
   if (owner === 0) return tileExplored(state, tx, ty)

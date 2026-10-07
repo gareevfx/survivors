@@ -45,6 +45,24 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'God Mode is off.')
     return true
   }
+  if (text === 'show enemy cam') {
+    if (state.enemyCam) {
+      pushToast(state, 'Enemy cam is already on.')
+      return true
+    }
+    state.enemyCam = true
+    pushToast(state, 'Enemy cam is on.')
+    return true
+  }
+  if (text === 'off enemy cam') {
+    if (!state.enemyCam) {
+      pushToast(state, 'Enemy cam is already off.')
+      return true
+    }
+    state.enemyCam = false
+    pushToast(state, 'Enemy cam is off.')
+    return true
+  }
   pushToast(state, 'Unknown command.')
   return false
 }

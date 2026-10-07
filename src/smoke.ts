@@ -5,7 +5,20 @@ import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
-import { aiTileExplored, depositKnown, groundShown, tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
+import {
+  aiTileExplored,
+  aiTileVisible,
+  depositKnown,
+  groundShown,
+  tileExplored,
+  tileVisible,
+  unitSeen,
+  updateVision,
+  viewBuildingSeen,
+  viewGroundShown,
+  viewTileVisible,
+  viewUnitSeen,
+} from './game/vision'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -837,6 +850,57 @@ function aiBreaksRockClosestToMinerals(): void {
   )
 }
 
+function enemyCamShowsDunmarchSight(): void {
+  const state = createMatch(1)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles')
+  assert(!state.enemyCam, 'a match started on enemy cam')
+  assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark starts outside its own sight')
+  assert(!viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch is visible before enemy cam')
+  assert(!runCommand(state, 'show enemy'), 'a partial enemy cam line was accepted')
+  assert(!state.enemyCam, 'a partial line turned enemy cam on')
+  assert(runCommand(state, '  Show Enemy Cam  '), 'show enemy cam was rejected')
+  assert(state.enemyCam, 'show enemy cam did not turn on')
+  assert(runCommand(state, 'SHOW ENEMY CAM'), 'repeating show enemy cam was rejected')
+  assert(state.enemyCam, 'repeating the command turned enemy cam off')
+  assert(viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch castle is dark on enemy cam')
+  assert(!viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark castle stays lit on enemy cam')
+  assert(viewBuildingSeen(state, enemy), 'Dunmarch castle is hidden from its own cam')
+  assert(!viewBuildingSeen(state, keep), 'Northmark castle is drawn on enemy cam')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'enemy cam revealed the map for Northmark')
+  assert(aiTileExplored(state, enemy.tx + 1, enemy.ty + 1), 'enemy cam forgot Dunmarch sight')
+  const spy = makeUnit(state, 0, 'porter', (enemy.tx + 1.5) * TILE, (enemy.ty + 4) * TILE)
+  updateVision(state)
+  assert(viewUnitSeen(state, spy), 'a Northmark unit inside Dunmarch sight stayed hidden')
+  spy.x = (keep.tx + 1.5) * TILE
+  spy.y = (keep.ty + 1.5) * TILE
+  updateVision(state)
+  assert(!viewUnitSeen(state, spy), 'a Northmark unit outside Dunmarch sight stayed drawn')
+  const foe = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(foe && viewUnitSeen(state, foe), 'a Dunmarch unit was hidden on enemy cam')
+  assert(!aiTileExplored(state, 0, 0) && !aiTileVisible(state, 0, 0), 'the corner started inside Dunmarch sight')
+  state.aiExplored[0] = 1
+  assert(viewGroundShown(state, 0, 0) && !viewTileVisible(state, 0, 0), 'enemy shroud hid rocks and minerals')
+  assert(!viewGroundShown(state, 2, 2), 'black ground on enemy cam still shows rocks and minerals')
+  assert(runCommand(state, 'Off Enemy Cam'), 'off enemy cam was rejected')
+  assert(!state.enemyCam, 'off enemy cam left the mode on')
+  assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark sight did not return')
+  assert(!viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed visible after enemy cam')
+  assert(viewBuildingSeen(state, keep) && !viewBuildingSeen(state, enemy), 'building sight did not return to Northmark')
+  assert(runCommand(state, 'off enemy cam'), 'off enemy cam was rejected while already off')
+  assert(!state.enemyCam, 'the off command turned enemy cam back on')
+  const cleared = createMatch(2)
+  assert(runCommand(cleared, 'clear fog of war'), 'could not clear fog')
+  assert(runCommand(cleared, 'show enemy cam'), 'enemy cam was rejected after clear fog')
+  const clearedKeep = cleared.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(clearedKeep, 'missing castle')
+  assert(tileVisible(cleared, clearedKeep.tx + 1, clearedKeep.ty + 1), 'clear fog stopped revealing Northmark')
+  assert(!viewTileVisible(cleared, clearedKeep.tx + 1, clearedKeep.ty + 1), 'clear fog also revealed enemy cam')
+  const fresh = createMatch(3)
+  assert(!fresh.enemyCam, 'a new match kept enemy cam')
+}
+
 function fogHidesUnexploredGround(): void {
   const state = createMatch(1)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -1293,6 +1357,7 @@ aiHaulsTheShortestOpenPath()
 aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
+enemyCamShowsDunmarchSight()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 shotsCannotCrossRocks()
