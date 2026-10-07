@@ -500,8 +500,10 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   ctx.translate(unit.x, unit.y + bob)
   ctx.fillStyle = 'rgba(0,0,0,0.25)'
   ctx.beginPath()
-  ctx.ellipse(1, 5, stats.radius * 0.85, stats.radius * 0.4, 0, 0, Math.PI * 2)
+  const lift = unit.kind === 'drone' ? 10 : 5
+  ctx.ellipse(1, lift, stats.radius * 0.85, stats.radius * 0.4, 0, 0, Math.PI * 2)
   ctx.fill()
+  if (unit.kind === 'drone') ctx.translate(0, -8)
   ctx.rotate(unit.facing)
 
   if (unit.kind === 'porter') {
@@ -536,6 +538,30 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.strokeStyle = ink
     ctx.lineWidth = 1.3
     ctx.stroke()
+  } else if (unit.kind === 'drone') {
+    ctx.strokeStyle = body
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.moveTo(-12, 0)
+    ctx.lineTo(12, 0)
+    ctx.moveTo(0, -7)
+    ctx.lineTo(0, 7)
+    ctx.stroke()
+    ctx.fillStyle = '#d7f08a'
+    ctx.beginPath()
+    ctx.moveTo(7, 0)
+    ctx.lineTo(0, -4.5)
+    ctx.lineTo(-7, 0)
+    ctx.lineTo(0, 4.5)
+    ctx.closePath()
+    ctx.fill()
+    ctx.strokeStyle = ink
+    ctx.lineWidth = 1.3
+    ctx.stroke()
+    ctx.fillStyle = body
+    ctx.beginPath()
+    ctx.arc(0, 0, 1.7, 0, Math.PI * 2)
+    ctx.fill()
   } else {
     ctx.fillStyle = body
     ctx.beginPath()

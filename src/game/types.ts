@@ -24,7 +24,7 @@ export const CHASE_BREAK = 300
 export const STUCK_REDIRECT_SECONDS = 4
 
 export type PlayerId = 0 | 1
-export type UnitKind = 'porter' | 'pike' | 'howler'
+export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
 export type BuildingKind = 'keep' | 'yard' | 'silo'
 export type TargetKind = 'unit' | 'building' | 'rock'
 
@@ -43,6 +43,8 @@ export interface UnitStats {
   trainTime: number
   projectileSpeed: number
   projectileRadius: number
+  /** Ignores rocks, buildings, and other ground blockers. */
+  flying: boolean
 }
 
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
@@ -61,6 +63,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     trainTime: 8,
     projectileSpeed: 280,
     projectileRadius: 2.4,
+    flying: false,
   },
   pike: {
     label: 'Bike',
@@ -77,6 +80,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     trainTime: 9,
     projectileSpeed: 420,
     projectileRadius: 2.2,
+    flying: false,
   },
   howler: {
     label: 'Tank',
@@ -93,6 +97,24 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     trainTime: 14,
     projectileSpeed: 200,
     projectileRadius: 4,
+    flying: false,
+  },
+  drone: {
+    label: 'Drone',
+    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Castle. Bikes deal half damage; tanks cannot attack it.',
+    hp: 40,
+    speed: 118,
+    radius: 8,
+    damage: 0,
+    range: 0,
+    cooldown: 1,
+    sight: 260,
+    supply: 1,
+    cost: 75,
+    trainTime: 11,
+    projectileSpeed: 0,
+    projectileRadius: 0,
+    flying: true,
   },
 }
 
@@ -122,7 +144,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains bikes and tanks.',
+    blurb: 'Trains bikes, tanks, and drones.',
     w: 3,
     h: 2,
     hp: 720,
@@ -334,5 +356,7 @@ export interface Target {
   y: number
   radius: number
   hp: number
-  targetKind: TargetKind
+    targetKind: TargetKind
+    /** Set when the target is a unit, so weapons can tell a Drone from a Bike. */
+    unitKind?: UnitKind
 }

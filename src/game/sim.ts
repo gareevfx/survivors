@@ -26,6 +26,8 @@ import {
   GATHER_TIME,
   INTERACT,
   MAP_H,
+  MAP_PX_H,
+  MAP_PX_W,
   MAP_W,
   STUCK_REDIRECT_SECONDS,
   TILE,
@@ -74,7 +76,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
       unit.order = { type: 'gather', nodeId: unit.nodeMemory, phase: 'return' }
       return
     }
-    if (unit.kind !== 'porter') {
+    if (unit.kind !== 'porter' && unit.kind !== 'drone') {
       const stats = UNIT_STATS[unit.kind]
       const foe =
         nearestHostile(state, unit, stats.sight, false) ??
@@ -379,6 +381,12 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
 }
 
 function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
+  if (unit.kind === 'drone') {
+    const margin = 6
+    unit.x = Math.max(margin, Math.min(MAP_PX_W - margin, unit.x + dx))
+    unit.y = Math.max(margin, Math.min(MAP_PX_H - margin, unit.y + dy))
+    return
+  }
   const radius = UNIT_STATS[unit.kind].radius * 0.45
   if (!circleBlocked(state, unit.x + dx, unit.y + dy, radius)) {
     unit.x += dx
@@ -411,11 +419,11 @@ function circleBlocked(state: MatchState, x: number, y: number, radius: number):
 function separate(state: MatchState): void {
   const units = state.units
   for (let i = 0; i < units.length; i++) {
-    const a = units[i]
-    if (!a || a.hp <= 0) continue
+      const a = units[i]
+    if (!a || a.hp <= 0 || a.kind === 'drone') continue
     for (let j = i + 1; j < units.length; j++) {
       const b = units[j]
-      if (!b || b.hp <= 0) continue
+      if (!b || b.hp <= 0 || b.kind === 'drone') continue
       const dx = b.x - a.x
       const dy = b.y - a.y
       const distance = Math.hypot(dx, dy) || 0.001
@@ -533,8 +541,8 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     for (let x = building.tx - 1; x <= building.tx + stats.w; x++) {
       const inside = x >= building.tx && x < building.tx + stats.w && y >= building.ty && y < building.ty + stats.h
       if (inside) continue
-      if (x < 0 || y < 0 || x >= 48 || y >= 48) continue
-      if (state.blocked[y * 48 + x]) continue
+      if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
+      if (state.blocked[y * MAP_W + x]) continue
       spots.push({ x: (x + 0.5) * TILE, y: (y + 0.5) * TILE })
     }
   }
@@ -585,7 +593,7 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
 }
 
 function tryFire(state: MatchState, unit: Unit): void {
-  if (unit.attackCd > 0 || unit.hp <= 0) return
+  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone') return
   const target = pickFireTarget(state, unit)
   if (!target || !inWeaponRange(unit, target)) return
   if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
@@ -620,7 +628,9 @@ function tryFire(state: MatchState, unit: Unit): void {
 
 function isAttackable(unit: Unit, focus: Target): boolean {
   if (focus.hp <= 0) return false
+  if (unit.kind === 'drone') return false
   if (focus.targetKind === 'rock') return unit.kind === 'porter'
+  if (focus.unitKind === 'drone' && unit.kind === 'howler') return false
   return focus.owner !== unit.owner
 }
 
@@ -636,9 +646,11 @@ function pickFireTarget(state: MatchState, unit: Unit): Target | null {
   }
   const angry = unit.hurtTimer > 0
   const combat =
-    unit.kind !== 'porter' && (order == null || order.type === 'move' || order.type === 'attackMove')
+    unit.kind !== 'porter' &&
+    unit.kind !== 'drone' &&
+    (order == null || order.type === 'move' || order.type === 'attackMove')
   if (!angry && !combat) return null
-  if (unit.kind === 'porter' && !angry) return null
+  if ((unit.kind === 'porter' || unit.kind === 'drone') && !angry) return null
   const stats = UNIT_STATS[unit.kind]
   return nearestHostile(state, unit, stats.range + 40, order?.type === 'attackMove')
 }
@@ -648,6 +660,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   let bestD = radius
   for (const other of state.units) {
     if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id) continue
+    if (other.kind === 'drone' && unit.kind === 'howler') continue
     const d = Math.hypot(other.x - unit.x, other.y - unit.y)
     if (d < bestD) {
       bestD = d
@@ -704,7 +717,10 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
     if (!unit || unit.hp <= 0) return
-    unit.hp -= damage
+    const source = unitById(state, sourceId)
+    if (unit.kind === 'drone' && source?.kind === 'howler') return
+    const dealt = unit.kind === 'drone' && source?.kind === 'pike' ? damage / 2 : damage
+    unit.hp -= dealt
     unit.hitFlash = 0.16
     unit.hurtTimer = 3.2
     if (unit.hp > 0 && unit.kind === 'porter' && !unit.order) {

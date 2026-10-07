@@ -120,6 +120,7 @@ export function unitTarget(unit: Unit): Target {
     radius: stats.radius,
     hp: unit.hp,
     targetKind: 'unit',
+    unitKind: unit.kind,
   }
 }
 

@@ -1125,4 +1125,82 @@ combatResolves()
 keepDecidesTheField()
 enemyPlays()
 wideMapHidesObjectsAndMakesDunmarchScout()
+droneFliesFromTheFactory()
 console.log('smoke ok')
+
+function droneFliesFromTheFactory(): void {
+  const state = createMatch(16)
+  const yard = makeBuilding(state, 0, 'yard', 14, 30, true)
+  assert(yard, 'factory was not placed')
+  assert(tryTrain(state, yard.id, 'drone') === null, 'factory rejected the drone')
+  const queued = yard.queue[0]
+  assert(queued?.kind === 'drone', 'drone was not queued')
+  assert(state.oreHeld[0] === STARTING_ORE - UNIT_STATS.drone.cost, 'drone cost was not charged')
+  assert(UNIT_STATS.drone.sight === BUILDING_STATS.keep.sight, 'drone sight does not match the castle')
+  assert(UNIT_STATS.drone.damage === 0 && UNIT_STATS.drone.flying, 'drone is not an unarmed flyer')
+  queued.remaining = 0.01
+  step(state, 0.05)
+  const drone = state.units.find((unit) => unit.owner === 0 && unit.kind === 'drone')
+  assert(drone, 'factory did not produce the drone')
+
+  const rock = state.rocks.find((entry) => entry.hp > 0 && entry.tx > 4 && entry.tx < MAP_W - 4 && entry.ty > 2 && entry.ty < MAP_H - 2)
+  assert(rock, 'no rock for the drone to fly over')
+  drone.x = (rock.tx - 2) * TILE
+  drone.y = (rock.ty + 0.5) * TILE
+  drone.order = null
+  drone.path = []
+  drone.goalX = null
+  drone.goalY = null
+  const before = rock.hp
+  commandMove(state, [drone.id], (rock.tx + 2) * TILE, drone.y, false)
+  let crossed = false
+  for (let i = 0; i < 8 * 60; i++) {
+    step(state, 1 / 60)
+    const now = unitById(state, drone.id)
+    if (now && now.x > (rock.tx + 0.6) * TILE) {
+      crossed = true
+      break
+    }
+  }
+  assert(crossed, 'drone did not fly across the rock')
+  assert(state.rocks.find((entry) => entry.id === rock.id)?.hp === before, 'flying over the rock damaged it')
+
+  drone.x = 40.5 * TILE
+  drone.y = 8.5 * TILE
+  drone.order = null
+  updateVision(state)
+  assert(tileVisible(state, 40, 8), 'drone did not reveal the tile under it')
+  assert(tileVisible(state, 40, 15), 'drone sight is shorter than the castle')
+  assert(!tileVisible(state, 40, 20), 'drone sight reaches farther than the castle')
+
+  const foe = makeUnit(state, 1, 'pike', drone.x + 30, drone.y)
+  const foeHp = foe.hp
+  commandAttack(state, [drone.id], foe.id, 'unit')
+  assert(unitById(state, drone.id)?.order == null, 'drone accepted an attack order')
+  for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
+  assert(unitById(state, foe.id)?.hp === foeHp, 'drone dealt combat damage')
+  foe.hp = 0
+
+  const tank = makeUnit(state, 1, 'howler', drone.x - 40, drone.y)
+  commandAttack(state, [tank.id], drone.id, 'unit')
+  assert(unitById(state, tank.id)?.order == null, 'tank accepted an order to attack a drone')
+  const forced = unitById(state, tank.id)
+  if (forced) forced.order = { type: 'attack', targetId: drone.id, kind: 'unit' }
+  const untouched = unitById(state, drone.id)?.hp ?? 0
+  for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
+  assert(unitById(state, drone.id)?.hp === untouched, 'tank damaged a drone')
+
+  const bike = makeUnit(state, 1, 'pike', drone.x + 24, drone.y + 8)
+  commandAttack(state, [bike.id], drone.id, 'unit')
+  const startHp = unitById(state, drone.id)?.hp ?? 0
+  let firstDrop = 0
+  for (let i = 0; i < 3 * 60; i++) {
+    step(state, 1 / 60)
+    const hp = unitById(state, drone.id)?.hp ?? startHp
+    if (hp < startHp) {
+      firstDrop = startHp - hp
+      break
+    }
+  }
+  assert(firstDrop === UNIT_STATS.pike.damage / 2, `bike dealt ${firstDrop} to a drone, not half of ${UNIT_STATS.pike.damage}`)
+}

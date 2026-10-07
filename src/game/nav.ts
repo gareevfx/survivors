@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
 import { canPlace, isWalkable, rockAt } from './state'
-import { MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
+import { MAP_H, MAP_PX_H, MAP_PX_W, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -74,6 +74,14 @@ export function nearestParking(
 }
 
 export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy: number): boolean {
+  if (unit.kind === 'drone') {
+    const margin = 8
+    unit.path = []
+    unit.goalX = Math.max(margin, Math.min(MAP_PX_W - margin, gx))
+    unit.goalY = Math.max(margin, Math.min(MAP_PX_H - margin, gy))
+    unit.stuckT = 0
+    return true
+  }
   const goalTileX = Math.floor(gx / TILE)
   const goalTileY = Math.floor(gy / TILE)
   const goalOpen = isWalkable(state, goalTileX, goalTileY)

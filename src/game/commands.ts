@@ -315,10 +315,12 @@ export function commandAttack(
   let x = 0
   let y = 0
   let neutral = false
+  let victimKind: UnitKind | null = null
   if (kind === 'unit') {
     const target = unitById(state, targetId)
     if (!target || target.hp <= 0) return
     owner = target.owner
+    victimKind = target.kind
     x = target.x
     y = target.y
   } else if (kind === 'building') {
@@ -336,7 +338,9 @@ export function commandAttack(
     y = (target.ty + 0.5) * TILE
   }
   const units = living(state, ids).filter((unit) => {
+    if (unit.kind === 'drone') return false
     if (kind === 'rock' && unit.kind !== 'porter') return false
+    if (victimKind === 'drone' && unit.kind === 'howler') return false
     return neutral || unit.owner !== owner
   })
   if (!units.length) return
@@ -417,7 +421,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
   if (building.kind === 'keep' && kind !== 'porter') return 'The Castle trains workers'
-  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains fighters'
+  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains bikes, tanks, and drones'
   if (building.kind === 'silo') return 'A silo does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} minerals`

@@ -21,7 +21,9 @@ function claimScout(state: MatchState, idle: Unit[]): Unit | null {
     if (current.kind === 'porter' && porters.length >= 2) return current
   }
   if (!state.aiAttacking) {
-    const fighter = state.units.find((unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.hp > 0 && !unit.order)
+    const fighter = state.units.find(
+      (unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0 && !unit.order,
+    )
     if (fighter) return fighter
   }
   if (idle.length >= 2 && porters.length >= 2) return idle[idle.length - 1] ?? null
@@ -113,10 +115,12 @@ export function updateAi(state: MatchState, dt: number): void {
     else tryTrain(state, readyYard.id, second)
   }
 
-  const army = state.units.filter((unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.hp > 0)
+  const army = state.units.filter(
+    (unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0,
+  )
   const keepPoint = buildingCenter(keep)
   const threatened = state.units.some((unit) => {
-    if (unit.owner !== 0 || unit.kind === 'porter' || unit.hp <= 0) return false
+    if (unit.owner !== 0 || unit.kind === 'porter' || unit.kind === 'drone' || unit.hp <= 0) return false
     if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) >= 340) return false
     return aiTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
   })

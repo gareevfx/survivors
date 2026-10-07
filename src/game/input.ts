@@ -512,6 +512,10 @@ function clearSelection(state: MatchState): void {
       trainSelected('howler')
       return
     }
+    if (event.code === 'KeyH') {
+      trainSelected('drone')
+      return
+    }
     if (event.code === 'KeyF') {
       opts.selectIdle()
       return
