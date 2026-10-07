@@ -1,7 +1,7 @@
 import type { Camera } from './camera'
 import { hash2 } from './rng'
 import { buildingCenter, buildingRect, playerKeep } from './state'
-import { buildingSeen, objectInSight, tileExplored, tileVisible, unitSeen } from './vision'
+import { buildingSeen, groundShown, tileExplored, tileVisible, unitSeen } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
@@ -118,7 +118,7 @@ export function renderWorld(
 
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
-    if (!objectInSight(state, rock.tx, rock.ty)) continue
+    if (!groundShown(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -135,7 +135,7 @@ export function renderWorld(
   }
 
   for (const node of state.ore) {
-    if (!objectInSight(state, node.tx, node.ty)) continue
+    if (!groundShown(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -288,7 +288,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   const origin = buildingCenter(keep)
   let best: { x: number; y: number; d: number } | null = null
   for (const node of state.ore) {
-    if (!objectInSight(state, node.tx, node.ty)) continue
+    if (!groundShown(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     const d = (x - origin.x) ** 2 + (y - origin.y) ** 2
@@ -710,13 +710,13 @@ export function renderMinimap(
   ctx.fillStyle = '#3a3832'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (!tileVisible(state, tx, ty)) continue
+      if (!tileExplored(state, tx, ty)) continue
       if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#e6c15a'
   for (const node of state.ore) {
-    if (!objectInSight(state, node.tx, node.ty)) continue
+    if (!groundShown(state, node.tx, node.ty)) continue
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
   }
   for (const building of state.buildings) {

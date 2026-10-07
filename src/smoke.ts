@@ -4,7 +4,7 @@ import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
-import { aiTileExplored, depositKnown, objectInSight, tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
+import { aiTileExplored, depositKnown, groundShown, tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -859,7 +859,8 @@ function fogHidesUnexploredGround(): void {
   assert(!unitSeen(state, foe), 'the enemy stayed visible after the scout left')
   assert(tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'explored ground was forgotten')
   assert(!tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'abandoned ground stayed lit')
-  assert(!objectInSight(state, enemy.tx + 1, enemy.ty + 1), 'an object on shrouded ground stayed visible')
+  assert(groundShown(state, enemy.tx + 1, enemy.ty + 1), 'rocks and minerals vanished from the gray shroud')
+  assert(!groundShown(state, 0, 0), 'black ground still shows rocks and minerals')
   assert(!aiTileExplored(state, keep.tx + 1, keep.ty + 1), 'Dunmarch started with a view of Northmark')
 }
 
@@ -1068,7 +1069,10 @@ function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   assert(shrouded, 'missing a hidden mineral')
   state.explored[shrouded.ty * MAP_W + shrouded.tx] = 1
   assert(tileExplored(state, shrouded.tx, shrouded.ty), 'revealing a mineral did not mark the ground')
-  assert(!objectInSight(state, shrouded.tx, shrouded.ty), 'a mineral under the shroud is still shown')
+  assert(!tileVisible(state, shrouded.tx, shrouded.ty), 'a shrouded mineral is still in active sight')
+  assert(groundShown(state, shrouded.tx, shrouded.ty), 'a mineral under the gray shroud is hidden')
+  const black = hidden.find((node) => node.id !== shrouded.id)
+  assert(black && !groundShown(state, black.tx, black.ty), 'a mineral in the black fog is shown')
   assert(depositKnown(state, 0, shrouded.tx, shrouded.ty), 'a revealed mineral was forgotten for gathering')
 
   const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter')

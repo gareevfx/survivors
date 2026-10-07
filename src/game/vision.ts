@@ -16,7 +16,7 @@ export function updateVision(state: MatchState): void {
   rememberSightings(state)
   if (state.selectedOre != null) {
     const node = state.ore.find((entry) => entry.id === state.selectedOre)
-    if (!node || !tileVisible(state, node.tx, node.ty)) state.selectedOre = null
+    if (!node || node.amount <= 0 || !tileExplored(state, node.tx, node.ty)) state.selectedOre = null
   }
 }
 
@@ -55,9 +55,9 @@ export function aiTileVisible(state: MatchState, tx: number, ty: number): boolea
   return state.aiVisible[ty * MAP_W + tx] === 1
 }
 
-/** Minerals, rocks, and other map objects are drawn only on tiles in current sight. */
-export function objectInSight(state: MatchState, tx: number, ty: number): boolean {
-  return tileVisible(state, tx, ty)
+/** Rocks and minerals stay drawn on explored ground, including the gray shroud. Black ground hides them. */
+export function groundShown(state: MatchState, tx: number, ty: number): boolean {
+  return tileExplored(state, tx, ty)
 }
 
 /** A deposit automatic gathering may use. Explored ground counts even under the shroud. */

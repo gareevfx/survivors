@@ -10,7 +10,7 @@ import {
   tryTrain,
 } from './commands'
 import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
-import { buildingSeen, objectInSight, unitSeen } from './vision'
+import { buildingSeen, groundShown, unitSeen } from './vision'
 import {
   TILE,
   type BuildingKind,
@@ -637,7 +637,7 @@ function pick(
   y: number,
 ): { type: 'unit' | 'building' | 'ore' | 'rock'; id: number } | null {
   for (const node of state.ore) {
-    if (!objectInSight(state, node.tx, node.ty)) continue
+    if (!groundShown(state, node.tx, node.ty)) continue
     const cx = (node.tx + 0.5) * TILE
     const cy = (node.ty + 0.5) * TILE
     if (Math.hypot(cx - x, cy - y) <= 14) return { type: 'ore', id: node.id }
@@ -665,7 +665,7 @@ function pick(
   }
   const tx = Math.floor(x / TILE)
   const ty = Math.floor(y / TILE)
-  const rock = objectInSight(state, tx, ty) ? rockAt(state, tx, ty) : undefined
+  const rock = groundShown(state, tx, ty) ? rockAt(state, tx, ty) : undefined
   if (rock) return { type: 'rock', id: rock.id }
   return null
 }
