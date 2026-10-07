@@ -1,3 +1,4 @@
+import { runCommand } from './game/console'
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
@@ -848,6 +849,25 @@ function fogHidesUnexploredGround(): void {
   assert(!tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'abandoned ground stayed lit')
 }
 
+function clearFogCommandRevealsTheMap(): void {
+  const state = createMatch(1)
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing Dunmarch castle')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'the map started fully revealed')
+  assert(!runCommand(state, 'no such order'), 'an unknown line was accepted')
+  assert(!state.fogCleared, 'an unknown command cleared the fog')
+  assert(runCommand(state, '  Clear Fog of War  '), 'Clear Fog of War was rejected')
+  assert(state.fogCleared, 'the command did not mark fog cleared')
+  assert(tileVisible(state, 0, 0) && tileExplored(state, MAP_W - 1, MAP_H - 1), 'a corner of the map stayed hidden')
+  assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed hidden after the command')
+  step(state, 0.5)
+  assert(state.fogCleared && tileVisible(state, enemy.tx, enemy.ty), 'fog returned after the command')
+  const again = createMatch(2)
+  assert(!again.fogCleared, 'a new match kept the cleared fog')
+  assert(runCommand(again, 'clear fog'), 'the clear fog alias was rejected')
+  assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'clear fog left part of the map dark')
+}
+
 function shotsCannotCrossRocks(): void {
   const state = createMatch(8)
   const open: Array<[number, number]> = []
@@ -951,6 +971,7 @@ workersBreakRockToReachMinerals()
 aiHaulsTheShortestOpenPath()
 aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
+clearFogCommandRevealsTheMap()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
 threeMinersPerDeposit()

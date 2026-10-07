@@ -286,6 +286,8 @@ export interface MatchState {
   explored: Uint8Array
   /** Tiles currently inside friendly sight. Rebuilt each step. */
   visible: Uint8Array
+  /** When set, fog stays off for the rest of this match. */
+  fogCleared: boolean
   ore: OreNode[]
   rocks: Rock[]
   units: Unit[]

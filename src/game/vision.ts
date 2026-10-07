@@ -2,6 +2,11 @@ import { BUILDING_STATS, MAP_H, MAP_W, TILE, UNIT_STATS, type Building, type Mat
 
 /** Player sight only. Dunmarch keeps a full view of the map. */
 export function updateVision(state: MatchState): void {
+  if (state.fogCleared) {
+    state.explored.fill(1)
+    state.visible.fill(1)
+    return
+  }
   const visible = new Uint8Array(MAP_W * MAP_H)
   for (const unit of state.units) {
     if (unit.owner !== 0 || unit.hp <= 0) continue
@@ -13,6 +18,13 @@ export function updateVision(state: MatchState): void {
     reveal(state, visible, (building.tx + stats.w / 2) * TILE, (building.ty + stats.h / 2) * TILE, stats.sight)
   }
   state.visible = visible
+}
+
+/** Reveal every tile for the rest of the match. A new match starts under fog again. */
+export function clearFog(state: MatchState): void {
+  state.fogCleared = true
+  state.explored.fill(1)
+  state.visible.fill(1)
 }
 
 export function tileVisible(state: MatchState, tx: number, ty: number): boolean {

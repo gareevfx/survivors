@@ -1,6 +1,7 @@
 import './style.css'
 import { Sfx } from './game/audio'
 import { centerCamera, clampCamera, type Camera } from './game/camera'
+import { runCommand } from './game/console'
 import { attachInput } from './game/input'
 import { buildTerrain, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
@@ -24,8 +25,16 @@ if (!view || !minimap || !help) {
 const stage: HTMLCanvasElement = view
 const mini: HTMLCanvasElement = minimap
 const helpPanel: HTMLElement = help
+const commandForm = document.querySelector<HTMLFormElement>('#console')
+const commandInput = document.querySelector<HTMLInputElement>('#console-input')
+if (!commandForm || !commandInput) {
+  throw new Error('Ridgekeep failed to find its command line.')
+}
+const commandBar = commandForm
+const commandField = commandInput
 
 const sfx = new Sfx()
+let commandArmedAt = 0
 let match: MatchState = createMatch((Math.random() * 1_000_000_000) | 0)
 let terrain = buildTerrain(match.seed)
 const camera: Camera = { x: 0, y: 0, zoom: 1.35 }
@@ -40,6 +49,19 @@ function focus(x: number, y: number): void {
   centerCamera(camera, x, y, size.w, size.h)
 }
 
+function openCommand(): void {
+  commandBar.classList.remove('hidden')
+  commandField.focus()
+  commandField.select()
+  commandArmedAt = performance.now()
+}
+
+function closeCommand(): void {
+  commandBar.classList.add('hidden')
+  commandField.value = ''
+  stage.focus()
+}
+
 function lookAtHome(): void {
   const keep = playerKeep(match)
   if (!keep) return
@@ -48,6 +70,7 @@ function lookAtHome(): void {
 }
 
 function boot(seed?: number): void {
+  closeCommand()
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0))
   terrain = buildTerrain(match.seed)
   camera.zoom = 1.35
@@ -55,6 +78,19 @@ function boot(seed?: number): void {
   resetHudCache()
   lookAtHome()
 }
+
+commandForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  if (performance.now() - commandArmedAt < 250) return
+  const text = commandField.value
+  if (!text.trim()) {
+    closeCommand()
+    return
+  }
+  const known = runCommand(match, text)
+  if (known) closeCommand()
+  else commandField.select()
+})
 
 const input = attachInput({
   canvas: stage,
@@ -67,6 +103,9 @@ const input = attachInput({
   onHelp: () => helpPanel.classList.toggle('hidden'),
   closeHelp: () => helpPanel.classList.add('hidden'),
   helpOpen: () => !helpPanel.classList.contains('hidden'),
+  commandOpen: () => !commandBar.classList.contains('hidden'),
+  openCommand,
+  closeCommand,
   onActivity: () => sfx.unlock(),
   selectIdle: () => selectIdlePorters(),
   focusPoint: focus,

@@ -54,6 +54,9 @@ export function attachInput(opts: {
   onHelp: () => void
   closeHelp: () => void
   helpOpen: () => boolean
+  commandOpen: () => boolean
+  openCommand: () => void
+  closeCommand: () => void
   onActivity: () => void
   selectIdle: () => void
   focusPoint: (x: number, y: number) => void
@@ -427,6 +430,14 @@ function clearSelection(state: MatchState): void {
   )
 
   window.addEventListener('keydown', (event) => {
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+    if (typing) {
+      if (event.code === 'Escape') {
+        event.preventDefault()
+        opts.closeCommand()
+      }
+      return
+    }
     keyAt.set(event.code, performance.now())
     if (
       event.code === 'Space' ||
@@ -444,7 +455,16 @@ function clearSelection(state: MatchState): void {
       opts.onHelp()
       return
     }
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+      event.preventDefault()
+      if (!opts.helpOpen()) opts.openCommand()
+      return
+    }
     if (event.code === 'Escape') {
+      if (opts.commandOpen()) {
+        opts.closeCommand()
+        return
+      }
       if (opts.helpOpen()) {
         opts.closeHelp()
         return
@@ -578,7 +598,7 @@ function clearSelection(state: MatchState): void {
       if (held('KeyS') || held('ArrowDown')) dy += 1
       if (held('KeyA') || held('ArrowLeft')) dx -= 1
       if (held('KeyD') || held('ArrowRight')) dx += 1
-      if (pointer?.over && !drag?.panning && !opts.helpOpen()) {
+      if (pointer?.over && !drag?.panning && !opts.helpOpen() && !opts.commandOpen()) {
         const margin = 8
         if (pointer.sx < margin) dx -= 1
         if (pointer.sx > box.w - margin) dx += 1
