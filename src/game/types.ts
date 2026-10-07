@@ -10,6 +10,8 @@ export const PLAYER_KEEP_TY = 36
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420
+/** At most this many miners from one side may work a single deposit. */
+export const MINERS_PER_DEPOSIT = 3
 /** Bikes and miners chip gray rock when ordered. Tanks cannot damage it. */
 export const ROCK_HP = 56
 export const STARTING_ORE = 120

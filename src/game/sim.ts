@@ -1,4 +1,5 @@
 import { updateAi } from './ai'
+import { assignMiners, fillOpenGatherSlots } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
   buildingById,
@@ -7,7 +8,6 @@ import {
   buildingTarget,
   distToRect,
   getTarget,
-  nearestOre,
   pushToast,
   rebuildBlocked,
   recomputeSupply,
@@ -54,6 +54,7 @@ export function step(state: MatchState, dt: number): void {
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
   cleanup(state)
+  fillOpenGatherSlots(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
 }
@@ -173,15 +174,13 @@ function dist(unit: Unit, focus: Target): number {
 function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { type: 'gather' }>): void {
   const node = state.ore.find((entry) => entry.id === order.nodeId) ?? null
   if ((!node || node.amount <= 0) && unit.cargo <= 0) {
-    const next = nearestOre(state, unit.x, unit.y)
-    if (next && order.phase !== 'return') {
-      order.nodeId = next.id
-      order.phase = 'approach'
-      stopMoving(unit)
+    if (order.phase !== 'return') {
+      assignMiners(state, [unit], null)
       return
     }
     if (unit.cargo <= 0) {
       unit.order = null
+      unit.nodeMemory = 0
       stopMoving(unit)
       return
     }
@@ -207,8 +206,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
       return
     }
     if (!node || node.amount <= 0) {
-      unit.order = null
-      stopMoving(unit)
+      assignMiners(state, [unit], null)
       return
     }
     if (distToTile(unit, node.tx, node.ty) <= INTERACT) {
@@ -282,7 +280,10 @@ function clearBlockedGather(state: MatchState, unit: Unit, node: { id: number; t
 
 function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
   const node = state.ore.find((entry) => entry.id === nodeId && entry.amount > 0)
-  if (!node) return
+  if (!node) {
+    unit.nodeMemory = 0
+    return
+  }
   const rock = gatherBlockRock(state, unit, node)
   unit.nodeMemory = nodeId
   if (rock) unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: nodeId }
@@ -466,16 +467,7 @@ function advanceGather(state: MatchState, dt: number): void {
       text: `+${unit.cargo}`,
     })
     unit.cargo = 0
-    const node = state.ore.find((entry) => entry.id === order.nodeId && entry.amount > 0)
-    const next = node ?? nearestOre(state, unit.x, unit.y)
-    if (next) {
-      order.nodeId = next.id
-      order.phase = 'approach'
-      stopMoving(unit)
-    } else {
-      unit.order = null
-      stopMoving(unit)
-    }
+    assignMiners(state, [unit], order.nodeId)
   }
 }
 

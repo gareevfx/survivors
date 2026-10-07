@@ -1,4 +1,4 @@
-import { commandAttack, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
+import { assignMiners, commandAttack, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
@@ -70,10 +70,13 @@ function gatherWorks(): void {
     porters.map((unit) => unit.id),
     node.id,
   )
+  let onTarget = 0
   for (const porter of porters) {
-    const order = unitById(state, porter.id)?.order
-    assert(order?.type === 'gather', 'reachable ore sent a miner to break rock')
+    const id = assignedDeposit(porter)
+    assert(id != null, 'miner was not sent to a deposit')
+    if (id === node.id) onTarget += 1
   }
+  assert(onTarget <= 3 && onTarget >= 1, `clicked deposit has ${onTarget} miners`)
   for (let i = 0; i < 20 * 30; i++) step(state, 1 / 30)
   assert(state.oreHeld[0] > STARTING_ORE, `ore did not increase (${state.oreHeld[0]})`)
 }
@@ -323,6 +326,82 @@ function aiPortersBreakRockForOre(): void {
   )
 }
 
+function assignedDeposit(unit: { order: { type: string; nodeId?: number; kind?: string; resumeNode?: number } | null }): number | null {
+  const order = unit.order
+  if (!order) return null
+  if (order.type === 'gather' && order.nodeId != null) return order.nodeId
+  if (order.type === 'attack' && order.kind === 'rock' && order.resumeNode != null) return order.resumeNode
+  return null
+}
+
+function threeMinersPerDeposit(): void {
+  const state = createMatch(4)
+  const node = state.ore.find((entry) => entry.amount > 0)
+  assert(node, 'missing ore')
+  for (const ore of state.ore) {
+    if (ore.id !== node.id) ore.amount = 0
+  }
+  const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
+  assert(porters.length >= 4, `need 4 miners, have ${porters.length}`)
+  commandGather(
+    state,
+    porters.map((unit) => unit.id),
+    node.id,
+  )
+  const assigned = porters.filter((unit) => assignedDeposit(unit) === node.id)
+  const waiting = porters.filter((unit) => unit.order == null && unit.nodeMemory === 0)
+  assert(assigned.length === 3, `expected 3 miners on the deposit, got ${assigned.length}`)
+  assert(waiting.length === porters.length - 3, `expected extras to wait, got ${waiting.length}`)
+  const victim = assigned[0]
+  assert(victim, 'missing assigned miner')
+  victim.hp = 0
+  step(state, 1 / 60)
+  const filled = waiting.filter((unit) => assignedDeposit(unitById(state, unit.id) ?? { order: null }) === node.id)
+  assert(filled.length === 1, 'waiting miner did not take the slot freed by a death')
+}
+
+function minersSpreadToNearestOpenDeposit(): void {
+  const state = createMatch(4)
+  const nodes = state.ore.filter((entry) => entry.amount > 0)
+  assert(nodes.length >= 2, 'need two deposits')
+  const target = nodes[0]
+  assert(target, 'missing target deposit')
+  const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
+  commandGather(
+    state,
+    porters.map((unit) => unit.id),
+    target.id,
+  )
+  const counts = new Map<number, number>()
+  for (const porter of porters) {
+    const id = assignedDeposit(porter)
+    assert(id != null, 'miner was not assigned a deposit')
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  for (const count of counts.values()) assert(count <= 3, `a deposit has ${count} miners`)
+  assert(counts.get(target.id) === 3, `clicked deposit has ${counts.get(target.id)} miners`)
+  assert(counts.size >= 2, 'extra miners stayed on the full deposit')
+}
+
+function aiUsesTheSameMinerCap(): void {
+  const state = createMatch(2)
+  const node = state.ore.find((entry) => entry.amount > 0)
+  assert(node, 'missing ore')
+  for (const ore of state.ore) {
+    if (ore.id !== node.id) ore.amount = 0
+  }
+  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(porters.length >= 4, `Dunmarch needs 4 miners, has ${porters.length}`)
+  for (const porter of porters) {
+    porter.order = null
+    porter.nodeMemory = -1
+    porter.cargo = 0
+  }
+  assignMiners(state, porters, null)
+  const onNode = porters.filter((unit) => assignedDeposit(unit) === node.id)
+  assert(onNode.length === 3, `Dunmarch put ${onNode.length} miners on one deposit`)
+}
+
 function oreSelectionShowsAmount(): void {
   const state = createMatch(3)
   const node = state.ore.find((entry) => entry.amount > 0)
@@ -492,6 +571,9 @@ howlerCannotBreakRock()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 aiPortersBreakRockForOre()
+threeMinersPerDeposit()
+minersSpreadToNearestOpenDeposit()
+aiUsesTheSameMinerCap()
 oreSelectionShowsAmount()
 minersClearRockToGather()
 aiIgnoresRocksOnOpenRoute()

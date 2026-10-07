@@ -13,6 +13,7 @@ import {
 } from './state'
 import {
   BUILDING_STATS,
+  MINERS_PER_DEPOSIT,
   TILE,
   UNIT_STATS,
   type BuildingKind,
@@ -36,10 +37,125 @@ function noteOrder(state: MatchState, units: Unit[]): void {
   if (units.some((unit) => unit.owner === 0)) state.events.push({ type: 'order' })
 }
 
+function depositOf(unit: Unit): number | null {
+  const order = unit.order
+  if (order?.type === 'gather') return order.nodeId
+  if (order?.type === 'attack' && order.kind === 'rock' && order.resumeNode != null) return order.resumeNode
+  return null
+}
+
+function depositDistance(unit: Unit, node: { tx: number; ty: number }): number {
+  const dx = (node.tx + 0.5) * TILE - unit.x
+  const dy = (node.ty + 0.5) * TILE - unit.y
+  return dx * dx + dy * dy
+}
+
+function giveDeposit(state: MatchState, unit: Unit, node: { id: number; tx: number; ty: number }): void {
+  unit.nodeMemory = node.id
+  unit.idleAcquire = false
+  if (unit.cargo > 0) {
+    unit.order = { type: 'gather', nodeId: node.id, phase: 'return' }
+    stopMoving(unit)
+    return
+  }
+  if (unit.owner === 0) {
+    const rock = gatherBlockRock(state, unit, node)
+    if (rock) {
+      unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: node.id }
+      stopMoving(unit)
+      return
+    }
+  }
+  unit.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
+  stopMoving(unit)
+}
+
+/**
+ * Send these miners to ore. A clicked deposit fills first, up to MINERS_PER_DEPOSIT,
+ * counting miners already working it. Everyone else takes the nearest deposit that
+ * still has ore and a free slot. Miners with no slot wait (nodeMemory 0) until one opens.
+ */
+export function assignMiners(state: MatchState, miners: Unit[], preferredId: number | null): void {
+  const crew = miners.filter((unit) => unit.hp > 0 && unit.kind === 'porter')
+  if (!crew.length) return
+  const owner = crew[0]?.owner
+  if (owner == null) return
+  const same = crew.filter((unit) => unit.owner === owner)
+  const exclude = new Set(same.map((unit) => unit.id))
+  const counts = new Map<number, number>()
+  for (const unit of state.units) {
+    if (exclude.has(unit.id) || unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    const id = depositOf(unit)
+    if (id == null) continue
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  const room = (id: number) => {
+    const node = state.ore.find((entry) => entry.id === id && entry.amount > 0)
+    return !!node && (counts.get(id) ?? 0) < MINERS_PER_DEPOSIT
+  }
+  const claim = (unit: Unit, node: { id: number; tx: number; ty: number }) => {
+    counts.set(node.id, (counts.get(node.id) ?? 0) + 1)
+    giveDeposit(state, unit, node)
+  }
+
+  const pending = new Set(same)
+  const preferred = preferredId != null ? state.ore.find((entry) => entry.id === preferredId && entry.amount > 0) : undefined
+  if (preferred && room(preferred.id)) {
+    const closest = same.slice().sort((a, b) => depositDistance(a, preferred) - depositDistance(b, preferred))
+    for (const unit of closest) {
+      if (!room(preferred.id)) break
+      claim(unit, preferred)
+      pending.delete(unit)
+    }
+  }
+
+  const left = [...pending]
+  while (left.length) {
+    let bestIndex = -1
+    let bestNode: { id: number; tx: number; ty: number } | null = null
+    let bestD = Infinity
+    for (let i = 0; i < left.length; i++) {
+      const unit = left[i]
+      if (!unit) continue
+      for (const node of state.ore) {
+        if (!room(node.id)) continue
+        const distance = depositDistance(unit, node)
+        if (distance < bestD) {
+          bestD = distance
+          bestIndex = i
+          bestNode = node
+        }
+      }
+    }
+    if (!bestNode || bestIndex < 0) break
+    const unit = left.splice(bestIndex, 1)[0]
+    if (!unit) break
+    claim(unit, bestNode)
+  }
+  for (const unit of left) {
+    unit.order = null
+    unit.nodeMemory = 0
+    unit.idleAcquire = false
+    stopMoving(unit)
+  }
+}
+
+/** Miners who were told to gather and are waiting for a free slot. */
+export function fillOpenGatherSlots(state: MatchState): void {
+  const waiting = state.units.filter(
+    (unit) => unit.kind === 'porter' && unit.hp > 0 && unit.cargo <= 0 && unit.order == null && unit.nodeMemory === 0,
+  )
+  for (const owner of [0, 1] as const) {
+    const group = waiting.filter((unit) => unit.owner === owner)
+    if (group.length) assignMiners(state, group, null)
+  }
+}
+
 export function commandStop(state: MatchState, ids: number[]): void {
   if (state.outcome) return
   for (const unit of living(state, ids)) {
     unit.order = null
+    unit.nodeMemory = -1
     unit.idleAcquire = false
     stopMoving(unit)
   }
@@ -66,6 +182,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
       unit.order = { type: 'move', x: gx, y: gy }
     }
     unit.idleAcquire = false
+    unit.nodeMemory = -1
     unit.leashX = null
     unit.leashY = null
     setUnitDestination(state, unit, gx, gy)
@@ -120,6 +237,7 @@ export function commandAttack(
   if (!units.length) return
   for (const unit of units) {
     unit.order = { type: 'attack', targetId, kind }
+    unit.nodeMemory = -1
     unit.idleAcquire = false
     unit.leashX = null
     unit.leashY = null
@@ -138,22 +256,16 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
   const units = living(state, ids)
   const porters = units.filter((unit) => unit.kind === 'porter')
   const others = units.filter((unit) => unit.kind !== 'porter')
-  for (const unit of porters) {
-    unit.order = {
-      type: 'gather',
-      nodeId,
-      phase: unit.cargo > 0 ? 'return' : 'approach',
-    }
-    unit.nodeMemory = nodeId
-    unit.idleAcquire = false
-    stopMoving(unit)
-  }
-  for (const unit of porters) {
-    if (unit.cargo > 0) continue
-    const rock = gatherBlockRock(state, unit, node)
-    if (!rock) continue
-    unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: nodeId }
-    stopMoving(unit)
+  if (porters.length) {
+    assignMiners(state, porters, node.id)
+    state.pings.push({
+      x: (node.tx + 0.5) * TILE,
+      y: (node.ty + 0.5) * TILE,
+      life: 0.45,
+      max: 0.45,
+      color: '#e6c15a',
+    })
+    noteOrder(state, porters)
   }
   if (others.length) {
     commandMove(
@@ -163,15 +275,6 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
       (node.ty + 0.5) * TILE,
       false,
     )
-  } else if (porters.length) {
-    state.pings.push({
-      x: (node.tx + 0.5) * TILE,
-      y: (node.ty + 0.5) * TILE,
-      life: 0.45,
-      max: 0.45,
-      color: '#e6c15a',
-    })
-    noteOrder(state, porters)
   }
 }
 
@@ -272,6 +375,7 @@ export function tryPlace(
   for (const porter of crew) {
     porter.order = { type: 'construct', buildingId: building.id }
     porter.idleAcquire = false
+    porter.nodeMemory = -1
     stopMoving(porter)
   }
 

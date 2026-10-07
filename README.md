@@ -26,7 +26,7 @@ No account, server, or network connection is required after install.
 
 You start with a Castle, four miners, and a little ore — not enough for a Factory. The red Dunmarch base is across the ridge and will mine, build, and march on you.
 
-1. Select the miners (click or drag a box) and right-click a gold ore patch.
+1. Select the miners (click or drag a box) and right-click a gold ore patch. Up to three miners work that patch. Any extras walk to the nearest patch that still has room. If gray rock seals a patch, those miners break it, then haul.
 2. They mine, walk the ore back to your Castle, and repeat. The count is in the top bar.
 3. Select a miner (or the Castle) and place a **Factory**. A miner walks over and builds it.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
@@ -43,7 +43,7 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 | Move | Right-click ground, or the Move button then left-click |
 | Attack | Right-click an enemy or gray rock |
 | Attack-move | `Q`, then left-click |
-| Gather | Right-click ore with miners selected. They break gray rock that seals that patch. |
+| Gather | Right-click ore with miners selected. At most 3 miners per patch; extras take the nearest open patch. They break gray rock that seals their patch. |
 | Ore amount | Left-click an ore patch |
 | Stop | `X` |
 | Factory / Silo | `Y` / `L`, then left-click the map |
@@ -66,7 +66,7 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 ## Known limitations
 
 - No fog of war, save games, or multiplayer.
-- One map, one ore type, and one enemy script. Dunmarch mines, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends bikes to break the stone (miners, when it has no free bike), then resumes the attack. Tanks never damage rock. The same rule opens ore: a sealed haul is always cleared by miners, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Your bikes break rock only when you right-click it. Your miners do that too, and they also break rock that seals a patch you told them to gather.
+- One map, one ore type, and one enemy script. Dunmarch mines, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends bikes to break the stone (miners, when it has no free bike), then resumes the attack. Tanks never damage rock. The same rule opens ore: a sealed haul is always cleared by miners, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Each deposit takes at most 3 miners from one side; the rest spread to the nearest deposit with room. Your bikes break rock only when you right-click it. Your miners do that too, and they also break rock that seals a patch you told them to gather.
 - Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
 - Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Miners shoot back at point-blank range but keep hauling unless they were idle.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.

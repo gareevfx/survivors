@@ -1,4 +1,4 @@
-import { aiPlaceNearKeep, commandAttack, commandMove, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, commandAttack, commandMove, tryTrain } from './commands'
 import { nearestWalkable } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, rockAt } from './state'
@@ -31,20 +31,11 @@ export function updateAi(state: MatchState, dt: number): void {
   state.aiAcc = 0
 
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
-  for (const porter of porters) {
-    if (!idlePorter(porter)) continue
-    const node = nearestNode(state, porter.x, porter.y)
-    if (!node) continue
-    porter.order = {
-      type: 'gather',
-      nodeId: node.id,
-      phase: porter.cargo > 0 ? 'return' : 'approach',
-    }
-    porter.nodeMemory = node.id
-    porter.path = []
-    porter.goalX = null
-    porter.goalY = null
-  }
+  assignMiners(
+    state,
+    porters.filter((unit) => idlePorter(unit)),
+    null,
+  )
 
   const oreBlock = economyRock(state, porters)
   if (oreBlock) assignOrePorters(state, porters, oreBlock.rock, oreBlock.trapped)
@@ -329,18 +320,3 @@ function assignRockBreakers(state: MatchState, army: Unit[], rock: Rock, trapped
   )
 }
 
-function nearestNode(state: MatchState, x: number, y: number): { id: number } | null {
-  let best: { id: number } | null = null
-  let bestD = Infinity
-  for (const node of state.ore) {
-    if (node.amount <= 0) continue
-    const dx = (node.tx + 0.5) * TILE - x
-    const dy = (node.ty + 0.5) * TILE - y
-    const d = dx * dx + dy * dy
-    if (d < bestD) {
-      bestD = d
-      best = node
-    }
-  }
-  return best
-}
