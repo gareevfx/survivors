@@ -8,7 +8,7 @@ import {
   tryPlace,
   tryTrain,
 } from './commands'
-import { buildingById, buildingCenter, playerKeep, pushToast, unitById } from './state'
+import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
 import {
   TILE,
   type BuildingKind,
@@ -166,6 +166,10 @@ export function attachInput(opts: {
         return
       }
     }
+    if (touch && state.selectedUnits.length && hit?.type === 'rock') {
+      commandAttack(state, state.selectedUnits, hit.id, 'rock')
+      return
+    }
     if (touch && state.selectedUnits.length && (!hit || hit.type === 'ore')) {
       if (hit?.type === 'ore') commandGather(state, state.selectedUnits, hit.id)
       else commandMove(state, state.selectedUnits, world.x, world.y, false)
@@ -245,6 +249,10 @@ export function attachInput(opts: {
     }
     if (hit?.type === 'ore') {
       commandGather(state, state.selectedUnits, hit.id)
+      return
+    }
+    if (hit?.type === 'rock') {
+      commandAttack(state, state.selectedUnits, hit.id, 'rock')
       return
     }
     commandMove(state, state.selectedUnits, world.x, world.y, false)
@@ -572,7 +580,7 @@ function pick(
   state: MatchState,
   x: number,
   y: number,
-): { type: 'unit' | 'building' | 'ore'; id: number } | null {
+): { type: 'unit' | 'building' | 'ore' | 'rock'; id: number } | null {
   for (const node of state.ore) {
     const cx = (node.tx + 0.5) * TILE
     const cy = (node.ty + 0.5) * TILE
@@ -599,5 +607,7 @@ function pick(
       return { type: 'building', id: building.id }
     }
   }
+  const rock = rockAt(state, Math.floor(x / TILE), Math.floor(y / TILE))
+  if (rock) return { type: 'rock', id: rock.id }
   return null
 }

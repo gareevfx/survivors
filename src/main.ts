@@ -27,7 +27,7 @@ const helpPanel: HTMLElement = help
 
 const sfx = new Sfx()
 let match: MatchState = createMatch((Math.random() * 1_000_000_000) | 0)
-let terrain = buildTerrain(match.tiles, match.seed)
+let terrain = buildTerrain(match.seed)
 const camera: Camera = { x: 0, y: 0, zoom: 1.35 }
 
 function frameSize(): { w: number; h: number } {
@@ -49,7 +49,7 @@ function lookAtHome(): void {
 
 function boot(seed?: number): void {
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0))
-  terrain = buildTerrain(match.tiles, match.seed)
+  terrain = buildTerrain(match.seed)
   camera.zoom = 1.35
   input.clearGroups()
   resetHudCache()

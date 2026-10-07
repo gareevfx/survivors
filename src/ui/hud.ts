@@ -315,7 +315,7 @@ function describe(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select porters and right-click ore. Build a Yard, train pikes and howlers, and destroy the red Keep.</p>
+      <p class="meta">Select porters and right-click ore. Build a Yard, train pikes and howlers, and destroy the red Keep. Howlers break gray rock: select them and right-click the stone.</p>
     `
   }
   if (units.length === 1) {

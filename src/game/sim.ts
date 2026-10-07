@@ -11,6 +11,7 @@ import {
   pushToast,
   rebuildBlocked,
   recomputeSupply,
+  rockById,
   unitById,
   unitTarget,
 } from './state'
@@ -21,6 +22,7 @@ import {
   GATHER_AMOUNT,
   GATHER_TIME,
   INTERACT,
+  MAP_W,
   TILE,
   UNIT_STATS,
   type Building,
@@ -49,6 +51,7 @@ export function step(state: MatchState, dt: number): void {
     tryFire(state, unit)
   }
   for (const building of state.buildings) building.hitFlash = Math.max(0, building.hitFlash - dt)
+  for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
   cleanup(state)
   fadeEffects(state, dt)
@@ -87,7 +90,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   if (order.type === 'attackMove') {
     let focus =
       order.focusId != null && order.focusKind ? getTarget(state, order.focusId, order.focusKind) : null
-    if (focus && (focus.hp <= 0 || focus.owner === unit.owner || dist(unit, focus) > CHASE_BREAK)) focus = null
+    if (focus && (!isAttackable(unit, focus) || dist(unit, focus) > CHASE_BREAK)) focus = null
     if (!focus) {
       order.focusId = null
       order.focusKind = null
@@ -105,7 +108,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
 
   if (order.type === 'attack') {
     const focus = getTarget(state, order.targetId, order.kind)
-    if (!focus || focus.hp <= 0 || focus.owner === unit.owner) {
+    if (!focus || !isAttackable(unit, focus)) {
       unit.order = null
       unit.idleAcquire = false
       stopMoving(unit)
@@ -581,15 +584,21 @@ function tryFire(state: MatchState, unit: Unit): void {
   state.events.push({ type: 'attack' })
 }
 
+function isAttackable(unit: Unit, focus: Target): boolean {
+  if (focus.hp <= 0) return false
+  if (focus.targetKind === 'rock') return true
+  return focus.owner !== unit.owner
+}
+
 function pickFireTarget(state: MatchState, unit: Unit): Target | null {
   const order = unit.order
   if (order?.type === 'attack') {
     const aimed = getTarget(state, order.targetId, order.kind)
-    if (aimed && aimed.hp > 0 && aimed.owner !== unit.owner) return aimed
+    if (aimed && isAttackable(unit, aimed)) return aimed
   }
   if (order?.type === 'attackMove' && order.focusId != null && order.focusKind) {
     const aimed = getTarget(state, order.focusId, order.focusKind)
-    if (aimed && aimed.hp > 0 && aimed.owner !== unit.owner) return aimed
+    if (aimed && isAttackable(unit, aimed)) return aimed
   }
   const angry = unit.hurtTimer > 0
   const combat =
@@ -648,6 +657,13 @@ function updateProjectiles(state: MatchState, dt: number): void {
 }
 
 function applyHit(state: MatchState, target: Target, damage: number, sourceId: number): void {
+  if (target.targetKind === 'rock') {
+    const rock = rockById(state, target.id)
+    if (!rock || rock.hp <= 0) return
+    rock.hp -= damage
+    rock.hitFlash = 0.18
+    return
+  }
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
     if (!unit || unit.hp <= 0) return
@@ -677,6 +693,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
 }
 
 function cleanup(state: MatchState): void {
+  clearBrokenRocks(state)
   const deadUnits = state.units.filter((unit) => unit.hp <= 0)
   if (deadUnits.length) {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
@@ -720,6 +737,38 @@ function cleanup(state: MatchState): void {
   } else if (!enemyAlive) {
     state.outcome = 'win'
     state.events.push({ type: 'win' })
+  }
+}
+
+function clearBrokenRocks(state: MatchState): void {
+  const dead = state.rocks.filter((rock) => rock.hp <= 0)
+  if (!dead.length) return
+  const deadIds = new Set(dead.map((rock) => rock.id))
+  for (const rock of dead) {
+    state.tiles[rock.ty * MAP_W + rock.tx] = 0
+    burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, '#b7b1a6', 7)
+  }
+  state.rocks = state.rocks.filter((rock) => rock.hp > 0)
+  for (const unit of state.units) {
+    if (unit.order?.type === 'attack' && unit.order.kind === 'rock' && deadIds.has(unit.order.targetId)) {
+      unit.order = null
+      unit.idleAcquire = false
+      stopMoving(unit)
+    }
+    if (
+      unit.order?.type === 'attackMove' &&
+      unit.order.focusKind === 'rock' &&
+      unit.order.focusId != null &&
+      deadIds.has(unit.order.focusId)
+    ) {
+      unit.order.focusId = null
+      unit.order.focusKind = null
+    }
+  }
+  rebuildBlocked(state)
+  for (const unit of state.units) {
+    if (unit.hp <= 0 || unit.goalX == null || unit.goalY == null) continue
+    setUnitDestination(state, unit, unit.goalX, unit.goalY)
   }
 }
 

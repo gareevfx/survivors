@@ -1,4 +1,4 @@
-import { commandAttack, commandGather, tryPlace, tryTrain } from './game/commands'
+import { commandAttack, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { canPlace, createMatch, isWalkable, makeUnit, unitById } from './game/state'
@@ -107,6 +107,58 @@ function buildAndTrain(): void {
   )
 }
 
+function howlerBreaksRock(): void {
+  const state = createMatch(9)
+  const offsets: Array<[number, number]> = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ]
+  const rock = state.rocks.find((entry) => offsets.some(([dx, dy]) => isWalkable(state, entry.tx + dx, entry.ty + dy)))
+  assert(rock, 'map has no rock beside open ground')
+  assert(!isWalkable(state, rock.tx, rock.ty), 'rock tile should block')
+  const howler = makeUnit(state, 0, 'howler', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE - 96)
+  commandAttack(state, [howler.id], rock.id, 'rock')
+  let broke = false
+  for (let i = 0; i < 12 * 60; i++) {
+    step(state, 1 / 60)
+    if (!state.rocks.some((entry) => entry.id === rock.id)) {
+      broke = true
+      break
+    }
+  }
+  assert(broke, 'howler did not destroy the rock')
+  assert(state.tiles[rock.ty * MAP_W + rock.tx] === 0, 'rock tile was not cleared')
+  assert(isWalkable(state, rock.tx, rock.ty), 'destroyed rock still blocks')
+  const start = offsets
+    .map(([dx, dy]) => ({ tx: rock.tx + dx, ty: rock.ty + dy }))
+    .find((tile) => isWalkable(state, tile.tx, tile.ty))
+  assert(start, 'no open tile next to the broken rock')
+  const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, rock.tx, rock.ty)
+  assert(path && path.some((step) => step.tx === rock.tx && step.ty === rock.ty), 'path does not enter the cleared rock')
+  const walker = makeUnit(state, 0, 'pike', (start.tx + 0.5) * TILE, (start.ty + 0.5) * TILE)
+  commandMove(state, [walker.id], (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, false)
+  for (let i = 0; i < 4 * 60; i++) step(state, 1 / 60)
+  const moved = unitById(state, walker.id)
+  assert(
+    moved && Math.floor(moved.x / TILE) === rock.tx && Math.floor(moved.y / TILE) === rock.ty,
+    `pike did not walk onto the cleared rock (${moved?.x}, ${moved?.y})`,
+  )
+}
+
+function pikeChipsRock(): void {
+  const state = createMatch(8)
+  const rock = state.rocks[0]
+  assert(rock, 'missing rock')
+  const before = rock.hp
+  const pike = makeUnit(state, 0, 'pike', (rock.tx + 0.5) * TILE + 28, (rock.ty + 0.5) * TILE)
+  commandAttack(state, [pike.id], rock.id, 'rock')
+  for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
+  const still = state.rocks.find((entry) => entry.id === rock.id)
+  assert((still?.hp ?? 0) < before, 'pike could not damage a rock')
+}
+
 function attacksBuildings(): void {
   const state = createMatch(3)
   const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
@@ -171,6 +223,8 @@ pathAroundWall()
 routeExists()
 gatherWorks()
 buildAndTrain()
+howlerBreaksRock()
+pikeChipsRock()
 attacksBuildings()
 combatResolves()
 keepDecidesTheField()

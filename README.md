@@ -31,7 +31,7 @@ You start with a Keep, four porters, and a little ore — not enough for a Yard.
 3. Select a porter (or the Keep) and place a **Yard**. A porter walks over and builds it.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
 5. Select the Yard and train **pikes** (short spears) and **howlers** (long reach).
-6. Right-click enemies to attack, or press **Q** and left-click for attack-move.
+6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock to break it — howlers do this best — and the stone stops blocking once it shatters.
 7. Destroy the Dunmarch Keep to win. If your Keep falls, the skirmish is lost.
 
 ## Controls
@@ -41,7 +41,7 @@ You start with a Keep, four porters, and a little ore — not enough for a Yard.
 | Select | Left-click. Drag a box for several units. Shift adds. |
 | Select all of one type on screen | Double-click a unit |
 | Move | Right-click ground, or the Move button then left-click |
-| Attack | Right-click an enemy |
+| Attack | Right-click an enemy or gray rock |
 | Attack-move | `Q`, then left-click |
 | Gather | Right-click ore with porters selected |
 | Stop | `X` |
@@ -66,6 +66,6 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 
 - No fog of war, save games, or multiplayer.
 - One map, one ore type, and one enemy script. Dunmarch mines, builds a Yard and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Keep.
-- Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement. Pathing is grid A*.
+- Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
 - Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Porters shoot back at point-blank range but keep hauling unless they were idle.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.

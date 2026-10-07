@@ -8,6 +8,7 @@ import {
   pushToast,
   rebuildBlocked,
   recomputeSupply,
+  rockById,
   unitById,
 } from './state'
 import {
@@ -91,21 +92,28 @@ export function commandAttack(
   let owner: PlayerId | null = null
   let x = 0
   let y = 0
+  let neutral = false
   if (kind === 'unit') {
     const target = unitById(state, targetId)
     if (!target || target.hp <= 0) return
     owner = target.owner
     x = target.x
     y = target.y
-  } else {
+  } else if (kind === 'building') {
     const target = buildingById(state, targetId)
     if (!target || target.hp <= 0) return
     owner = target.owner
     const center = buildingCenter(target)
     x = center.x
     y = center.y
+  } else {
+    const target = rockById(state, targetId)
+    if (!target || target.hp <= 0) return
+    neutral = true
+    x = (target.tx + 0.5) * TILE
+    y = (target.ty + 0.5) * TILE
   }
-  const units = living(state, ids).filter((unit) => unit.owner !== owner)
+  const units = living(state, ids).filter((unit) => neutral || unit.owner !== owner)
   if (!units.length) return
   for (const unit of units) {
     unit.order = { type: 'attack', targetId, kind }

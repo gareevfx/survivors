@@ -6,6 +6,7 @@ import {
   ORE_NODE_AMOUNT,
   PLAYER_KEEP_TX,
   PLAYER_KEEP_TY,
+  ROCK_HP,
   STARTING_ORE,
   SUPPLY_MAX,
   TILE,
@@ -14,6 +15,7 @@ import {
   type BuildingKind,
   type MatchState,
   type PlayerId,
+  type Rock,
   type Target,
   type TargetKind,
   type Unit,
@@ -74,6 +76,14 @@ export function buildingById(state: MatchState, id: number): Building | undefine
   return state.buildings.find((building) => building.id === id)
 }
 
+export function rockById(state: MatchState, id: number): Rock | undefined {
+  return state.rocks.find((rock) => rock.id === id)
+}
+
+export function rockAt(state: MatchState, tx: number, ty: number): Rock | undefined {
+  return state.rocks.find((rock) => rock.tx === tx && rock.ty === ty && rock.hp > 0)
+}
+
 export function buildingRect(building: Building): { x: number; y: number; w: number; h: number } {
   const stats = BUILDING_STATS[building.kind]
   return {
@@ -126,11 +136,28 @@ export function buildingTarget(building: Building): Target {
   }
 }
 
+export function rockTarget(rock: Rock): Target {
+  return {
+    id: rock.id,
+    owner: 0,
+    x: (rock.tx + 0.5) * TILE,
+    y: (rock.ty + 0.5) * TILE,
+    radius: 12,
+    hp: rock.hp,
+    targetKind: 'rock',
+  }
+}
+
 export function getTarget(state: MatchState, id: number, kind: TargetKind): Target | null {
   if (kind === 'unit') {
     const unit = unitById(state, id)
     if (!unit || unit.hp <= 0) return null
     return unitTarget(unit)
+  }
+  if (kind === 'rock') {
+    const rock = rockById(state, id)
+    if (!rock || rock.hp <= 0) return null
+    return rockTarget(rock)
   }
   const building = buildingById(state, id)
   if (!building || building.hp <= 0) return null
@@ -227,6 +254,7 @@ export function createMatch(seed: number): MatchState {
     tiles: field.tiles,
     blocked: new Uint8Array(MAP_W * MAP_H),
     ore: [],
+    rocks: [],
     units: [],
     buildings: [],
     projectiles: [],
@@ -259,6 +287,19 @@ export function createMatch(seed: number): MatchState {
       ty: spot.ty,
       amount: ORE_NODE_AMOUNT,
     })
+  }
+
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (field.tiles[tileIndex(tx, ty)] !== 1) continue
+      state.rocks.push({
+        id: state.nextId++,
+        tx,
+        ty,
+        hp: ROCK_HP,
+        hitFlash: 0,
+      })
+    }
   }
 
   const keepStats = BUILDING_STATS.keep

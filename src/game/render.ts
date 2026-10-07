@@ -8,6 +8,7 @@ import {
   MAP_PX_W,
   MAP_W,
   PLAYER_COLOR,
+  ROCK_HP,
   TILE,
   UNIT_STATS,
   type Building,
@@ -23,7 +24,7 @@ export interface WorldOverlay {
 
 const GRASS = ['#66754c', '#6e7d52', '#5e6c46', '#758856', '#617048', '#6a784e']
 
-export function buildTerrain(tiles: Uint8Array, seed: number): HTMLCanvasElement {
+export function buildTerrain(seed: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = MAP_PX_W
   canvas.height = MAP_PX_H
@@ -40,13 +41,12 @@ export function buildTerrain(tiles: Uint8Array, seed: number): HTMLCanvasElement
       if (n > 0.82) {
         ctx.fillStyle = 'rgba(255,255,255,0.05)'
         ctx.fillRect(x + 6, y + 18, 4, 2)
-      } else if (n < 0.08) {
+      } else       if (n < 0.08) {
         ctx.fillStyle = 'rgba(30,40,18,0.18)'
         ctx.beginPath()
         ctx.ellipse(x + 16, y + 20, 5, 2, 0, 0, Math.PI * 2)
         ctx.fill()
       }
-      if (tiles[ty * MAP_W + tx] === 1) drawRock(ctx, tx, ty, seed)
     }
   }
 
@@ -113,6 +113,23 @@ export function renderWorld(
     t: cam.y - 48,
     r: cam.x + viewW / cam.zoom + 48,
     b: cam.y + viewH / cam.zoom + 48,
+  }
+
+  for (const rock of state.rocks) {
+    if (rock.hp <= 0) continue
+    const x = (rock.tx + 0.5) * TILE
+    const y = (rock.ty + 0.5) * TILE
+    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
+    drawRock(ctx, rock.tx, rock.ty, state.seed)
+    if (rock.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
+      ctx.beginPath()
+      ctx.arc(x, y - 1, 10, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    if (rock.hp < ROCK_HP) {
+      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, rock.hp / ROCK_HP, hpColor(rock.hp / ROCK_HP))
+    }
   }
 
   for (const node of state.ore) {

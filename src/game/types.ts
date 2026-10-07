@@ -10,6 +10,8 @@ export const PLAYER_KEEP_TY = 36
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420
+/** Four howler hits. Any ordered attacker can chip a rock; howlers are the practical siege tool. */
+export const ROCK_HP = 56
 export const STARTING_ORE = 120
 export const SUPPLY_MAX = 60
 export const INTERACT = 42
@@ -19,7 +21,7 @@ export const CHASE_BREAK = 300
 export type PlayerId = 0 | 1
 export type UnitKind = 'porter' | 'pike' | 'howler'
 export type BuildingKind = 'keep' | 'yard' | 'silo'
-export type TargetKind = 'unit' | 'building'
+export type TargetKind = 'unit' | 'building' | 'rock'
 
 export interface UnitStats {
   label: string
@@ -73,7 +75,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   howler: {
     label: 'Howler',
-    blurb: 'Slow slinger with a long reach.',
+    blurb: 'Slow slinger with a long reach. Right-click gray rock to break it.',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -204,6 +206,14 @@ export interface OreNode {
   amount: number
 }
 
+export interface Rock {
+  id: number
+  tx: number
+  ty: number
+  hp: number
+  hitFlash: number
+}
+
 export interface Projectile {
   id: number
   owner: PlayerId
@@ -258,6 +268,7 @@ export interface MatchState {
   tiles: Uint8Array
   blocked: Uint8Array
   ore: OreNode[]
+  rocks: Rock[]
   units: Unit[]
   buildings: Building[]
   projectiles: Projectile[]
