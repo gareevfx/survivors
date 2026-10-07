@@ -1,8 +1,8 @@
 import { commandAttack, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
-import { canPlace, createMatch, isWalkable, makeUnit, unitById } from './game/state'
-import { MAP_H, MAP_W, STARTING_ORE, TILE } from './game/types'
+import { canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
+import { BUILDING_STATS, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, type MatchState } from './game/types'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -147,6 +147,100 @@ function howlerBreaksRock(): void {
   )
 }
 
+function footprintBlocks(state: MatchState, tx: number, ty: number): boolean {
+  if (state.ore.some((node) => node.tx === tx && node.ty === ty && node.amount > 0)) return true
+  return state.buildings.some((building) => {
+    if (building.hp <= 0) return false
+    const stats = BUILDING_STATS[building.kind]
+    return tx >= building.tx && ty >= building.ty && tx < building.tx + stats.w && ty < building.ty + stats.h
+  })
+}
+
+function aiBreaksBlockingRock(): void {
+  const state = createMatch(9)
+  const wallY = 24
+  for (let tx = 0; tx < MAP_W; tx++) {
+    if (footprintBlocks(state, tx, wallY)) continue
+    if (state.tiles[wallY * MAP_W + tx] === 1) continue
+    state.tiles[wallY * MAP_W + tx] = 1
+    state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
+  }
+  rebuildBlocked(state)
+
+  let spot: { tx: number; ty: number } | null = null
+  for (let tx = 1; tx < MAP_W - 1 && !spot; tx++) {
+    if (!state.rocks.some((rock) => rock.tx === tx && rock.ty === wallY && rock.hp > 0)) continue
+    for (const ty of [22, 21, 20, 19]) {
+      if (isWalkable(state, tx, ty)) {
+        spot = { tx, ty }
+        break
+      }
+    }
+  }
+  assert(spot, 'no open ground north of the rock wall')
+  const howler = makeUnit(state, 1, 'howler', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
+  const before = findPath(state.blocked, MAP_W, MAP_H, spot.tx, spot.ty, spot.tx, wallY + 3)
+  assert(before === null, 'wall did not seal the march')
+  state.aiAttacking = true
+  step(state, 0.5)
+  const ordered = unitById(state, howler.id)
+  assert(ordered?.order?.type === 'attack' && ordered.order.kind === 'rock', 'Dunmarch did not order the howler onto a rock')
+  const targetId = ordered.order.targetId
+  const target = state.rocks.find((rock) => rock.id === targetId)
+  assert(target, 'rock order pointed at nothing')
+  let broke = false
+  for (let i = 0; i < 20 * 60; i++) {
+    step(state, 1 / 60)
+    if (!state.rocks.some((rock) => rock.id === targetId)) {
+      broke = true
+      break
+    }
+  }
+  assert(broke, 'howler did not break the blocking rock')
+  assert(isWalkable(state, target.tx, target.ty), 'broken rock still blocks')
+  for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
+  const resumed = unitById(state, howler.id)
+  assert(
+    !(resumed?.order?.type === 'attack' && resumed.order.kind === 'rock'),
+    `Dunmarch kept sieging rock after the gap opened (${resumed?.order?.type ?? 'idle'})`,
+  )
+  const south = { tx: target.tx, ty: wallY + 2 }
+  assert(isWalkable(state, south.tx, south.ty) || isWalkable(state, target.tx, target.ty), 'no ground beyond the wall')
+  const through = findPath(
+    state.blocked,
+    MAP_W,
+    MAP_H,
+    spot.tx,
+    spot.ty,
+    isWalkable(state, south.tx, south.ty) ? south.tx : target.tx,
+    isWalkable(state, south.tx, south.ty) ? south.ty : target.ty,
+  )
+  assert(through, 'path did not open after the rock fell')
+}
+
+function aiIgnoresRocksOnOpenRoute(): void {
+  const state = createMatch(6)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'missing player keep')
+  let spot: { tx: number; ty: number } | null = null
+  for (let rad = 4; rad <= 8 && !spot; rad++) {
+    for (let ty = keep.ty - rad; ty <= keep.ty + rad && !spot; ty++) {
+      for (let tx = keep.tx - rad; tx <= keep.tx + rad; tx++) {
+        if (isWalkable(state, tx, ty)) {
+          spot = { tx, ty }
+          break
+        }
+      }
+    }
+  }
+  assert(spot, 'no open ground near the player keep')
+  const howler = makeUnit(state, 1, 'howler', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
+  state.aiAttacking = true
+  for (let i = 0; i < 3; i++) step(state, 0.5)
+  const order = unitById(state, howler.id)?.order
+  assert(!(order?.type === 'attack' && order.kind === 'rock'), 'Dunmarch broke rock on a short open route')
+}
+
 function pikeChipsRock(): void {
   const state = createMatch(8)
   const rock = state.rocks[0]
@@ -224,6 +318,8 @@ routeExists()
 gatherWorks()
 buildAndTrain()
 howlerBreaksRock()
+aiBreaksBlockingRock()
+aiIgnoresRocksOnOpenRoute()
 pikeChipsRock()
 attacksBuildings()
 combatResolves()

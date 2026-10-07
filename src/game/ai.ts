@@ -1,6 +1,11 @@
-import { aiPlaceNearKeep, commandMove, tryTrain } from './commands'
-import { buildingCenter } from './state'
-import { BUILDING_STATS, TILE, type MatchState, type Unit } from './types'
+import { aiPlaceNearKeep, commandAttack, commandMove, tryTrain } from './commands'
+import { nearestWalkable } from './nav'
+import { findPath } from './pathfind'
+import { buildingCenter, rockAt } from './state'
+import { BUILDING_STATS, MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
+
+/** Extra tiles of walking that justify stopping to break a rock. */
+const ROCK_DETOUR = 12
 
 function idlePorter(unit: Unit): boolean {
   return unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && !unit.order
@@ -78,6 +83,8 @@ export function updateAi(state: MatchState, dt: number): void {
   if (!state.aiAttacking || !playerKeep) return
 
   const dest = threatened ? keepPoint : buildingCenter(playerKeep)
+  const blocker = rockBlockingMarch(state, army, dest.x, dest.y)
+  if (blocker) assignRockBreakers(state, army, blocker.rock, blocker.trapped)
   for (const unit of army) {
     if (unit.order?.type === 'attack') continue
     if (unit.order?.type === 'attackMove' && unit.order.focusId != null) continue
@@ -89,6 +96,120 @@ export function updateAi(state: MatchState, dt: number): void {
     }
     commandMove(state, [unit.id], dest.x, dest.y, true)
   }
+}
+
+/**
+ * A rock on the way to the player when the real route is gone, or at least ROCK_DETOUR tiles longer
+ * than the same route with stones ignored. Buildings and ore still count as blocked.
+ */
+function rockBlockingMarch(
+  state: MatchState,
+  army: Unit[],
+  destX: number,
+  destY: number,
+): { rock: Rock; trapped: boolean } | null {
+  const goal = nearestWalkable(state, destX, destY)
+  if (!goal) return null
+  const cleared = new Uint8Array(state.blocked)
+  for (const rock of state.rocks) {
+    if (rock.hp <= 0) continue
+    cleared[rock.ty * MAP_W + rock.tx] = 0
+  }
+
+  let detour: Rock | null = null
+  for (const unit of army) {
+    const start = nearestWalkable(state, unit.x, unit.y)
+    if (!start) continue
+    const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+    const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+    if (!shortcut) continue
+    if (!open) {
+      const rock = rockAlong(state, start, shortcut)
+      if (rock) return { rock, trapped: true }
+      continue
+    }
+    if (detour) continue
+    if (routeLength(start, open) - routeLength(start, shortcut) < ROCK_DETOUR) continue
+    detour = rockAlong(state, start, shortcut)
+  }
+  return detour ? { rock: detour, trapped: false } : null
+}
+
+function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number; ty: number }>): number {
+  let length = 0
+  let prev = start
+  for (const step of path) {
+    length += Math.hypot(step.tx - prev.tx, step.ty - prev.ty)
+    prev = step
+  }
+  return length
+}
+
+function rockAlong(
+  state: MatchState,
+  start: { tx: number; ty: number },
+  path: Array<{ tx: number; ty: number }>,
+): Rock | null {
+  let prev = start
+  for (const step of path) {
+    const rock = firstRockOnSegment(state, prev.tx, prev.ty, step.tx, step.ty)
+    if (rock) return rock
+    prev = step
+  }
+  return null
+}
+
+function firstRockOnSegment(state: MatchState, x0: number, y0: number, x1: number, y1: number): Rock | null {
+  const dx = Math.abs(x1 - x0)
+  const dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  let x = x0
+  let y = y0
+  for (let guard = 0; guard <= dx + dy + 1; guard++) {
+    const rock = rockAt(state, x, y)
+    if (rock) return rock
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+  }
+  return null
+}
+
+function fightingSomeone(unit: Unit): boolean {
+  if (unit.order?.type === 'attack' && unit.order.kind !== 'rock') return true
+  return unit.order?.type === 'attackMove' && unit.order.focusId != null && unit.order.focusKind !== 'rock'
+}
+
+function assignRockBreakers(state: MatchState, army: Unit[], rock: Rock, trapped: boolean): void {
+  const free = army.filter((unit) => !fightingSomeone(unit))
+  const howlers = free.filter((unit) => unit.kind === 'howler')
+  const pikes = free
+    .filter((unit) => unit.kind === 'pike')
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - (rock.tx + 0.5) * TILE, a.y - (rock.ty + 0.5) * TILE) -
+        Math.hypot(b.x - (rock.tx + 0.5) * TILE, b.y - (rock.ty + 0.5) * TILE),
+    )
+  const crew = trapped ? [...howlers, ...pikes] : howlers.length ? howlers : pikes.slice(0, 2)
+  const fresh = crew.filter(
+    (unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock' && unit.order.targetId === rock.id),
+  )
+  if (!fresh.length) return
+  commandAttack(
+    state,
+    fresh.map((unit) => unit.id),
+    rock.id,
+    'rock',
+  )
 }
 
 function nearestNode(state: MatchState, x: number, y: number): { id: number } | null {
