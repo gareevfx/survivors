@@ -1,3 +1,4 @@
+import { scoutArea } from './game/ai'
 import { runCommand } from './game/console'
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
@@ -1166,6 +1167,69 @@ function dunmarchAimsAtTheCastle(): void {
   )
 }
 
+function dunmarchScoutsMineralsAndTheEnemy(): void {
+  const state = createMatch(1)
+  const home = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  const castle = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home && castle, 'missing castles')
+  state.aiExplored.fill(1)
+  state.aiVisible.fill(0)
+  state.aiExplored[4 * MAP_W + 4] = 0
+  state.aiExplored[30 * MAP_W + 40] = 0
+  const fromX = 8.5 * TILE
+  const fromY = 4.5 * TILE
+  const minerals = scoutArea(state, fromX, fromY)
+  assert(minerals, 'no scout goal while black ground is nearby')
+  assert(
+    Math.floor(minerals.x / TILE) === 4 && Math.floor(minerals.y / TILE) === 4,
+    'scout ignored nearby black ground with minerals still hidden',
+  )
+  state.aiExplored[4 * MAP_W + 4] = 1
+  const hunt = scoutArea(state, fromX, fromY)
+  assert(hunt, 'no scout goal for the far fog')
+  assert(
+    Math.floor(hunt.x / TILE) === 40 && Math.floor(hunt.y / TILE) === 30,
+    'scout did not head across the map for the enemy',
+  )
+  state.aiExplored.fill(1)
+  state.aiVisible.fill(1)
+  state.aiVisible[10 * MAP_W + 20] = 0
+  const shroud = scoutArea(state, fromX, fromY)
+  assert(
+    shroud && Math.floor(shroud.x / TILE) === 20 && Math.floor(shroud.y / TILE) === 10,
+    'scout skipped shrouded ground while the Castle was unknown',
+  )
+  state.aiSpotted.push({ id: castle.id, x: (castle.tx + 1.5) * TILE, y: (castle.ty + 1.5) * TILE })
+  assert(scoutArea(state, fromX, fromY) == null, 'scout kept wandering shroud after the Castle was found')
+
+  const live = createMatch(3)
+  const enemy = live.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing Dunmarch castle')
+  const drone = makeUnit(live, 1, 'drone', (enemy.tx + 1.5) * TILE, (enemy.ty + 1.5) * TILE)
+  const tank = makeUnit(live, 1, 'howler', drone.x + 40, drone.y)
+  const startX = drone.x
+  const startY = drone.y
+  const before = live.aiExplored.reduce((sum, bit) => sum + bit, 0)
+  step(live, 0.5)
+  assert(live.aiScout === drone.id, 'Dunmarch sent a tank to scout instead of the Drone')
+  assert(unitById(live, tank.id)?.order == null, 'the tank left the army to scout')
+  for (let i = 0; i < 8 * 30; i++) step(live, 1 / 30)
+  const flown = unitById(live, drone.id)
+  assert(flown?.order?.type === 'move', 'the Drone scout was not ordered into the fog')
+  assert(Math.hypot(flown.x - startX, flown.y - startY) > 48, 'the Drone scout did not move')
+  const after = live.aiExplored.reduce((sum, bit) => sum + bit, 0)
+  assert(after > before + 10, 'scouting did not reveal new ground')
+
+  const prod = createMatch(6)
+  const yard = makeBuilding(prod, 1, 'yard', 60, 10, true)
+  prod.oreHeld[1] = 500
+  step(prod, 0.5)
+  assert(
+    yard.queue.some((job) => job.kind === 'drone'),
+    'Dunmarch Factory did not train a Drone',
+  )
+}
+
 function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   assert(MAP_W * 9 === MAP_H * 16, `map is ${MAP_W}x${MAP_H}, not 16:9`)
   const state = createMatch(1)
@@ -1235,6 +1299,7 @@ shotsCannotCrossRocks()
 stuckWorkerRetargets()
 stuckUnitsStepToAnEmptyTile()
 dunmarchAimsAtTheCastle()
+dunmarchScoutsMineralsAndTheEnemy()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()

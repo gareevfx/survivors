@@ -315,7 +315,7 @@ export interface MatchState {
   aiVisible: Uint8Array
   /** Player buildings Dunmarch has seen. The last position is kept until that building is gone. */
   aiSpotted: Array<{ id: number; x: number; y: number }>
-  /** Worker or fighter currently walking into unexplored ground. */
+  /** Drone, bike, or spare worker currently scouting fog for minerals and the enemy. */
   aiScout: number
   /** When set, the player's fog stays off for the rest of this match. Dunmarch still scouts. */
   fogCleared: boolean

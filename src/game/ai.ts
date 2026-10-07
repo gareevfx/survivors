@@ -12,19 +12,74 @@ function idlePorter(unit: Unit): boolean {
   return unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && !unit.order
 }
 
-/** Keep one spare worker (or an idle fighter) walking into ground Dunmarch has not seen. */
-function claimScout(state: MatchState, idle: Unit[]): Unit | null {
-  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
-  const current = state.units.find((unit) => unit.id === state.aiScout && unit.owner === 1 && unit.hp > 0)
-  if (current && current.order?.type !== 'construct' && current.cargo <= 0) {
-    if (current.kind !== 'porter' && !state.aiAttacking) return current
-    if (current.kind === 'porter' && porters.length >= 2) return current
+/** Unexplored ground this close to the scout is searched first, so new minerals are found before a long hunt. */
+const SCOUT_LOCAL = 16 * TILE
+
+/**
+ * Pick the next patch of fog to enter.
+ * Nearby black ground comes first (new minerals). After that, unexplored ground
+ * toward the far side of the map is the search for the enemy. Shroud is only
+ * revisited while the Castle is still unknown.
+ */
+export function scoutArea(state: MatchState, fromX: number, fromY: number): { x: number; y: number } | null {
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const home = keep ? buildingCenter(keep) : { x: fromX, y: fromY }
+  const castleKnown = spottedPlayerKeep(state) != null
+  const far = { x: MAP_W * TILE - home.x, y: MAP_H * TILE - home.y }
+  let mineral: { x: number; y: number; d: number } | null = null
+  let hunt: { x: number; y: number; score: number } | null = null
+  let shroud: { x: number; y: number; score: number } | null = null
+  for (let ty = 0; ty < MAP_H; ty += 2) {
+    for (let tx = 0; tx < MAP_W; tx += 2) {
+      const index = ty * MAP_W + tx
+      const explored = state.aiExplored[index] === 1
+      const visible = state.aiVisible[index] === 1
+      if (visible) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      const fromScout = Math.hypot(x - fromX, y - fromY)
+      if (fromScout < TILE) continue
+      const towardEnemy = Math.hypot(x - far.x, y - far.y)
+      if (!explored) {
+        if (fromScout <= SCOUT_LOCAL && (!mineral || fromScout < mineral.d)) mineral = { x, y, d: fromScout }
+        const score = fromScout + towardEnemy * (castleKnown ? 0.15 : 0.45)
+        if (!hunt || score < hunt.score) hunt = { x, y, score }
+        continue
+      }
+      if (castleKnown) continue
+      const score = fromScout + towardEnemy * 0.45 + 800
+      if (!shroud || score < shroud.score) shroud = { x, y, score }
+    }
   }
-  if (!state.aiAttacking) {
-    const fighter = state.units.find(
-      (unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0 && !unit.order,
+  if (mineral) return { x: mineral.x, y: mineral.y }
+  if (hunt) return { x: hunt.x, y: hunt.y }
+  if (shroud) return { x: shroud.x, y: shroud.y }
+  return null
+}
+
+/** A Drone, else a Bike, else one spare Worker. Tanks stay with the army. */
+function claimScout(state: MatchState, idle: Unit[]): Unit | null {
+  const drone = state.units.find((unit) => unit.owner === 1 && unit.kind === 'drone' && unit.hp > 0)
+  if (drone) return drone
+  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const castleKnown = spottedPlayerKeep(state) != null
+  const current = state.units.find((unit) => unit.id === state.aiScout && unit.owner === 1 && unit.hp > 0)
+  if (
+    current?.kind === 'pike' &&
+    !state.aiAttacking &&
+    !castleKnown &&
+    current.order?.type !== 'construct'
+  ) {
+    return current
+  }
+  if (!state.aiAttacking && !castleKnown) {
+    const bike = state.units.find(
+      (unit) => unit.owner === 1 && unit.kind === 'pike' && unit.hp > 0 && !unit.order,
     )
-    if (fighter) return fighter
+    if (bike) return bike
+  }
+  if (current?.kind === 'porter' && porters.length >= 2 && current.cargo <= 0 && current.order?.type !== 'construct') {
+    return current
   }
   if (idle.length >= 2 && porters.length >= 2) return idle[idle.length - 1] ?? null
   return null
@@ -32,31 +87,15 @@ function claimScout(state: MatchState, idle: Unit[]): Unit | null {
 
 function sendScout(state: MatchState, scout: Unit | null): void {
   if (!scout) return
-  const goal = nextScoutGoal(state)
+  const goal = scoutArea(state, scout.x, scout.y)
   if (!goal) return
   const order = scout.order
   if (order && (order.type === 'move' || order.type === 'attackMove')) {
     if (Math.hypot(scout.x - order.x, scout.y - order.y) > 80) return
   }
   state.aiScout = scout.id
-  commandMove(state, [scout.id], goal.x, goal.y, scout.kind !== 'porter')
-}
-
-function nextScoutGoal(state: MatchState): { x: number; y: number } | null {
-  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
-  if (!keep) return null
-  const home = buildingCenter(keep)
-  let best: { x: number; y: number; d: number } | null = null
-  for (let ty = 0; ty < MAP_H; ty += 2) {
-    for (let tx = 0; tx < MAP_W; tx += 2) {
-      if (state.aiExplored[ty * MAP_W + tx] !== 0) continue
-      const x = (tx + 0.5) * TILE
-      const y = (ty + 0.5) * TILE
-      const d = (x - home.x) ** 2 + (y - home.y) ** 2
-      if (!best || d < best.d) best = { x, y, d }
-    }
-  }
-  return best ? { x: best.x, y: best.y } : null
+  const fightOnTheWay = scout.kind === 'pike'
+  commandMove(state, [scout.id], goal.x, goal.y, fightOnTheWay)
 }
 
 /** The player Castle, once a Dunmarch unit has seen it. Destroying it is the attack objective. */
@@ -118,8 +157,17 @@ export function updateAi(state: MatchState, dt: number): void {
   const readyYards = state.buildings.filter(
     (building) => building.owner === 1 && building.kind === 'yard' && building.complete && building.hp > 0,
   )
+  let wantsDrone =
+    !state.units.some((unit) => unit.owner === 1 && unit.kind === 'drone' && unit.hp > 0) &&
+    !state.buildings.some(
+      (building) => building.owner === 1 && building.hp > 0 && building.queue.some((job) => job.kind === 'drone'),
+    )
   for (const readyYard of readyYards) {
     if (readyYard.queue.length >= 1) continue
+    if (wantsDrone && tryTrain(state, readyYard.id, 'drone') === null) {
+      wantsDrone = false
+      continue
+    }
     const first = state.aiNext
     const second = first === 'pike' ? 'howler' : 'pike'
     if (tryTrain(state, readyYard.id, first) === null) state.aiNext = second
