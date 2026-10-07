@@ -10,7 +10,7 @@ export const PLAYER_KEEP_TY = 36
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420
-/** Four howler hits. Any ordered attacker can chip a rock; howlers are the practical siege tool. */
+/** Pikes and miners chip gray rock when ordered. Howlers cannot damage it. */
 export const ROCK_HP = 56
 export const STARTING_ORE = 120
 export const SUPPLY_MAX = 60
@@ -42,7 +42,7 @@ export interface UnitStats {
 
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
-    label: 'Porter',
+    label: 'Miner',
     blurb: 'Hauls ore and raises structures. Right-click gray rock to break it.',
     hp: 42,
     speed: 86,
@@ -59,7 +59,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   pike: {
     label: 'Pike',
-    blurb: 'Quick infantry with a short spear.',
+    blurb: 'Quick infantry with a short spear. Right-click gray rock to break it.',
     hp: 58,
     speed: 104,
     radius: 10,
@@ -75,7 +75,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   howler: {
     label: 'Howler',
-    blurb: 'Slow slinger with a long reach. Right-click gray rock to break it.',
+    blurb: 'Slow slinger with a long reach.',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -104,8 +104,8 @@ export interface BuildingStats {
 
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
-    label: 'Keep',
-    blurb: 'Drop-off for ore and home of the porters. If it falls, the field is lost.',
+    label: 'Castle',
+    blurb: 'Drop-off for ore and home of the miners. If it falls, the field is lost.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -114,7 +114,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     supply: 12,
   },
   yard: {
-    label: 'Yard',
+    label: 'Factory',
     blurb: 'Trains pikes and howlers.',
     w: 3,
     h: 2,

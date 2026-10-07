@@ -113,7 +113,10 @@ export function commandAttack(
     x = (target.tx + 0.5) * TILE
     y = (target.ty + 0.5) * TILE
   }
-  const units = living(state, ids).filter((unit) => neutral || unit.owner !== owner)
+  const units = living(state, ids).filter((unit) => {
+    if (kind === 'rock' && unit.kind === 'howler') return false
+    return neutral || unit.owner !== owner
+  })
   if (!units.length) return
   for (const unit of units) {
     unit.order = { type: 'attack', targetId, kind }
@@ -180,8 +183,8 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
-  if (building.kind === 'keep' && kind !== 'porter') return 'The Keep trains porters'
-  if (building.kind === 'yard' && kind === 'porter') return 'The Yard trains fighters'
+  if (building.kind === 'keep' && kind !== 'porter') return 'The Castle trains miners'
+  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains fighters'
   if (building.kind === 'silo') return 'A silo does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} ore`
@@ -232,7 +235,7 @@ export function tryPlace(
   preferredPorterIds: number[],
 ): string | null {
   if (state.outcome) return 'The battle is over'
-  if (kind === 'keep') return 'The Keep is already standing'
+  if (kind === 'keep') return 'The Castle is already standing'
   const stats = BUILDING_STATS[kind]
   if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} ore`
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
@@ -247,7 +250,7 @@ export function tryPlace(
     const db = (b.x - (tx + stats.w / 2) * TILE) ** 2 + (b.y - (ty + stats.h / 2) * TILE) ** 2
     return da - db
   })
-  if (!choices.length) return 'You need a porter to build'
+  if (!choices.length) return 'You need a miner to build'
   const limit = preferred.size === 0 ? 1 : Math.min(2, choices.length)
   const crew = choices.slice(0, limit)
 

@@ -586,7 +586,7 @@ function tryFire(state: MatchState, unit: Unit): void {
 
 function isAttackable(unit: Unit, focus: Target): boolean {
   if (focus.hp <= 0) return false
-  if (focus.targetKind === 'rock') return true
+  if (focus.targetKind === 'rock') return unit.kind !== 'howler'
   return focus.owner !== unit.owner
 }
 
@@ -658,6 +658,8 @@ function updateProjectiles(state: MatchState, dt: number): void {
 
 function applyHit(state: MatchState, target: Target, damage: number, sourceId: number): void {
   if (target.targetKind === 'rock') {
+    const source = unitById(state, sourceId)
+    if (source?.kind === 'howler') return
     const rock = rockById(state, target.id)
     if (!rock || rock.hp <= 0) return
     rock.hp -= damage
@@ -687,7 +689,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   building.hitFlash = 0.18
   if (building.owner === 0 && state.underAttackCd <= 0) {
     state.underAttackCd = 8
-    const label = building.kind === 'keep' ? 'The Keep is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
+    const label = building.kind === 'keep' ? 'The Castle is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
     state.toasts.push({ text: label, life: 3.4 })
   }
 }

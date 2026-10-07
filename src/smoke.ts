@@ -107,7 +107,7 @@ function buildAndTrain(): void {
   )
 }
 
-function howlerBreaksRock(): void {
+function howlerCannotBreakRock(): void {
   const state = createMatch(9)
   const offsets: Array<[number, number]> = [
     [1, 0],
@@ -118,8 +118,17 @@ function howlerBreaksRock(): void {
   const rock = state.rocks.find((entry) => offsets.some(([dx, dy]) => isWalkable(state, entry.tx + dx, entry.ty + dy)))
   assert(rock, 'map has no rock beside open ground')
   assert(!isWalkable(state, rock.tx, rock.ty), 'rock tile should block')
-  const howler = makeUnit(state, 0, 'howler', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE - 96)
+  const before = rock.hp
+  const howler = makeUnit(state, 0, 'howler', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE - 40)
   commandAttack(state, [howler.id], rock.id, 'rock')
+  assert(unitById(state, howler.id)?.order == null, 'howler accepted a rock order')
+  const forced = unitById(state, howler.id)
+  if (forced) forced.order = { type: 'attack', targetId: rock.id, kind: 'rock' }
+  for (let i = 0; i < 6 * 60; i++) step(state, 1 / 60)
+  const untouched = state.rocks.find((entry) => entry.id === rock.id)
+  assert(untouched && untouched.hp === before, 'howler damaged the rock')
+  const pike = makeUnit(state, 0, 'pike', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE - 40)
+  commandAttack(state, [pike.id], rock.id, 'rock')
   let broke = false
   for (let i = 0; i < 12 * 60; i++) {
     step(state, 1 / 60)
@@ -128,7 +137,7 @@ function howlerBreaksRock(): void {
       break
     }
   }
-  assert(broke, 'howler did not destroy the rock')
+  assert(broke, 'pike did not destroy the rock')
   assert(state.tiles[rock.ty * MAP_W + rock.tx] === 0, 'rock tile was not cleared')
   assert(isWalkable(state, rock.tx, rock.ty), 'destroyed rock still blocks')
   const start = offsets
@@ -178,28 +187,33 @@ function aiBreaksBlockingRock(): void {
     }
   }
   assert(spot, 'no open ground north of the rock wall')
+  const pike = makeUnit(state, 1, 'pike', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
   const howler = makeUnit(state, 1, 'howler', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
   const before = findPath(state.blocked, MAP_W, MAP_H, spot.tx, spot.ty, spot.tx, wallY + 3)
   assert(before === null, 'wall did not seal the march')
   state.aiAttacking = true
   step(state, 0.5)
-  const ordered = unitById(state, howler.id)
-  assert(ordered?.order?.type === 'attack' && ordered.order.kind === 'rock', 'Dunmarch did not order the howler onto a rock')
+  const howlerOrder = unitById(state, howler.id)?.order
+  assert(!(howlerOrder?.type === 'attack' && howlerOrder.kind === 'rock'), 'Dunmarch ordered a howler onto a rock')
+  const ordered = unitById(state, pike.id)
+  assert(ordered?.order?.type === 'attack' && ordered.order.kind === 'rock', 'Dunmarch did not order the pike onto a rock')
   const targetId = ordered.order.targetId
   const target = state.rocks.find((rock) => rock.id === targetId)
   assert(target, 'rock order pointed at nothing')
   let broke = false
   for (let i = 0; i < 20 * 60; i++) {
     step(state, 1 / 60)
+    const stillHowler = unitById(state, howler.id)?.order
+    assert(!(stillHowler?.type === 'attack' && stillHowler.kind === 'rock'), 'howler was ordered onto a rock mid-siege')
     if (!state.rocks.some((rock) => rock.id === targetId)) {
       broke = true
       break
     }
   }
-  assert(broke, 'howler did not break the blocking rock')
+  assert(broke, 'pike did not break the blocking rock')
   assert(isWalkable(state, target.tx, target.ty), 'broken rock still blocks')
   for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
-  const resumed = unitById(state, howler.id)
+  const resumed = unitById(state, pike.id)
   assert(
     !(resumed?.order?.type === 'attack' && resumed.order.kind === 'rock'),
     `Dunmarch kept sieging rock after the gap opened (${resumed?.order?.type ?? 'idle'})`,
@@ -403,7 +417,7 @@ pathAroundWall()
 routeExists()
 gatherWorks()
 buildAndTrain()
-howlerBreaksRock()
+howlerCannotBreakRock()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 aiPortersBreakRockForOre()

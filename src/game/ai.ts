@@ -230,9 +230,7 @@ function assignOrePorters(state: MatchState, porters: Unit[], rock: Rock, trappe
         Math.hypot(b.x - (rock.tx + 0.5) * TILE, b.y - (rock.ty + 0.5) * TILE),
     )
   const chosen = trapped ? crew : crew.slice(0, 2)
-  const fresh = chosen.filter(
-    (unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock' && unit.order.targetId === rock.id),
-  )
+  const fresh = chosen.filter((unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock'))
   if (!fresh.length) return
   commandAttack(
     state,
@@ -296,20 +294,32 @@ function fightingSomeone(unit: Unit): boolean {
   return unit.order?.type === 'attackMove' && unit.order.focusId != null && unit.order.focusKind !== 'rock'
 }
 
+function nearestToRock(rock: Rock, units: Unit[]): Unit[] {
+  const x = (rock.tx + 0.5) * TILE
+  const y = (rock.ty + 0.5) * TILE
+  return units.slice().sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))
+}
+
+/** Pikes break march rocks. Miners fill in only when no pike is free. Howlers never do. */
 function assignRockBreakers(state: MatchState, army: Unit[], rock: Rock, trapped: boolean): void {
-  const free = army.filter((unit) => !fightingSomeone(unit))
-  const howlers = free.filter((unit) => unit.kind === 'howler')
-  const pikes = free
-    .filter((unit) => unit.kind === 'pike')
-    .sort(
-      (a, b) =>
-        Math.hypot(a.x - (rock.tx + 0.5) * TILE, a.y - (rock.ty + 0.5) * TILE) -
-        Math.hypot(b.x - (rock.tx + 0.5) * TILE, b.y - (rock.ty + 0.5) * TILE),
-    )
-  const crew = trapped ? [...howlers, ...pikes] : howlers.length ? howlers : pikes.slice(0, 2)
-  const fresh = crew.filter(
-    (unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock' && unit.order.targetId === rock.id),
+  const pikes = nearestToRock(
+    rock,
+    army.filter((unit) => unit.kind === 'pike' && !fightingSomeone(unit)),
   )
+  const miners = nearestToRock(
+    rock,
+    state.units.filter(
+      (unit) =>
+        unit.owner === 1 &&
+        unit.kind === 'porter' &&
+        unit.hp > 0 &&
+        unit.cargo <= 0 &&
+        unit.order?.type !== 'construct',
+    ),
+  )
+  const pool = pikes.length ? pikes : miners
+  const crew = trapped ? pool : pool.slice(0, 2)
+  const fresh = crew.filter((unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock'))
   if (!fresh.length) return
   commandAttack(
     state,

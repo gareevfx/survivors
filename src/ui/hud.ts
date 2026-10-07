@@ -89,11 +89,11 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     if (state.outcome === 'win') {
       endKicker.textContent = 'Northmark'
       endTitle.textContent = 'The ridge is yours'
-      endCopy.textContent = 'The Dunmarch Keep is rubble. Your banners stay on the field.'
+      endCopy.textContent = 'The Dunmarch Castle is rubble. Your banners stay on the field.'
     } else if (state.outcome === 'lose') {
       endKicker.textContent = 'Dunmarch'
-      endTitle.textContent = 'The keep has fallen'
-      endCopy.textContent = 'Your Keep is gone. Dunmarch takes the ridge.'
+      endTitle.textContent = 'The castle has fallen'
+      endCopy.textContent = 'Your Castle is gone. Dunmarch takes the ridge.'
     }
     endSeed.textContent = `Field ${state.seed}`
   }
@@ -249,7 +249,7 @@ function paintCommands(commands: Cmd[]): void {
   if (!commands.length) {
     const empty = document.createElement('p')
     empty.className = 'cmd-empty'
-    empty.textContent = 'Select porters, the Keep, or a Yard.'
+    empty.textContent = 'Select miners, the Castle, or a Factory.'
     root.append(empty)
     return
   }
@@ -295,7 +295,7 @@ function describe(state: MatchState): string {
       ? `Construction ${Math.floor(building.progress * 100)}%${
           state.units.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id)
             ? ''
-            : ' · bring a porter'
+            : ' · bring a miner'
         }`
       : stats.blurb
     return `
@@ -315,7 +315,7 @@ function describe(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select porters and right-click ore. Build a Yard, train pikes and howlers, and destroy the red Keep. Howlers break gray rock: select them and right-click the stone.</p>
+      <p class="meta">Select miners and right-click ore. Build a Factory, train pikes and howlers, and destroy the red Castle. Miners and pikes break gray rock: select them and right-click the stone.</p>
     `
   }
   if (units.length === 1) {
