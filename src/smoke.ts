@@ -1,7 +1,8 @@
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
+import { movementGrid } from './game/nav'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
-import { buildingRect, canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
+import { buildingRect, canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
 import { describeSelection } from './ui/hud'
 
@@ -206,15 +207,14 @@ function howlerCannotBreakRock(): void {
   assert(untouched && untouched.hp === before, 'howler damaged the rock')
   const pike = makeUnit(state, 0, 'pike', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE - 40)
   commandAttack(state, [pike.id], rock.id, 'rock')
-  let broke = false
-  for (let i = 0; i < 12 * 60; i++) {
-    step(state, 1 / 60)
-    if (!state.rocks.some((entry) => entry.id === rock.id)) {
-      broke = true
-      break
-    }
-  }
-  assert(broke, 'pike did not destroy the rock')
+  assert(unitById(state, pike.id)?.order == null, 'bike accepted a rock order')
+  const forcedPike = unitById(state, pike.id)
+  if (forcedPike) forcedPike.order = { type: 'attack', targetId: rock.id, kind: 'rock' }
+  for (let i = 0; i < 6 * 60; i++) step(state, 1 / 60)
+  const stillRock = state.rocks.find((entry) => entry.id === rock.id)
+  assert(stillRock && stillRock.hp === before, 'bike damaged the rock')
+  stillRock.hp = 0
+  step(state, 1 / 30)
   assert(state.tiles[rock.ty * MAP_W + rock.tx] === 0, 'rock tile was not cleared')
   assert(isWalkable(state, rock.tx, rock.ty), 'destroyed rock still blocks')
   const start = offsets
@@ -271,23 +271,29 @@ function aiBreaksBlockingRock(): void {
   state.aiAttacking = true
   step(state, 0.5)
   const howlerOrder = unitById(state, howler.id)?.order
-  assert(!(howlerOrder?.type === 'attack' && howlerOrder.kind === 'rock'), 'Dunmarch ordered a howler onto a rock')
-  const ordered = unitById(state, pike.id)
-  assert(ordered?.order?.type === 'attack' && ordered.order.kind === 'rock', 'Dunmarch did not order the pike onto a rock')
+  assert(!(howlerOrder?.type === 'attack' && howlerOrder.kind === 'rock'), 'Dunmarch ordered a tank onto a rock')
+  const pikeOrder = unitById(state, pike.id)?.order
+  assert(!(pikeOrder?.type === 'attack' && pikeOrder.kind === 'rock'), 'Dunmarch ordered a bike onto a rock')
+  const ordered = state.units.find(
+    (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'attack' && unit.order.kind === 'rock',
+  )
+  assert(ordered?.order?.type === 'attack' && ordered.order.kind === 'rock', 'Dunmarch did not send a worker to break the rock')
   const targetId = ordered.order.targetId
   const target = state.rocks.find((rock) => rock.id === targetId)
   assert(target, 'rock order pointed at nothing')
   let broke = false
-  for (let i = 0; i < 20 * 60; i++) {
+  for (let i = 0; i < 40 * 60; i++) {
     step(state, 1 / 60)
     const stillHowler = unitById(state, howler.id)?.order
-    assert(!(stillHowler?.type === 'attack' && stillHowler.kind === 'rock'), 'howler was ordered onto a rock mid-siege')
+    const stillPike = unitById(state, pike.id)?.order
+    assert(!(stillHowler?.type === 'attack' && stillHowler.kind === 'rock'), 'tank was ordered onto a rock mid-siege')
+    assert(!(stillPike?.type === 'attack' && stillPike.kind === 'rock'), 'bike was ordered onto a rock mid-siege')
     if (!state.rocks.some((rock) => rock.id === targetId)) {
       broke = true
       break
     }
   }
-  assert(broke, 'pike did not break the blocking rock')
+  assert(broke, 'worker did not break the blocking rock')
   assert(isWalkable(state, target.tx, target.ty), 'broken rock still blocks')
   for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
   const resumed = unitById(state, pike.id)
@@ -321,7 +327,7 @@ function porterBreaksRockWhenOrdered(): void {
   assert((still?.hp ?? 0) < before, 'ordered worker did not damage the rock')
 }
 
-function aiPortersBreakRockForOre(): void {
+function workersReachMineralsThroughRocks(): void {
   const state = createMatch(9)
   const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
   assert(node, 'no southern minerals')
@@ -368,30 +374,33 @@ function aiPortersBreakRockForOre(): void {
   assert(south, 'no open ground south of the wall')
   assert(
     findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty) === null,
-    'minerals stayed reachable through the wall',
+    'combat path crossed the minerals wall',
   )
+  const through = findPath(movementGrid(state, origin), MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty)
+  assert(through, 'worker path did not cross the minerals wall')
   state.oreHeld[1] = 40
   state.aiAttacking = false
   step(state, 0.5)
-  const breaker = porters
-    .map((unit) => unitById(state, unit.id))
-    .find((unit) => unit?.order?.type === 'attack' && unit.order.kind === 'rock')
-  assert(breaker?.order?.type === 'attack' && breaker.order.kind === 'rock', 'workers did not attack a rock to reach minerals')
-  const targetId = breaker.order.targetId
-  let broke = false
-  for (let i = 0; i < 30 * 60; i++) {
-    step(state, 1 / 60)
-    if (!state.rocks.some((rock) => rock.id === targetId)) {
-      broke = true
+  const gatherer = porters.map((unit) => unitById(state, unit.id)).find((unit) => unit?.order?.type === 'gather')
+  assert(gatherer?.order?.type === 'gather', 'workers did not gather through the rock wall')
+  assert(
+    !porters.some((unit) => unit.order?.type === 'attack' && unit.order.kind === 'rock'),
+    'workers attacked rock instead of walking through it',
+  )
+  const wallHp = state.rocks.filter((rock) => rock.ty === wallY).map((rock) => rock.hp)
+  let reached = false
+  for (let i = 0; i < 25 * 30; i++) {
+    step(state, 1 / 30)
+    if (porters.some((unit) => unit.cargo > 0 || Math.floor(unit.y / TILE) > wallY)) {
+      reached = true
       break
     }
   }
-  assert(broke, 'workers did not break the minerals blockage')
-  for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
-  const resumed = unitById(state, breaker.id)
+  assert(reached, 'workers did not cross the rock wall to the minerals')
+  const after = state.rocks.filter((rock) => rock.ty === wallY)
   assert(
-    resumed?.order?.type === 'gather' || !(resumed?.order?.type === 'attack' && resumed.order.kind === 'rock'),
-    'worker kept sieging after the minerals route opened',
+    after.length === wallHp.length && after.every((rock, index) => rock.hp === wallHp[index]),
+    'workers destroyed rock on the way to minerals',
   )
 }
 
@@ -517,34 +526,24 @@ function minersClearRockToGather(): void {
   const tank = makeUnit(state, 0, 'howler', (spot.tx + 1.5) * TILE, (spot.ty + 0.5) * TILE)
   commandGather(state, [miner.id, tank.id], node.id)
   const ordered = unitById(state, miner.id)
-  assert(
-    ordered?.order?.type === 'attack' && ordered.order.kind === 'rock' && ordered.order.resumeNode === node.id,
-    'worker did not attack the rock sealing the minerals',
-  )
+  assert(ordered?.order?.type === 'gather' && ordered.order.nodeId === node.id, 'worker did not gather through the rock wall')
   const tankOrder = unitById(state, tank.id)?.order
   assert(!(tankOrder?.type === 'attack' && tankOrder.kind === 'rock'), 'tank was sent to break rock')
-  const targetId = ordered.order.targetId
-  let broke = false
-  for (let i = 0; i < 40 * 60; i++) {
-    step(state, 1 / 60)
+  const wallBefore = state.rocks.filter((rock) => rock.ty === wallY).reduce((sum, rock) => sum + rock.hp, 0)
+  let reached = false
+  for (let i = 0; i < 25 * 30; i++) {
+    step(state, 1 / 30)
     const tankNow = unitById(state, tank.id)?.order
     assert(!(tankNow?.type === 'attack' && tankNow.kind === 'rock'), 'tank attacked a rock while workers gathered')
-    if (!state.rocks.some((rock) => rock.id === targetId)) {
-      broke = true
+    const worker = unitById(state, miner.id)
+    if (worker && (worker.cargo > 0 || Math.floor(worker.y / TILE) > wallY)) {
+      reached = true
       break
     }
   }
-  assert(broke, 'worker did not break the rock sealing the minerals')
-  let resumed = false
-  for (let i = 0; i < 3 * 60; i++) {
-    step(state, 1 / 60)
-    const order = unitById(state, miner.id)?.order
-    if (order?.type === 'gather' && order.nodeId === node.id) {
-      resumed = true
-      break
-    }
-  }
-  assert(resumed, 'worker did not go back to gathering after the rock fell')
+  assert(reached, 'worker did not walk through rock to the minerals')
+  const wallAfter = state.rocks.filter((rock) => rock.ty === wallY).reduce((sum, rock) => sum + rock.hp, 0)
+  assert(wallAfter === wallBefore, 'worker broke rock instead of walking through it')
 }
 
 function aiIgnoresRocksOnOpenRoute(): void {
@@ -570,16 +569,68 @@ function aiIgnoresRocksOnOpenRoute(): void {
   assert(!(order?.type === 'attack' && order.kind === 'rock'), 'Dunmarch broke rock on a short open route')
 }
 
-function pikeChipsRock(): void {
+function combatUnitsDoNotChipRock(): void {
   const state = createMatch(8)
   const rock = state.rocks[0]
   assert(rock, 'missing rock')
   const before = rock.hp
   const pike = makeUnit(state, 0, 'pike', (rock.tx + 0.5) * TILE + 28, (rock.ty + 0.5) * TILE)
-  commandAttack(state, [pike.id], rock.id, 'rock')
+  const tank = makeUnit(state, 0, 'howler', (rock.tx + 0.5) * TILE - 28, (rock.ty + 0.5) * TILE)
+  commandAttack(state, [pike.id, tank.id], rock.id, 'rock')
+  assert(unitById(state, pike.id)?.order == null, 'bike accepted a rock order')
+  assert(unitById(state, tank.id)?.order == null, 'tank accepted a rock order')
   for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
   const still = state.rocks.find((entry) => entry.id === rock.id)
-  assert((still?.hp ?? 0) < before, 'pike could not damage a rock')
+  assert(still?.hp === before, 'combat unit damaged a rock')
+}
+
+function aiPlacesMoreFactoriesAndSilos(): void {
+  const state = createMatch(2)
+  state.oreHeld[1] = 4000
+  const finishSites = () => {
+    for (const building of state.buildings) {
+      if (building.owner !== 1 || building.complete) continue
+      building.complete = true
+      building.progress = 1
+    }
+    for (const unit of state.units) {
+      if (unit.owner === 1 && unit.order?.type === 'construct') {
+        unit.order = null
+        unit.path = []
+        unit.goalX = null
+        unit.goalY = null
+      }
+    }
+    rebuildBlocked(state)
+    recomputeSupply(state)
+  }
+  const packSupply = () => {
+    let guard = 0
+    while (state.supplyCap[1] - state.supplyUsed[1] > 2 && guard++ < 80) {
+      makeUnit(state, 1, 'pike', 40 + guard * 4, 40)
+      recomputeSupply(state)
+    }
+  }
+  step(state, 0.5)
+  assert(
+    state.buildings.some((building) => building.owner === 1 && building.kind === 'yard'),
+    'Dunmarch did not start a factory',
+  )
+  finishSites()
+  step(state, 0.5)
+  const yards = state.buildings.filter((building) => building.owner === 1 && building.kind === 'yard')
+  assert(yards.length >= 2, `Dunmarch stopped at ${yards.length} factories`)
+  finishSites()
+  for (let n = 0; n < 5; n++) {
+    packSupply()
+    const before = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+    step(state, 0.5)
+    const after = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+    assert(after > before, `Dunmarch did not start silo ${n + 1} (have ${after})`)
+    finishSites()
+  }
+  const silos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  assert(silos >= 5, `Dunmarch stopped at ${silos} silos`)
 }
 
 function attacksBuildings(): void {
@@ -650,14 +701,15 @@ howlerCannotBreakRock()
 constructionPausesUntilWorkerReturns()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
-aiPortersBreakRockForOre()
+workersReachMineralsThroughRocks()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()
 oreSelectionShowsAmount()
 minersClearRockToGather()
 aiIgnoresRocksOnOpenRoute()
-pikeChipsRock()
+combatUnitsDoNotChipRock()
+aiPlacesMoreFactoriesAndSilos()
 attacksBuildings()
 combatResolves()
 keepDecidesTheField()

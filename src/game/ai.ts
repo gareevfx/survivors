@@ -4,21 +4,8 @@ import { findPath } from './pathfind'
 import { buildingCenter, rockAt } from './state'
 import { BUILDING_STATS, MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
 
-/** Extra tiles of walking that justify stopping to break a rock. */
+/** Extra tiles of walking that justify stopping to break a rock for the army. */
 const ROCK_DETOUR = 12
-/** Bank or reachable ore below this counts as running low (a yard costs more). */
-const ORE_NEED = 80
-
-const NEIGHBORS: ReadonlyArray<readonly [number, number]> = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-  [1, 1],
-  [1, -1],
-  [-1, 1],
-  [-1, -1],
-]
 
 function idlePorter(unit: Unit): boolean {
   return unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && !unit.order
@@ -37,9 +24,6 @@ export function updateAi(state: MatchState, dt: number): void {
     null,
   )
 
-  const oreBlock = economyRock(state, porters)
-  if (oreBlock) assignOrePorters(state, porters, oreBlock.rock, oreBlock.trapped)
-
   const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
   if (!keep?.complete) return
 
@@ -49,24 +33,20 @@ export function updateAi(state: MatchState, dt: number): void {
   }
 
   const constructing = state.buildings.some((building) => building.owner === 1 && !building.complete && building.hp > 0)
-  const yard = state.buildings.find((building) => building.owner === 1 && building.kind === 'yard' && building.hp > 0)
-  const silos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo' && building.hp > 0).length
   if (!constructing) {
-    if (!yard && state.oreHeld[1] >= BUILDING_STATS.yard.cost) {
-      aiPlaceNearKeep(state, 'yard')
-    } else if (
-      state.supplyCap[1] - state.supplyUsed[1] <= 2 &&
-      silos < 4 &&
-      state.oreHeld[1] >= BUILDING_STATS.silo.cost
-    ) {
+    const supplyRoom = state.supplyCap[1] - state.supplyUsed[1]
+    if (supplyRoom <= 2 && state.oreHeld[1] >= BUILDING_STATS.silo.cost) {
       aiPlaceNearKeep(state, 'silo')
+    } else if (state.oreHeld[1] >= BUILDING_STATS.yard.cost) {
+      aiPlaceNearKeep(state, 'yard')
     }
   }
 
-  const readyYard = state.buildings.find(
+  const readyYards = state.buildings.filter(
     (building) => building.owner === 1 && building.kind === 'yard' && building.complete && building.hp > 0,
   )
-  if (readyYard && readyYard.queue.length < 1) {
+  for (const readyYard of readyYards) {
+    if (readyYard.queue.length >= 1) continue
     const first = state.aiNext
     const second = first === 'pike' ? 'howler' : 'pike'
     if (tryTrain(state, readyYard.id, first) === null) state.aiNext = second
@@ -91,7 +71,7 @@ export function updateAi(state: MatchState, dt: number): void {
 
   const dest = threatened ? keepPoint : buildingCenter(playerKeep)
   const blocker = rockBlockingMarch(state, army, dest.x, dest.y)
-  if (blocker) assignRockBreakers(state, army, blocker.rock, blocker.trapped)
+  if (blocker) assignRockBreakers(state, blocker.rock, blocker.trapped)
   for (const unit of army) {
     if (unit.order?.type === 'attack') continue
     if (unit.order?.type === 'attackMove' && unit.order.focusId != null) continue
@@ -147,90 +127,6 @@ function withoutRocks(state: MatchState): Uint8Array {
   return cleared
 }
 
-/**
- * Rock between porters and remaining ore. A sealed route is always cleared.
- * A long detour is cleared only when the bank or the ore they can already reach is running low.
- */
-function economyRock(state: MatchState, porters: Unit[]): { rock: Rock; trapped: boolean } | null {
-  const seekers = porters.filter((unit) => unit.cargo <= 0 && unit.order?.type !== 'construct')
-  const seeker = seekers[0]
-  if (!seeker) return null
-  const start = nearestWalkable(state, seeker.x, seeker.y)
-  if (!start) return null
-  const nodes = state.ore.filter((node) => node.amount > 0)
-  if (!nodes.length) return null
-  nodes.sort((a, b) => {
-    const da = (a.tx - start.tx) ** 2 + (a.ty - start.ty) ** 2
-    const db = (b.tx - start.tx) ** 2 + (b.ty - start.ty) ** 2
-    return da - db
-  })
-
-  const cleared = withoutRocks(state)
-  let bestOpen = Infinity
-  let reachableAmount = 0
-  let bestShort: { len: number; path: Array<{ tx: number; ty: number }> } | null = null
-
-  for (const node of nodes) {
-    const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
-    const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
-    if (shortGoal) {
-      const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
-      if (shortcut) {
-        const len = routeLength(start, shortcut)
-        if (!bestShort || len < bestShort.len) bestShort = { len, path: shortcut }
-      }
-    }
-    if (openGoal) {
-      const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)
-      if (open) {
-        const len = routeLength(start, open)
-        if (len < bestOpen) bestOpen = len
-        reachableAmount += node.amount
-      }
-    }
-    if (state.oreHeld[1] >= ORE_NEED && reachableAmount >= ORE_NEED) return null
-  }
-
-  if (!bestShort) return null
-  if (bestOpen === Infinity) {
-    const rock = rockAlong(state, start, bestShort.path)
-    return rock ? { rock, trapped: true } : null
-  }
-  const needMore = state.oreHeld[1] < ORE_NEED || reachableAmount < ORE_NEED
-  if (!needMore || bestOpen - bestShort.len < ROCK_DETOUR) return null
-  const rock = rockAlong(state, start, bestShort.path)
-  return rock ? { rock, trapped: false } : null
-}
-
-function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
-  for (const [dx, dy] of NEIGHBORS) {
-    const x = tx + dx
-    const y = ty + dy
-    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
-    if (blocked[y * MAP_W + x] === 0) return { tx: x, ty: y }
-  }
-  return null
-}
-
-function assignOrePorters(state: MatchState, porters: Unit[], rock: Rock, trapped: boolean): void {
-  const crew = porters
-    .filter((unit) => unit.cargo <= 0 && unit.order?.type !== 'construct')
-    .sort(
-      (a, b) =>
-        Math.hypot(a.x - (rock.tx + 0.5) * TILE, a.y - (rock.ty + 0.5) * TILE) -
-        Math.hypot(b.x - (rock.tx + 0.5) * TILE, b.y - (rock.ty + 0.5) * TILE),
-    )
-  const chosen = trapped ? crew : crew.slice(0, 2)
-  const fresh = chosen.filter((unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock'))
-  if (!fresh.length) return
-  commandAttack(
-    state,
-    fresh.map((unit) => unit.id),
-    rock.id,
-    'rock',
-  )
-}
-
 function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number; ty: number }>): number {
   let length = 0
   let prev = start
@@ -280,24 +176,15 @@ function firstRockOnSegment(state: MatchState, x0: number, y0: number, x1: numbe
   return null
 }
 
-function fightingSomeone(unit: Unit): boolean {
-  if (unit.order?.type === 'attack' && unit.order.kind !== 'rock') return true
-  return unit.order?.type === 'attackMove' && unit.order.focusId != null && unit.order.focusKind !== 'rock'
-}
-
 function nearestToRock(rock: Rock, units: Unit[]): Unit[] {
   const x = (rock.tx + 0.5) * TILE
   const y = (rock.ty + 0.5) * TILE
   return units.slice().sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))
 }
 
-/** Pikes break march rocks. Miners fill in only when no pike is free. Howlers never do. */
-function assignRockBreakers(state: MatchState, army: Unit[], rock: Rock, trapped: boolean): void {
-  const pikes = nearestToRock(
-    rock,
-    army.filter((unit) => unit.kind === 'pike' && !fightingSomeone(unit)),
-  )
-  const miners = nearestToRock(
+/** Workers break rocks that stop the army. Bikes and tanks never shoot stone. */
+function assignRockBreakers(state: MatchState, rock: Rock, trapped: boolean): void {
+  const workers = nearestToRock(
     rock,
     state.units.filter(
       (unit) =>
@@ -308,8 +195,7 @@ function assignRockBreakers(state: MatchState, army: Unit[], rock: Rock, trapped
         unit.order?.type !== 'construct',
     ),
   )
-  const pool = pikes.length ? pikes : miners
-  const crew = trapped ? pool : pool.slice(0, 2)
+  const crew = trapped ? workers : workers.slice(0, 2)
   const fresh = crew.filter((unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock'))
   if (!fresh.length) return
   commandAttack(

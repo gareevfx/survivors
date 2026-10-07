@@ -31,6 +31,27 @@ export function isWalkable(state: MatchState, tx: number, ty: number): boolean {
   return state.blocked[tileIndex(tx, ty)] === 0
 }
 
+function occupiedByStructure(state: MatchState, tx: number, ty: number): boolean {
+  for (const node of state.ore) {
+    if (node.amount > 0 && node.tx === tx && node.ty === ty) return true
+  }
+  for (const building of state.buildings) {
+    if (building.hp <= 0) continue
+    const stats = BUILDING_STATS[building.kind]
+    if (tx >= building.tx && tx < building.tx + stats.w && ty >= building.ty && ty < building.ty + stats.h) return true
+  }
+  return false
+}
+
+/** Rocks block bikes and tanks. Workers walk through rock tiles; buildings and minerals still stop them. */
+export function blocksMovement(state: MatchState, kind: UnitKind | null, tx: number, ty: number): boolean {
+  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return true
+  const index = tileIndex(tx, ty)
+  if (state.blocked[index] === 0) return false
+  if (kind === 'porter' && state.tiles[index] === 1 && !occupiedByStructure(state, tx, ty)) return false
+  return true
+}
+
 export function rebuildBlocked(state: MatchState): void {
   state.blocked.set(state.tiles)
   for (const node of state.ore) {

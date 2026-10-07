@@ -1,4 +1,4 @@
-import { findBuildSpot, gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { findBuildSpot, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
   buildingById,
   buildingCenter,
@@ -50,21 +50,13 @@ function depositDistance(unit: Unit, node: { tx: number; ty: number }): number {
   return dx * dx + dy * dy
 }
 
-function giveDeposit(state: MatchState, unit: Unit, node: { id: number; tx: number; ty: number }): void {
+function giveDeposit(unit: Unit, node: { id: number; tx: number; ty: number }): void {
   unit.nodeMemory = node.id
   unit.idleAcquire = false
   if (unit.cargo > 0) {
     unit.order = { type: 'gather', nodeId: node.id, phase: 'return' }
     stopMoving(unit)
     return
-  }
-  if (unit.owner === 0) {
-    const rock = gatherBlockRock(state, unit, node)
-    if (rock) {
-      unit.order = { type: 'attack', targetId: rock.id, kind: 'rock', resumeNode: node.id }
-      stopMoving(unit)
-      return
-    }
   }
   unit.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
   stopMoving(unit)
@@ -95,7 +87,7 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
   }
   const claim = (unit: Unit, node: { id: number; tx: number; ty: number }) => {
     counts.set(node.id, (counts.get(node.id) ?? 0) + 1)
-    giveDeposit(state, unit, node)
+    giveDeposit(unit, node)
   }
 
   const pending = new Set(same)
@@ -231,7 +223,7 @@ export function commandAttack(
     y = (target.ty + 0.5) * TILE
   }
   const units = living(state, ids).filter((unit) => {
-    if (kind === 'rock' && unit.kind === 'howler') return false
+    if (kind === 'rock' && unit.kind !== 'porter') return false
     return neutral || unit.owner !== owner
   })
   if (!units.length) return
@@ -343,7 +335,7 @@ function ejectFrom(state: MatchState, building: ReturnType<typeof makeBuilding>)
     const inside =
       unit.x >= rect.x && unit.x <= rect.x + rect.w && unit.y >= rect.y && unit.y <= rect.y + rect.h
     if (!inside) continue
-    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y, unit.kind)
     if (spot) {
       unit.x = spot.x
       unit.y = spot.y

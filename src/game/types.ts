@@ -12,7 +12,7 @@ export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420
 /** At most this many miners from one side may work a single deposit. */
 export const MINERS_PER_DEPOSIT = 3
-/** Bikes and workers chip gray rock when ordered. Tanks cannot damage it. */
+/** Workers chip gray rock when ordered. Bikes and tanks cannot damage it. */
 export const ROCK_HP = 56
 export const STARTING_ORE = 120
 export const SUPPLY_MAX = 60
@@ -45,7 +45,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Worker',
-    blurb: 'Hauls minerals and raises structures. Right-click gray rock to break it.',
+    blurb: 'Hauls minerals through gray rock and raises structures. Right-click gray rock to break it.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -61,7 +61,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   pike: {
     label: 'Bike',
-    blurb: 'Quick rider with a short reach. Right-click gray rock to break it.',
+    blurb: 'Quick rider with a short reach.',
     hp: 58,
     speed: 104,
     radius: 10,

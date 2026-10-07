@@ -2,6 +2,7 @@ import { updateAi } from './ai'
 import { assignMiners, fillOpenGatherSlots } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
+  blocksMovement,
   buildingById,
   buildingCenter,
   buildingRect,
@@ -216,7 +217,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
       return
     }
     if (unit.goalX == null) {
-      const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y)
+      const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y, unit.kind)
       if (!spot) {
         if (!clearBlockedGather(state, unit, node)) unit.order = null
         return
@@ -237,7 +238,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
   }
   if (unit.goalX == null) {
     const stats = BUILDING_STATS.keep
-    const spot = nearestParking(state, keep.tx, keep.ty, stats.w, stats.h, unit.x, unit.y)
+    const spot = nearestParking(state, keep.tx, keep.ty, stats.w, stats.h, unit.x, unit.y, unit.kind)
     if (spot) setUnitDestination(state, unit, spot.x, spot.y)
   }
 }
@@ -258,7 +259,7 @@ function refreshConstruct(state: MatchState, unit: Unit, order: Extract<Order, {
   }
   if (unit.goalX == null) {
     const stats = BUILDING_STATS[building.kind]
-    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y, unit.kind)
     if (spot) setUnitDestination(state, unit, spot.x, spot.y)
   }
 }
@@ -363,19 +364,19 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
 
 function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
   const radius = UNIT_STATS[unit.kind].radius * 0.45
-  if (!circleBlocked(state, unit.x + dx, unit.y + dy, radius)) {
+  if (!circleBlocked(state, unit, unit.x + dx, unit.y + dy, radius)) {
     unit.x += dx
     unit.y += dy
     return
   }
-  if (!circleBlocked(state, unit.x + dx, unit.y, radius)) {
+  if (!circleBlocked(state, unit, unit.x + dx, unit.y, radius)) {
     unit.x += dx
     return
   }
-  if (!circleBlocked(state, unit.x, unit.y + dy, radius)) unit.y += dy
+  if (!circleBlocked(state, unit, unit.x, unit.y + dy, radius)) unit.y += dy
 }
 
-function circleBlocked(state: MatchState, x: number, y: number, radius: number): boolean {
+function circleBlocked(state: MatchState, unit: Unit, x: number, y: number, radius: number): boolean {
   const samples: Array<[number, number]> = [
     [0, 0],
     [radius, 0],
@@ -386,8 +387,7 @@ function circleBlocked(state: MatchState, x: number, y: number, radius: number):
   for (const [ox, oy] of samples) {
     const tx = Math.floor((x + ox) / TILE)
     const ty = Math.floor((y + oy) / TILE)
-    if (tx < 0 || ty < 0 || tx >= 48 || ty >= 48) return true
-    if (state.blocked[ty * 48 + tx]) return true
+    if (blocksMovement(state, unit.kind, tx, ty)) return true
   }
   return false
 }
@@ -598,7 +598,7 @@ function tryFire(state: MatchState, unit: Unit): void {
 
 function isAttackable(unit: Unit, focus: Target): boolean {
   if (focus.hp <= 0) return false
-  if (focus.targetKind === 'rock') return unit.kind !== 'howler'
+  if (focus.targetKind === 'rock') return unit.kind === 'porter'
   return focus.owner !== unit.owner
 }
 
@@ -671,7 +671,7 @@ function updateProjectiles(state: MatchState, dt: number): void {
 function applyHit(state: MatchState, target: Target, damage: number, sourceId: number): void {
   if (target.targetKind === 'rock') {
     const source = unitById(state, sourceId)
-    if (source?.kind === 'howler') return
+    if (source?.kind !== 'porter') return
     const rock = rockById(state, target.id)
     if (!rock || rock.hp <= 0) return
     rock.hp -= damage

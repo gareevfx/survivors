@@ -324,7 +324,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest open one. Build a Factory, train bikes and tanks, and destroy the red Castle. Workers and bikes break gray rock: select them and right-click the stone. Click a minerals patch to see how much is left.</p>
+      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest open one. Workers walk through gray rock to reach a patch. Build a Factory, train bikes and tanks, and destroy the red Castle. Workers break gray rock when you right-click the stone. Bikes and tanks do not.</p>
     `
   }
   if (units.length === 1) {
