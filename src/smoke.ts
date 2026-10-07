@@ -1049,6 +1049,123 @@ function stuckWorkerRetargets(): void {
   )
 }
 
+function stuckUnitsStepToAnEmptyTile(): void {
+  const state = createMatch(8)
+  for (const unit of state.units) unit.hp = 0
+  for (const node of state.ore) node.amount = 0
+  carveGround(state, [
+    [8, 8],
+    [7, 8],
+    [8, 12],
+    [7, 12],
+  ])
+  rebuildBlocked(state)
+  const bike = makeUnit(state, 1, 'pike', 8 * TILE + 26, 8.5 * TILE)
+  const worker = makeUnit(state, 0, 'porter', 8 * TILE + 26, 12.5 * TILE)
+  commandMove(state, [bike.id], 30.5 * TILE, 8.5 * TILE, false)
+  commandMove(state, [worker.id], 30.5 * TILE, 12.5 * TILE, false)
+  for (let i = 0; i < 200; i++) step(state, 1 / 60)
+  const earlyBike = unitById(state, bike.id)
+  const earlyWorker = unitById(state, worker.id)
+  assert(
+    earlyBike != null && Math.floor(earlyBike.x / TILE) === 8 && Math.floor(earlyBike.y / TILE) === 8,
+    'bike left its tile before 4 seconds',
+  )
+  assert(
+    earlyWorker != null && Math.floor(earlyWorker.x / TILE) === 8 && Math.floor(earlyWorker.y / TILE) === 12,
+    'worker left its tile before 4 seconds',
+  )
+  let shifted = false
+  for (let i = 0; i < 80; i++) {
+    step(state, 1 / 60)
+    const bikeNow = unitById(state, bike.id)
+    const workerNow = unitById(state, worker.id)
+    const bikeTx = Math.floor((bikeNow?.x ?? 0) / TILE)
+    const bikeTy = Math.floor((bikeNow?.y ?? 0) / TILE)
+    const workerTx = Math.floor((workerNow?.x ?? 0) / TILE)
+    const workerTy = Math.floor((workerNow?.y ?? 0) / TILE)
+    if (bikeTx !== 7 || bikeTy !== 8 || workerTx !== 7 || workerTy !== 12) continue
+    shifted = true
+    break
+  }
+  assert(shifted && state.time >= 4 && state.time < 5, 'stuck units were not moved onto an empty tile after 4 seconds')
+  const lateBike = unitById(state, bike.id)
+  const lateWorker = unitById(state, worker.id)
+  assert(lateWorker?.order?.type === 'move', 'unstick replaced the worker order')
+  assert(lateBike?.order?.type === 'move', 'unstick replaced the bike order')
+
+  const flown = createMatch(8)
+  for (const unit of flown.units) unit.hp = 0
+  const drone = makeUnit(flown, 0, 'drone', 6, 6)
+  drone.order = { type: 'move', x: -40, y: 6 }
+  drone.goalX = -40
+  drone.goalY = 6
+  drone.path = []
+  for (let i = 0; i < 200; i++) step(flown, 1 / 60)
+  const earlyDrone = unitById(flown, drone.id)
+  assert(
+    earlyDrone != null && Math.floor(earlyDrone.x / TILE) === 0 && Math.floor(earlyDrone.y / TILE) === 0,
+    'drone left the corner before 4 seconds',
+  )
+  let lifted = false
+  for (let i = 0; i < 80; i++) {
+    step(flown, 1 / 60)
+    const now = unitById(flown, drone.id)
+    if (Math.floor((now?.x ?? 0) / TILE) === 0 && Math.floor((now?.y ?? 0) / TILE) === 1) {
+      lifted = true
+      break
+    }
+  }
+  assert(lifted && flown.time >= 4 && flown.time < 5, 'stuck drone was not moved onto an open cell after 4 seconds')
+}
+
+function dunmarchAimsAtTheCastle(): void {
+  const state = createMatch(4)
+  const castle = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(castle, 'missing the player castle')
+  const silo = makeBuilding(state, 0, 'silo', 40, 8, true)
+  const castlePoint = { x: (castle.tx + 1.5) * TILE, y: (castle.ty + 1.5) * TILE }
+  const siloPoint = { x: (silo.tx + 1) * TILE, y: (silo.ty + 1) * TILE }
+  state.aiSpotted.push(
+    { id: silo.id, x: siloPoint.x, y: siloPoint.y },
+    { id: castle.id, x: castlePoint.x, y: castlePoint.y },
+  )
+  const fighters: Array<ReturnType<typeof makeUnit>> = []
+  for (let i = 0; i < 10; i++) fighters.push(makeUnit(state, 1, 'pike', siloPoint.x + 36, siloPoint.y + i * 4))
+  const distracted = fighters[0]
+  assert(distracted, 'missing a fighter')
+  commandAttack(state, [distracted.id], silo.id, 'building')
+  step(state, 0.5)
+  for (const fighter of fighters) {
+    const order = unitById(state, fighter.id)?.order
+    assert(order, 'fighter stood idle after the Castle was known')
+    if (order.type === 'attack') {
+      assert(order.kind === 'building' && order.targetId === castle.id, 'fighter kept a target other than the Castle')
+      continue
+    }
+    assert(order.type === 'attackMove', `fighter took ${order.type} instead of marching on the Castle`)
+    const toCastle = Math.hypot(order.x - castlePoint.x, order.y - castlePoint.y)
+    const toSilo = Math.hypot(order.x - siloPoint.x, order.y - siloPoint.y)
+    assert(toCastle < toSilo, 'fighter marched on the Silo instead of the Castle')
+  }
+
+  const sight = createMatch(4)
+  const home = sight.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing the player castle')
+  const nearSilo = makeBuilding(sight, 0, 'silo', 6, 28, true)
+  const homePoint = { x: (home.tx + 1.5) * TILE, y: (home.ty + 1.5) * TILE }
+  const nearPoint = { x: (nearSilo.tx + 1) * TILE, y: (nearSilo.ty + 1) * TILE }
+  sight.aiSpotted.push({ id: home.id, x: homePoint.x, y: homePoint.y }, { id: nearSilo.id, x: nearPoint.x, y: nearPoint.y })
+  const eye = makeUnit(sight, 1, 'pike', nearPoint.x, nearPoint.y + 70)
+  commandMove(sight, [eye.id], homePoint.x, homePoint.y, true)
+  for (let i = 0; i < 8; i++) step(sight, 1 / 60)
+  const aimed = unitById(sight, eye.id)?.order
+  assert(
+    aimed?.type === 'attackMove' && aimed.focusKind === 'building' && aimed.focusId === home.id,
+    'Dunmarch aimed at the nearer Silo instead of the Castle',
+  )
+}
+
 function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   assert(MAP_W * 9 === MAP_H * 16, `map is ${MAP_W}x${MAP_H}, not 16:9`)
   const state = createMatch(1)
@@ -1116,6 +1233,8 @@ godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
+stuckUnitsStepToAnEmptyTile()
+dunmarchAimsAtTheCastle()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()

@@ -1,4 +1,4 @@
-import { updateAi } from './ai'
+import { spottedPlayerKeep, updateAi } from './ai'
 import { assignMiners, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -62,7 +62,7 @@ export function step(state: MatchState, dt: number): void {
   updateProjectiles(state, dt)
   cleanup(state)
   fillOpenGatherSlots(state)
-  watchStuckWorkers(state, dt)
+  watchStuckUnits(state, dt)
   updateVision(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
@@ -371,7 +371,7 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.anim += dt * 7
   if (unit.goalX != null && blockedStep) unit.stuckT += dt
   else unit.stuckT = 0
-  if (unit.stuckT > 0.85 && unit.goalX != null && unit.goalY != null) {
+  if (unit.kind !== 'drone' && unit.stuckT > 0.85 && unit.goalX != null && unit.goalY != null) {
     unit.stuckT = 0
     const gx = unit.goalX
     const gy = unit.goalY
@@ -668,8 +668,10 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
     }
   }
   if (!best && buildingsToo) {
+    const castleFirst = unit.owner === 1 && spottedPlayerKeep(state) != null
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
+      if (castleFirst && building.kind !== 'keep') continue
       const center = buildingCenter(building)
       const d = Math.hypot(center.x - unit.x, center.y - unit.y)
       if (d < bestD) {
@@ -846,26 +848,102 @@ function burst(state: MatchState, x: number, y: number, color: string, count: nu
 
 const STUCK_SHIFT = 8
 
-function watchStuckWorkers(state: MatchState, dt: number): void {
+function watchStuckUnits(state: MatchState, dt: number): void {
   for (const unit of state.units) {
-    if (unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.hp <= 0) continue
     if (unit.avoidNode >= 0 && state.time >= unit.avoidUntil) unit.avoidNode = -1
     if (!unit.order || workingInPlace(state, unit)) {
-      unit.stuckOrderT = 0
-      unit.stuckX = unit.x
-      unit.stuckY = unit.y
+      noteProgress(unit)
       continue
     }
     if (Math.hypot(unit.x - unit.stuckX, unit.y - unit.stuckY) >= STUCK_SHIFT) {
-      unit.stuckOrderT = 0
-      unit.stuckX = unit.x
-      unit.stuckY = unit.y
+      noteProgress(unit)
       continue
     }
     unit.stuckOrderT += dt
     if (unit.stuckOrderT < STUCK_REDIRECT_SECONDS) continue
-    redirectStuckPorter(state, unit)
+    if (nudgeStuckUnit(state, unit)) continue
+    if (unit.kind === 'porter') redirectStuckPorter(state, unit)
+    else repaceStuckUnit(state, unit)
   }
+}
+
+/** Shift a unit that cannot move onto a neighboring empty cell. Drones use open air; ground units need walkable ground. */
+function nudgeStuckUnit(state: MatchState, unit: Unit): boolean {
+  const spot = adjacentEmptyCell(state, unit)
+  if (!spot) return false
+  unit.x = spot.x
+  unit.y = spot.y
+  noteProgress(unit)
+  const gx = unit.goalX
+  const gy = unit.goalY
+  if (gx != null && gy != null) {
+    unit.path = []
+    setUnitDestination(state, unit, gx, gy)
+  }
+  return true
+}
+
+function adjacentEmptyCell(state: MatchState, unit: Unit): { x: number; y: number } | null {
+  const tx = Math.floor(unit.x / TILE)
+  const ty = Math.floor(unit.y / TILE)
+  const goalX = unit.goalX ?? unit.x
+  const goalY = unit.goalY ?? unit.y
+  const steps = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ]
+  let best: { x: number; y: number; d: number } | null = null
+  for (const [dx, dy] of steps) {
+    const nx = tx + dx
+    const ny = ty + dy
+    if (!cellOpenFor(state, unit, nx, ny)) continue
+    const x = (nx + 0.5) * TILE
+    const y = (ny + 0.5) * TILE
+    const d = (x - goalX) ** 2 + (y - goalY) ** 2
+    if (!best || d < best.d) best = { x, y, d }
+  }
+  return best ? { x: best.x, y: best.y } : null
+}
+
+function cellOpenFor(state: MatchState, unit: Unit, tx: number, ty: number): boolean {
+  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
+  const x = (tx + 0.5) * TILE
+  const y = (ty + 0.5) * TILE
+  if (unit.kind === 'drone') {
+    const margin = 8
+    if (x < margin || y < margin || x > MAP_PX_W - margin || y > MAP_PX_H - margin) return false
+  } else if (!isWalkable(state, tx, ty)) {
+    return false
+  }
+  for (const other of state.units) {
+    if (other.id === unit.id || other.hp <= 0) continue
+    if (unit.kind === 'drone' ? other.kind !== 'drone' : other.kind === 'drone') continue
+    if (Math.hypot(other.x - x, other.y - y) < TILE * 0.55) return false
+  }
+  return true
+}
+
+function noteProgress(unit: Unit): void {
+  unit.stuckOrderT = 0
+  unit.stuckX = unit.x
+  unit.stuckY = unit.y
+  unit.stuckT = 0
+}
+
+function repaceStuckUnit(state: MatchState, unit: Unit): void {
+  noteProgress(unit)
+  if (unit.goalX == null || unit.goalY == null) return
+  const gx = unit.goalX
+  const gy = unit.goalY
+  unit.path = []
+  setUnitDestination(state, unit, gx, gy)
 }
 
 function workingInPlace(state: MatchState, unit: Unit): boolean {

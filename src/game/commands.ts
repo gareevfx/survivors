@@ -162,10 +162,11 @@ export function fillOpenGatherSlots(state: MatchState): void {
 }
 
 /**
- * A worker has not moved on their current order. Gather and rock-clearing switch
- * to the next deposit with room. Construction switches to the next unfinished
- * site, or to minerals if there is none. A return trip and an explicit move or
- * attack keep their target and only take a fresh path.
+ * A worker is still boxed in after the unstick step found no empty neighbor.
+ * Gather and rock-clearing switch to the next deposit with room. Construction
+ * switches to the next unfinished site, or to minerals if there is none. A
+ * return trip and an explicit move or attack keep their target and only take
+ * a fresh path.
  */
 export function redirectStuckPorter(state: MatchState, unit: Unit): void {
   if (unit.kind !== 'porter' || unit.hp <= 0) return

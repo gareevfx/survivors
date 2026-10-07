@@ -59,12 +59,23 @@ function nextScoutGoal(state: MatchState): { x: number; y: number } | null {
   return best ? { x: best.x, y: best.y } : null
 }
 
+/** The player Castle, once a Dunmarch unit has seen it. Destroying it is the attack objective. */
+export function spottedPlayerKeep(state: MatchState): { id: number; x: number; y: number } | null {
+  for (const spot of state.aiSpotted) {
+    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner === 0)
+    if (building?.kind !== 'keep') continue
+    return { id: building.id, x: spot.x, y: spot.y }
+  }
+  return null
+}
+
 function knownEnemyBuilding(state: MatchState): { x: number; y: number } | null {
+  const castle = spottedPlayerKeep(state)
+  if (castle) return { x: castle.x, y: castle.y }
   let fallback: { x: number; y: number } | null = null
   for (const spot of state.aiSpotted) {
     const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner === 0)
     if (!building) continue
-    if (building.kind === 'keep') return { x: spot.x, y: spot.y }
     fallback = { x: spot.x, y: spot.y }
   }
   return fallback
@@ -124,23 +135,38 @@ export function updateAi(state: MatchState, dt: number): void {
     if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) >= 340) return false
     return aiTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
   })
+  const castle = spottedPlayerKeep(state)
   const spotted = knownEnemyBuilding(state)
   if (threatened || (spotted && (army.length >= 10 || (state.time > 105 && army.length >= 5)))) state.aiAttacking = true
   if (!threatened && army.length === 0) state.aiAttacking = false
   if (!state.aiAttacking || (!threatened && !spotted)) return
 
-  const dest = threatened || !spotted ? keepPoint : { x: spotted.x, y: spotted.y }
+  const dest = castle ?? (threatened || !spotted ? keepPoint : spotted)
   const blocker = rockBlockingMarch(state, army, dest.x, dest.y)
   if (blocker) assignRockBreakers(state, blocker.rock, blocker.trapped)
   for (const unit of army) {
-    if (unit.order?.type === 'attack') continue
-    if (unit.order?.type === 'attackMove' && unit.order.focusId != null) continue
+    const order = unit.order
     if (
-      unit.order?.type === 'attackMove' &&
-      Math.hypot(unit.order.x - dest.x, unit.order.y - dest.y) < 56
+      castle &&
+      order?.type === 'attack' &&
+      order.kind === 'building' &&
+      order.targetId !== castle.id
     ) {
+      commandMove(state, [unit.id], dest.x, dest.y, true)
       continue
     }
+    if (
+      castle &&
+      order?.type === 'attackMove' &&
+      order.focusKind === 'building' &&
+      order.focusId !== castle.id
+    ) {
+      order.focusId = null
+      order.focusKind = null
+    }
+    if (order?.type === 'attack') continue
+    if (order?.type === 'attackMove' && order.focusId != null) continue
+    if (order?.type === 'attackMove' && Math.hypot(order.x - dest.x, order.y - dest.y) < 56) continue
     commandMove(state, [unit.id], dest.x, dest.y, true)
   }
 }

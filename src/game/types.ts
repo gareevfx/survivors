@@ -20,7 +20,7 @@ export const SUPPLY_MAX = 60
 export const INTERACT = 42
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
-/** A worker who makes no progress on an order for this long is sent to the next target. */
+/** A unit that has not moved on an order for this long is shifted onto an adjacent empty tile. */
 export const STUCK_REDIRECT_SECONDS = 4
 
 export type PlayerId = 0 | 1
