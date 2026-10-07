@@ -1,4 +1,4 @@
-import { findBuildSpot, gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { findBuildSpot, gatherBlockRock, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import {
   buildingById,
   buildingCenter,
@@ -117,7 +117,7 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
       if (!unit) continue
       for (const node of state.ore) {
         if (!room(node.id)) continue
-        const distance = depositDistance(unit, node)
+        const distance = owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
         if (distance < bestD) {
           bestD = distance
           bestIndex = i

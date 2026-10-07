@@ -715,6 +715,113 @@ function enemyPlays(): void {
   assert(state.outcome == null, `match ended too early: ${state.outcome}`)
 }
 
+function carveGround(state: MatchState, open: Array<[number, number]>): void {
+  state.tiles.fill(1)
+  for (const [tx, ty] of open) state.tiles[ty * MAP_W + tx] = 0
+  state.rocks = []
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (state.tiles[ty * MAP_W + tx] !== 1) continue
+      state.rocks.push({ id: state.nextId++, tx, ty, hp: ROCK_HP, hitFlash: 0 })
+    }
+  }
+}
+
+function parkOtherWorkers(state: MatchState, keeperId: number): void {
+  for (const unit of state.units) {
+    if (unit.owner !== 1 || unit.kind !== 'porter' || unit.id === keeperId || unit.hp <= 0) continue
+    unit.order = { type: 'move', x: unit.x, y: unit.y }
+    unit.cargo = 0
+    unit.nodeMemory = -1
+    unit.path = []
+    unit.goalX = null
+    unit.goalY = null
+  }
+}
+
+function aiHaulsTheShortestOpenPath(): void {
+  const state = createMatch(3)
+  const open: Array<[number, number]> = []
+  for (let y = 10; y <= 17; y++) open.push([10, y])
+  carveGround(state, open)
+  for (const node of state.ore) node.amount = 0
+  const far = { id: state.nextId++, tx: 10, ty: 18, amount: 420 }
+  const near = { id: state.nextId++, tx: 14, ty: 10, amount: 420 }
+  state.ore.push(far, near)
+  rebuildBlocked(state)
+  const worker = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(worker, 'missing Dunmarch worker')
+  worker.x = 10.5 * TILE
+  worker.y = 10.5 * TILE
+  worker.order = null
+  worker.cargo = 0
+  worker.path = []
+  worker.goalX = null
+  worker.goalY = null
+  worker.nodeMemory = 0
+  parkOtherWorkers(state, worker.id)
+  state.oreHeld[1] = 0
+  state.aiAttacking = false
+  step(state, 0.5)
+  const order = unitById(state, worker.id)?.order
+  assert(
+    order?.type === 'gather' && order.nodeId === far.id,
+    `Dunmarch skipped the open minerals path for a nearer sealed patch (${order?.type ?? 'none'})`,
+  )
+}
+
+function aiBreaksRockClosestToMinerals(): void {
+  const state = createMatch(4)
+  const open: Array<[number, number]> = []
+  for (let y = 10; y <= 12; y++) open.push([10, y])
+  open.push([11, 12])
+  for (let y = 13; y <= 15; y++) open.push([11, y])
+  open.push([10, 15], [10, 17])
+  carveGround(state, open)
+  for (const [tx, ty] of [
+    [9, 17],
+    [11, 17],
+    [9, 18],
+    [11, 18],
+    [9, 19],
+    [10, 19],
+    [11, 19],
+  ] as const) {
+    state.tiles[ty * MAP_W + tx] = 2
+    state.rocks = state.rocks.filter((rock) => rock.tx !== tx || rock.ty !== ty)
+  }
+  for (const node of state.ore) node.amount = 0
+  const node = { id: state.nextId++, tx: 10, ty: 18, amount: 420 }
+  state.ore.push(node)
+  rebuildBlocked(state)
+  const nearRock = state.rocks.find((rock) => rock.tx === 10 && rock.ty === 13)
+  const farRock = state.rocks.find((rock) => rock.tx === 10 && rock.ty === 16)
+  assert(nearRock && farRock, 'missing the rocks that seal the minerals')
+  assert(
+    findPath(state.blocked, MAP_W, MAP_H, 10, 10, 10, 17) === null,
+    'a clear path already reached the minerals',
+  )
+  const worker = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(worker, 'missing Dunmarch worker')
+  worker.x = 10.5 * TILE
+  worker.y = 10.5 * TILE
+  worker.order = null
+  worker.cargo = 0
+  worker.path = []
+  worker.goalX = null
+  worker.goalY = null
+  worker.nodeMemory = 0
+  parkOtherWorkers(state, worker.id)
+  state.oreHeld[1] = 0
+  state.aiAttacking = false
+  step(state, 0.5)
+  const order = unitById(state, worker.id)?.order
+  assert(
+    order?.type === 'attack' && order.kind === 'rock' && order.targetId === farRock.id,
+    `Dunmarch broke rock ${order?.type === 'attack' ? order.targetId : 'none'} instead of the one beside the minerals (${farRock.id}, worker-side ${nearRock.id})`,
+  )
+}
+
 pathAroundWall()
 routeExists()
 gatherWorks()
@@ -724,6 +831,8 @@ constructionPausesUntilWorkerReturns()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 workersBreakRockToReachMinerals()
+aiHaulsTheShortestOpenPath()
+aiBreaksRockClosestToMinerals()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()

@@ -142,8 +142,30 @@ const APPROACH: ReadonlyArray<readonly [number, number]> = [
 ]
 
 /**
- * First gray rock on the way to this ore when no walkable route exists.
+ * Walk length from a worker to a deposit. A clear route uses A* on walkable tiles.
+ * A sealed route sorts after every clear one, by the same length with rocks ignored.
+ */
+export function haulCost(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const start = nearestWalkable(state, unit.x, unit.y)
+  if (!start) return Number.POSITIVE_INFINITY
+  const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
+  if (openGoal) {
+    const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)
+    if (open) return routeLength(start, open)
+  }
+  const cleared = clearedOfRocks(state)
+  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+  if (!shortGoal) return Number.POSITIVE_INFINITY
+  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+  if (!shortcut) return Number.POSITIVE_INFINITY
+  return 1_000_000 + routeLength(start, shortcut)
+}
+
+/**
+ * Rock to break when no walkable route to this ore exists.
  * An open route, however long, is left alone. Only workers clear stone.
+ * Dunmarch breaks the rock on that shortcut closest to the deposit.
+ * A player worker breaks the first rock on the way.
  */
 export function gatherBlockRock(
   state: MatchState,
@@ -157,16 +179,50 @@ export function gatherBlockRock(
   if (openGoal && findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)) {
     return null
   }
+  const cleared = clearedOfRocks(state)
+  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+  if (!shortGoal) return null
+  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+  if (!shortcut) return null
+  const rocks = rocksAlong(state, start, shortcut)
+  if (!rocks.length) return null
+  if (unit.owner !== 1) return rocks[0] ?? null
+  const nearestDeposit = rocks.slice().sort((a, b) => rockDistance(a, node) - rockDistance(b, node))
+  return nearestDeposit.find((rock) => reachableRock(state, start, rock)) ?? nearestDeposit[0] ?? null
+}
+
+function clearedOfRocks(state: MatchState): Uint8Array {
   const cleared = new Uint8Array(state.blocked)
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
     cleared[rock.ty * MAP_W + rock.tx] = 0
   }
-  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
-  if (!shortGoal) return null
-  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
-  if (!shortcut) return null
-  return rockAlong(state, start, shortcut)
+  return cleared
+}
+
+function rockDistance(rock: Rock, node: { tx: number; ty: number }): number {
+  return (rock.tx - node.tx) ** 2 + (rock.ty - node.ty) ** 2
+}
+
+function reachableRock(state: MatchState, start: { tx: number; ty: number }, rock: Rock): boolean {
+  for (const [dx, dy] of APPROACH) {
+    const tx = rock.tx + dx
+    const ty = rock.ty + dy
+    if (!isWalkable(state, tx, ty)) continue
+    if (tx === start.tx && ty === start.ty) return true
+    if (findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, tx, ty)) return true
+  }
+  return false
+}
+
+function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number; ty: number }>): number {
+  let length = 0
+  let prev = start
+  for (const step of path) {
+    length += Math.hypot(step.tx - prev.tx, step.ty - prev.ty)
+    prev = step
+  }
+  return length
 }
 
 function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
@@ -179,31 +235,37 @@ function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number
   return null
 }
 
-function rockAlong(
+function rocksAlong(
   state: MatchState,
   start: { tx: number; ty: number },
   path: Array<{ tx: number; ty: number }>,
-): Rock | null {
+): Rock[] {
+  const rocks: Rock[] = []
+  const seen = new Set<number>()
   let prev = start
   for (const step of path) {
-    const rock = firstRockOnSegment(state, prev.tx, prev.ty, step.tx, step.ty)
-    if (rock) return rock
+    for (const rock of rocksOnSegment(state, prev.tx, prev.ty, step.tx, step.ty)) {
+      if (seen.has(rock.id)) continue
+      seen.add(rock.id)
+      rocks.push(rock)
+    }
     prev = step
   }
-  return null
+  return rocks
 }
 
-function firstRockOnSegment(state: MatchState, x0: number, y0: number, x1: number, y1: number): Rock | null {
+function rocksOnSegment(state: MatchState, x0: number, y0: number, x1: number, y1: number): Rock[] {
   const dx = Math.abs(x1 - x0)
   const dy = Math.abs(y1 - y0)
   const sx = x0 < x1 ? 1 : -1
   const sy = y0 < y1 ? 1 : -1
   let err = dx - dy
+  const rocks: Rock[] = []
   let x = x0
   let y = y0
   for (let guard = 0; guard <= dx + dy + 1; guard++) {
     const rock = rockAt(state, x, y)
-    if (rock) return rock
+    if (rock) rocks.push(rock)
     if (x === x1 && y === y1) break
     const e2 = 2 * err
     if (e2 > -dy) {
@@ -215,5 +277,5 @@ function firstRockOnSegment(state: MatchState, x0: number, y0: number, x1: numbe
       y += sy
     }
   }
-  return null
+  return rocks
 }
