@@ -901,6 +901,44 @@ function godModeSavesNorthmark(): void {
   assert(fresh.godMode, 'the alias did not turn God Mode on')
 }
 
+function fogAndGodModeTurnOff(): void {
+  const state = createMatch(14)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles')
+  assert(runCommand(state, 'Fog of War'), 'Fog of War was rejected while already on')
+  assert(!state.fogCleared && !tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'Fog of War cleared a map that was already hidden')
+  assert(runCommand(state, 'Clear Fog of War'), 'could not clear fog before turning it on')
+  assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the clear did not reveal Dunmarch')
+  assert(runCommand(state, 'fog of war'), 'fog of war was rejected')
+  assert(!state.fogCleared, 'fog of war left the map revealed')
+  assert(tileVisible(state, keep.tx + 1, keep.ty + 1), 'the Castle left sight when fog returned')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed explored after fog returned')
+  step(state, 0.5)
+  assert(!tileVisible(state, enemy.tx, enemy.ty), 'fog did not stay on after the next step')
+
+  const open: Array<[number, number]> = []
+  for (let y = 9; y <= 14; y++) {
+    for (let x = 10; x <= 16; x++) open.push([x, y])
+  }
+  carveGround(state, open)
+  rebuildBlocked(state)
+  const worker = makeUnit(state, 0, 'porter', 14.5 * TILE, 10.5 * TILE)
+  const foe = makeUnit(state, 1, 'pike', worker.x + 28, worker.y)
+  assert(runCommand(state, 'God Mode'), 'God Mode was rejected')
+  commandAttack(state, [foe.id], worker.id, 'unit')
+  commandAttack(state, [worker.id], foe.id, 'unit')
+  for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
+  const safe = unitById(state, worker.id)
+  assert(safe && safe.hp === worker.hp, 'the worker was hurt before God Mode was turned off')
+  assert(runCommand(state, 'Off God Mode'), 'off god mode was rejected')
+  assert(!state.godMode, 'God Mode stayed on')
+  const before = safe.hp
+  for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
+  const hurt = unitById(state, worker.id)
+  assert(hurt && hurt.hp < before, 'the worker took no damage after God Mode was turned off')
+}
+
 function shotsCannotCrossRocks(): void {
   const state = createMatch(8)
   const open: Array<[number, number]> = []
@@ -1006,6 +1044,7 @@ aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
 godModeSavesNorthmark()
+fogAndGodModeTurnOff()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
 threeMinersPerDeposit()

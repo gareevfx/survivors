@@ -20,11 +20,19 @@ export function updateVision(state: MatchState): void {
   state.visible = visible
 }
 
-/** Reveal every tile for the rest of the match. A new match starts under fog again. */
+/** Reveal every tile until Fog of War is turned back on. A new match starts under fog. */
 export function clearFog(state: MatchState): void {
   state.fogCleared = true
   state.explored.fill(1)
   state.visible.fill(1)
+}
+
+/** Hide the map again. Only tiles in current friendly sight stay explored. */
+export function restoreFog(state: MatchState): void {
+  state.fogCleared = false
+  state.explored.fill(0)
+  state.visible.fill(0)
+  updateVision(state)
 }
 
 export function tileVisible(state: MatchState, tx: number, ty: number): boolean {

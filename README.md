@@ -58,7 +58,7 @@ You start with a Castle, four workers, and a small store of minerals — not eno
 | Center camera | `Space` (selection, or your Castle) |
 | Idle workers | `F` or the Idle button |
 | Control groups | `Ctrl+1`–`9` to save, `1`–`9` to recall. Tap the number again to center. |
-| Command line | `Enter`. The box says “write here”. `Clear Fog of War` reveals the map. `God Mode` makes your units and buildings invulnerable. Both last until you fight again or reload. Escape cancels. |
+| Command line | `Enter`. The box says “write here”. `Clear Fog of War` reveals the map, and `Fog of War` hides it again except what you can see. `God Mode` makes your units and buildings invulnerable, and `Off God Mode` turns that off. Escape cancels. |
 | Mute | `M` |
 | Controls overlay | `?` or `F1` |
 
@@ -66,7 +66,7 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 
 ## Known limitations
 
-- Save games and multiplayer are not included. Northmark has fog of war: black for unexplored ground, and a dark shroud for ground you have seen but are not watching. Sight comes from your workers, bikes, tanks, and buildings. Enemy units and buildings disappear outside that sight; rocks and minerals stay on explored ground. Press Enter and run Clear Fog of War to reveal the whole map until the next match. God Mode, from the same line, keeps Northmark units and buildings from taking damage until the next match. Dunmarch is unchanged and plays with a full view of the map.
+- Save games and multiplayer are not included. Northmark has fog of war: black for unexplored ground, and a dark shroud for ground you have seen but are not watching. Sight comes from your workers, bikes, tanks, and buildings. Enemy units and buildings disappear outside that sight; rocks and minerals stay on explored ground. Press Enter and run Clear Fog of War to reveal the whole map. Fog of War turns that off and hides everything outside current sight. God Mode keeps Northmark units and buildings from taking damage, and Off God Mode lets them take damage again. Dunmarch is unchanged and plays with a full view of the map.
 - One map, one minerals type, and one enemy script. Dunmarch gathers, builds Factories and Silos with no count limit, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends workers to break the stone, then resumes the attack. Bikes and tanks never damage rock. Dunmarch hauls along the shortest open path. When a patch is sealed, its workers break the blocking rocks closest to that patch, then walk the opened ground. Each deposit takes at most 3 workers from one side; the rest spread to the nearest deposit with room. An unfinished building gains progress only while a worker is constructing on that site.
 - Units slide around each other instead of hard-blocking. Buildings, rock, and minerals block movement until a rock is destroyed. Pathing is grid A*. Workers ordered onto gray rock break it, including rocks that seal a minerals patch. Bikes, tanks, idle units, and attack-move do not seek stones out.
 - Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. A shot that would cross gray rock does not fire. Workers shoot back at point-blank range but keep hauling unless they were idle. A worker who stays stuck on a gather or build order for 4 seconds is sent to the next open minerals patch or unfinished site.
