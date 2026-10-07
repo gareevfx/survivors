@@ -65,7 +65,7 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 ## Known limitations
 
 - No fog of war, save games, or multiplayer.
-- One map, one ore type, and one enemy script. Dunmarch mines, builds a Yard and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Keep. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends howlers (pikes, when it has no howlers) to break the stone, then resumes the attack.
+- One map, one ore type, and one enemy script. Dunmarch mines, builds a Yard and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Keep. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends howlers (pikes, when it has no howlers) to break the stone, then resumes the attack. The same rule opens ore: a sealed haul is always cleared by porters, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Your own porters break rock only when you right-click it.
 - Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
 - Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Porters shoot back at point-blank range but keep hauling unless they were idle.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.

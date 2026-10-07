@@ -218,6 +218,92 @@ function aiBreaksBlockingRock(): void {
   assert(through, 'path did not open after the rock fell')
 }
 
+function porterBreaksRockWhenOrdered(): void {
+  const state = createMatch(4)
+  const rock = state.rocks.find((entry) => entry.hp > 0)
+  assert(rock, 'missing rock')
+  const before = rock.hp
+  const porter = makeUnit(state, 0, 'porter', (rock.tx + 0.5) * TILE + 24, (rock.ty + 0.5) * TILE)
+  commandAttack(state, [porter.id], rock.id, 'rock')
+  for (let i = 0; i < 4 * 60; i++) step(state, 1 / 60)
+  const still = state.rocks.find((entry) => entry.id === rock.id)
+  assert((still?.hp ?? 0) < before, 'ordered porter did not damage the rock')
+}
+
+function aiPortersBreakRockForOre(): void {
+  const state = createMatch(9)
+  const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
+  assert(node, 'no southern ore')
+  for (const ore of state.ore) {
+    if (ore.id !== node.id) ore.amount = 0
+  }
+  node.amount = 420
+  const wallY = 24
+  for (let tx = 0; tx < MAP_W; tx++) {
+    if (footprintBlocks(state, tx, wallY)) continue
+    if (state.tiles[wallY * MAP_W + tx] === 1) continue
+    state.tiles[wallY * MAP_W + tx] = 1
+    state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
+  }
+  rebuildBlocked(state)
+  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(porters.length > 0, 'Dunmarch has no porters')
+  let placed = 0
+  for (let tx = 4; tx < MAP_W - 4 && placed < porters.length; tx++) {
+    if (!isWalkable(state, tx, 20)) continue
+    const porter = porters[placed]
+    if (!porter) break
+    porter.x = (tx + 0.5) * TILE
+    porter.y = 20.5 * TILE
+    porter.order = null
+    porter.cargo = 0
+    porter.path = []
+    porter.goalX = null
+    porter.goalY = null
+    placed += 1
+  }
+  assert(placed > 0, 'no open ground for Dunmarch porters')
+  const origin = porters[0]
+  assert(origin, 'missing porter')
+  let south: { tx: number; ty: number } | null = null
+  for (let ty = wallY + 1; ty < MAP_H && !south; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (isWalkable(state, tx, ty)) {
+        south = { tx, ty }
+        break
+      }
+    }
+  }
+  assert(south, 'no open ground south of the wall')
+  assert(
+    findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty) === null,
+    'ore stayed reachable through the wall',
+  )
+  state.oreHeld[1] = 40
+  state.aiAttacking = false
+  step(state, 0.5)
+  const breaker = porters
+    .map((unit) => unitById(state, unit.id))
+    .find((unit) => unit?.order?.type === 'attack' && unit.order.kind === 'rock')
+  assert(breaker?.order?.type === 'attack' && breaker.order.kind === 'rock', 'porters did not attack a rock to reach ore')
+  const targetId = breaker.order.targetId
+  let broke = false
+  for (let i = 0; i < 30 * 60; i++) {
+    step(state, 1 / 60)
+    if (!state.rocks.some((rock) => rock.id === targetId)) {
+      broke = true
+      break
+    }
+  }
+  assert(broke, 'porters did not break the ore blockage')
+  for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
+  const resumed = unitById(state, breaker.id)
+  assert(
+    resumed?.order?.type === 'gather' || !(resumed?.order?.type === 'attack' && resumed.order.kind === 'rock'),
+    'porter kept sieging after the ore route opened',
+  )
+}
+
 function aiIgnoresRocksOnOpenRoute(): void {
   const state = createMatch(6)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -319,6 +405,8 @@ gatherWorks()
 buildAndTrain()
 howlerBreaksRock()
 aiBreaksBlockingRock()
+porterBreaksRockWhenOrdered()
+aiPortersBreakRockForOre()
 aiIgnoresRocksOnOpenRoute()
 pikeChipsRock()
 attacksBuildings()

@@ -6,6 +6,19 @@ import { BUILDING_STATS, MAP_H, MAP_W, TILE, type MatchState, type Rock, type Un
 
 /** Extra tiles of walking that justify stopping to break a rock. */
 const ROCK_DETOUR = 12
+/** Bank or reachable ore below this counts as running low (a yard costs more). */
+const ORE_NEED = 80
+
+const NEIGHBORS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+]
 
 function idlePorter(unit: Unit): boolean {
   return unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && !unit.order
@@ -32,6 +45,9 @@ export function updateAi(state: MatchState, dt: number): void {
     porter.goalX = null
     porter.goalY = null
   }
+
+  const oreBlock = economyRock(state, porters)
+  if (oreBlock) assignOrePorters(state, porters, oreBlock.rock, oreBlock.trapped)
 
   const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
   if (!keep?.complete) return
@@ -110,11 +126,7 @@ function rockBlockingMarch(
 ): { rock: Rock; trapped: boolean } | null {
   const goal = nearestWalkable(state, destX, destY)
   if (!goal) return null
-  const cleared = new Uint8Array(state.blocked)
-  for (const rock of state.rocks) {
-    if (rock.hp <= 0) continue
-    cleared[rock.ty * MAP_W + rock.tx] = 0
-  }
+  const cleared = withoutRocks(state)
 
   let detour: Rock | null = null
   for (const unit of army) {
@@ -133,6 +145,101 @@ function rockBlockingMarch(
     detour = rockAlong(state, start, shortcut)
   }
   return detour ? { rock: detour, trapped: false } : null
+}
+
+function withoutRocks(state: MatchState): Uint8Array {
+  const cleared = new Uint8Array(state.blocked)
+  for (const rock of state.rocks) {
+    if (rock.hp <= 0) continue
+    cleared[rock.ty * MAP_W + rock.tx] = 0
+  }
+  return cleared
+}
+
+/**
+ * Rock between porters and remaining ore. A sealed route is always cleared.
+ * A long detour is cleared only when the bank or the ore they can already reach is running low.
+ */
+function economyRock(state: MatchState, porters: Unit[]): { rock: Rock; trapped: boolean } | null {
+  const seekers = porters.filter((unit) => unit.cargo <= 0 && unit.order?.type !== 'construct')
+  const seeker = seekers[0]
+  if (!seeker) return null
+  const start = nearestWalkable(state, seeker.x, seeker.y)
+  if (!start) return null
+  const nodes = state.ore.filter((node) => node.amount > 0)
+  if (!nodes.length) return null
+  nodes.sort((a, b) => {
+    const da = (a.tx - start.tx) ** 2 + (a.ty - start.ty) ** 2
+    const db = (b.tx - start.tx) ** 2 + (b.ty - start.ty) ** 2
+    return da - db
+  })
+
+  const cleared = withoutRocks(state)
+  let bestOpen = Infinity
+  let reachableAmount = 0
+  let bestShort: { len: number; path: Array<{ tx: number; ty: number }> } | null = null
+
+  for (const node of nodes) {
+    const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
+    const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+    if (shortGoal) {
+      const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+      if (shortcut) {
+        const len = routeLength(start, shortcut)
+        if (!bestShort || len < bestShort.len) bestShort = { len, path: shortcut }
+      }
+    }
+    if (openGoal) {
+      const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)
+      if (open) {
+        const len = routeLength(start, open)
+        if (len < bestOpen) bestOpen = len
+        reachableAmount += node.amount
+      }
+    }
+    if (state.oreHeld[1] >= ORE_NEED && reachableAmount >= ORE_NEED) return null
+  }
+
+  if (!bestShort) return null
+  if (bestOpen === Infinity) {
+    const rock = rockAlong(state, start, bestShort.path)
+    return rock ? { rock, trapped: true } : null
+  }
+  const needMore = state.oreHeld[1] < ORE_NEED || reachableAmount < ORE_NEED
+  if (!needMore || bestOpen - bestShort.len < ROCK_DETOUR) return null
+  const rock = rockAlong(state, start, bestShort.path)
+  return rock ? { rock, trapped: false } : null
+}
+
+function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
+  for (const [dx, dy] of NEIGHBORS) {
+    const x = tx + dx
+    const y = ty + dy
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
+    if (blocked[y * MAP_W + x] === 0) return { tx: x, ty: y }
+  }
+  return null
+}
+
+function assignOrePorters(state: MatchState, porters: Unit[], rock: Rock, trapped: boolean): void {
+  const crew = porters
+    .filter((unit) => unit.cargo <= 0 && unit.order?.type !== 'construct')
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - (rock.tx + 0.5) * TILE, a.y - (rock.ty + 0.5) * TILE) -
+        Math.hypot(b.x - (rock.tx + 0.5) * TILE, b.y - (rock.ty + 0.5) * TILE),
+    )
+  const chosen = trapped ? crew : crew.slice(0, 2)
+  const fresh = chosen.filter(
+    (unit) => !(unit.order?.type === 'attack' && unit.order.kind === 'rock' && unit.order.targetId === rock.id),
+  )
+  if (!fresh.length) return
+  commandAttack(
+    state,
+    fresh.map((unit) => unit.id),
+    rock.id,
+    'rock',
+  )
 }
 
 function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number; ty: number }>): number {
