@@ -1,6 +1,7 @@
 import type { Camera } from './camera'
 import { hash2 } from './rng'
 import { buildingCenter, buildingRect, playerKeep } from './state'
+import { buildingSeen, tileExplored, tileVisible, unitSeen } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
@@ -117,6 +118,7 @@ export function renderWorld(
 
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
+    if (!tileExplored(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -133,6 +135,7 @@ export function renderWorld(
   }
 
   for (const node of state.ore) {
+    if (!tileExplored(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -141,15 +144,9 @@ export function renderWorld(
 
   if (state.tutorial) drawOreHint(ctx, state)
 
-  if (state.placement && overlay.pointer) {
-    const stats = BUILDING_STATS[state.placement]
-    const tx = Math.floor(overlay.pointer.x / TILE)
-    const ty = Math.floor(overlay.pointer.y / TILE)
-    drawPlacement(ctx, state, state.placement, tx, ty, stats.w, stats.h)
-  }
-
   const buildings = state.buildings.slice().sort((a, b) => a.ty - b.ty)
   for (const building of buildings) {
+    if (!buildingSeen(state, building)) continue
     const rect = buildingRect(building)
     if (rect.x > view.r || rect.y > view.b || rect.x + rect.w < view.l || rect.y + rect.h < view.t) continue
     drawBuilding(ctx, state, building)
@@ -160,12 +157,14 @@ export function renderWorld(
   const selected = new Set(state.selectedUnits)
   const units = state.units.slice().sort((a, b) => a.y - b.y)
   for (const unit of units) {
+    if (!unitSeen(state, unit)) continue
     if (unit.x < view.l || unit.y < view.t || unit.x > view.r || unit.y > view.b) continue
     if (selected.has(unit.id)) drawOrderLine(ctx, unit)
     drawUnit(ctx, state, unit, selected.has(unit.id))
   }
 
   for (const shot of state.projectiles) {
+    if (shot.owner !== 0 && !tileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
     ctx.fillStyle = shot.owner === 0 ? '#e9f7ff' : '#ffd2c8'
     ctx.beginPath()
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
@@ -173,6 +172,7 @@ export function renderWorld(
   }
 
   for (const particle of state.particles) {
+    if (!tileVisible(state, Math.floor(particle.x / TILE), Math.floor(particle.y / TILE))) continue
     const alpha = Math.max(0, particle.life / particle.max)
     ctx.globalAlpha = alpha
     if (particle.text) {
@@ -190,6 +190,15 @@ export function renderWorld(
       ctx.fill()
     }
     ctx.globalAlpha = 1
+  }
+
+  drawFog(ctx, state, view)
+
+  if (state.placement && overlay.pointer) {
+    const stats = BUILDING_STATS[state.placement]
+    const tx = Math.floor(overlay.pointer.x / TILE)
+    const ty = Math.floor(overlay.pointer.y / TILE)
+    drawPlacement(ctx, state, state.placement, tx, ty, stats.w, stats.h)
   }
 
   const rally = state.selectedBuilding != null ? state.buildings.find((b) => b.id === state.selectedBuilding) : undefined
@@ -216,6 +225,24 @@ export function renderWorld(
     ctx.strokeRect(overlay.drag.x, overlay.drag.y, overlay.drag.w, overlay.drag.h)
   }
   return { viewW, viewH }
+}
+
+function drawFog(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  view: { l: number; t: number; r: number; b: number },
+): void {
+  const x0 = Math.max(0, Math.floor(view.l / TILE))
+  const y0 = Math.max(0, Math.floor(view.t / TILE))
+  const x1 = Math.min(MAP_W - 1, Math.floor(view.r / TILE))
+  const y1 = Math.min(MAP_H - 1, Math.floor(view.b / TILE))
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (tileVisible(state, tx, ty)) continue
+      ctx.fillStyle = tileExplored(state, tx, ty) ? 'rgba(6, 8, 6, 0.58)' : '#070806'
+      ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE)
+    }
+  }
 }
 
 function drawOre(ctx: CanvasRenderingContext2D, x: number, y: number, selected = false): void {
@@ -628,19 +655,31 @@ export function renderMinimap(
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.fillStyle = '#1a2217'
+  ctx.fillStyle = '#070806'
   ctx.fillRect(0, 0, cssW, cssH)
   const sx = cssW / MAP_W
   const sy = cssH / MAP_H
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (!tileExplored(state, tx, ty)) continue
+      ctx.fillStyle = tileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
+      ctx.fillRect(tx * sx, ty * sy, sx, sy)
+    }
+  }
   ctx.fillStyle = '#3a3832'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
+      if (!tileExplored(state, tx, ty)) continue
       if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(tx * sx, ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#e6c15a'
-  for (const node of state.ore) ctx.fillRect(node.tx * sx, node.ty * sy, sx, sy)
+  for (const node of state.ore) {
+    if (!tileExplored(state, node.tx, node.ty)) continue
+    ctx.fillRect(node.tx * sx, node.ty * sy, sx, sy)
+  }
   for (const building of state.buildings) {
+    if (!buildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
     ctx.fillStyle = building.owner === 0 ? '#7ecfff' : '#ff7d70'
     ctx.globalAlpha = building.complete ? 1 : 0.55
@@ -648,10 +687,18 @@ export function renderMinimap(
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {
+    if (!unitSeen(state, unit)) continue
     ctx.fillStyle = unit.owner === 0 ? '#d8f4ff' : '#ffd0c8'
     const px = (unit.x / TILE) * sx
     const py = (unit.y / TILE) * sy
     ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (!tileExplored(state, tx, ty) || tileVisible(state, tx, ty)) continue
+      ctx.fillRect(tx * sx, ty * sy, sx, sy)
+    }
   }
   ctx.strokeStyle = '#f4f1c4'
   ctx.lineWidth = 1

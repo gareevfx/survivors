@@ -1,4 +1,5 @@
 import { generateBattlefield } from './map'
+import { updateVision } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
@@ -201,6 +202,11 @@ export function makeUnit(
     cargo: 0,
     gatherTimer: 0,
     stuckT: 0,
+    stuckOrderT: 0,
+    stuckX: x,
+    stuckY: y,
+    avoidNode: -1,
+    avoidUntil: 0,
     leashX: null,
     leashY: null,
     idleAcquire: false,
@@ -253,6 +259,8 @@ export function createMatch(seed: number): MatchState {
     seed,
     tiles: field.tiles,
     blocked: new Uint8Array(MAP_W * MAP_H),
+    explored: new Uint8Array(MAP_W * MAP_H),
+    visible: new Uint8Array(MAP_W * MAP_H),
     ore: [],
     rocks: [],
     units: [],
@@ -323,6 +331,7 @@ export function createMatch(seed: number): MatchState {
 
   rebuildBlocked(state)
   recomputeSupply(state)
+  updateVision(state)
   return state
 }
 

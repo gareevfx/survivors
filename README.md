@@ -31,7 +31,7 @@ You start with a Castle, four workers, and a small store of minerals — not eno
 3. Select a worker (or the Castle) and place a **Factory**. The site rises only while a worker stands on it. Order that worker away and the label switches to **Paused** with no further progress. The work already done is kept. Select the worker and right-click the site to resume. A second worker on the site speeds the work.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
 5. Select the Factory and train **bikes** (short reach) and **tanks** (long reach).
-6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with workers to break it — bikes and tanks cannot — and the stone stops blocking once it shatters. Left-click a minerals patch to see how much is left. Workers sent to a sealed patch break the rocks in the way, then haul.
+6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Shots stop at gray rock. Right-click gray rock with workers to break it — bikes and tanks cannot — and the stone stops blocking once it shatters. Left-click a minerals patch to see how much is left. Workers sent to a sealed patch break the rocks in the way, then haul. A worker who cannot move for about 4 seconds leaves that job for the next minerals patch or unfinished building.
 7. Destroy the Dunmarch Castle to win. If your Castle falls, the skirmish is lost.
 
 ## Controls
@@ -65,8 +65,8 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 
 ## Known limitations
 
-- No fog of war, save games, or multiplayer.
+- Save games and multiplayer are not included. Northmark has fog of war: black for unexplored ground, and a dark shroud for ground you have seen but are not watching. Sight comes from your workers, bikes, tanks, and buildings. Enemy units and buildings disappear outside that sight; rocks and minerals stay on explored ground. Dunmarch plays with a full view of the map.
 - One map, one minerals type, and one enemy script. Dunmarch gathers, builds Factories and Silos with no count limit, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends workers to break the stone, then resumes the attack. Bikes and tanks never damage rock. Dunmarch hauls along the shortest open path. When a patch is sealed, its workers break the blocking rocks closest to that patch, then walk the opened ground. Each deposit takes at most 3 workers from one side; the rest spread to the nearest deposit with room. An unfinished building gains progress only while a worker is constructing on that site.
 - Units slide around each other instead of hard-blocking. Buildings, rock, and minerals block movement until a rock is destroyed. Pathing is grid A*. Workers ordered onto gray rock break it, including rocks that seal a minerals patch. Bikes, tanks, idle units, and attack-move do not seek stones out.
-- Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Workers shoot back at point-blank range but keep hauling unless they were idle.
+- Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. A shot that would cross gray rock does not fire. Workers shoot back at point-blank range but keep hauling unless they were idle. A worker who stays stuck on a gather or build order for 4 seconds is sent to the next open minerals patch or unfinished site.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.

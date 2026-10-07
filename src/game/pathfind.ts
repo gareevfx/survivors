@@ -215,3 +215,49 @@ export function rayClear(
   }
   return false
 }
+
+/**
+ * True when a shot from tile A to tile B does not cross gray rock.
+ * The start tile and the destination tile do not themselves block the shot,
+ * so a worker can still chip the rock they are standing next to.
+ */
+export function rockShotClear(
+  tiles: Uint8Array,
+  w: number,
+  h: number,
+  a: { tx: number; ty: number },
+  b: { tx: number; ty: number },
+): boolean {
+  if (a.tx === b.tx && a.ty === b.ty) return true
+  let x = a.tx
+  let y = a.ty
+  const dx = Math.abs(b.tx - a.tx)
+  const dy = Math.abs(b.ty - a.ty)
+  const sx = a.tx < b.tx ? 1 : -1
+  const sy = a.ty < b.ty ? 1 : -1
+  let err = dx - dy
+  const rock = (tx: number, ty: number) => {
+    if (tx === a.tx && ty === a.ty) return false
+    if (tx === b.tx && ty === b.ty) return false
+    if (tx < 0 || ty < 0 || tx >= w || ty >= h) return true
+    return tiles[ty * w + tx] === 1
+  }
+  const guardMax = dx + dy + 4
+  for (let guard = 0; guard < guardMax; guard++) {
+    if (x === b.tx && y === b.ty) return true
+    const e2 = 2 * err
+    const prevX = x
+    const prevY = y
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+    if (x !== prevX && y !== prevY && (rock(x, prevY) || rock(prevX, y))) return false
+    if (rock(x, y)) return false
+  }
+  return false
+}

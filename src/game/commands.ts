@@ -50,7 +50,16 @@ function depositDistance(unit: Unit, node: { tx: number; ty: number }): number {
   return dx * dx + dy * dy
 }
 
+function noteProgress(unit: Unit): void {
+  unit.stuckOrderT = 0
+  unit.stuckX = unit.x
+  unit.stuckY = unit.y
+  unit.avoidNode = -1
+  unit.avoidUntil = 0
+}
+
 function giveDeposit(state: MatchState, unit: Unit, node: { id: number; tx: number; ty: number }): void {
+  noteProgress(unit)
   unit.nodeMemory = node.id
   unit.idleAcquire = false
   if (unit.cargo > 0) {
@@ -117,6 +126,7 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
       if (!unit) continue
       for (const node of state.ore) {
         if (!room(node.id)) continue
+        if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
         const distance = owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
         if (distance < bestD) {
           bestD = distance
@@ -149,9 +159,102 @@ export function fillOpenGatherSlots(state: MatchState): void {
   }
 }
 
+/**
+ * A worker has not moved on their current order. Gather and rock-clearing switch
+ * to the next deposit with room. Construction switches to the next unfinished
+ * site, or to minerals if there is none. A return trip and an explicit move or
+ * attack keep their target and only take a fresh path.
+ */
+export function redirectStuckPorter(state: MatchState, unit: Unit): void {
+  if (unit.kind !== 'porter' || unit.hp <= 0) return
+  const order = unit.order
+  if (!order) return
+  unit.stuckOrderT = 0
+  unit.stuckX = unit.x
+  unit.stuckY = unit.y
+  if (order.type === 'gather' && order.phase === 'return') {
+    stopMoving(unit)
+    return
+  }
+  if (order.type === 'gather') {
+    sendNextDeposit(state, unit, order.nodeId)
+    return
+  }
+  if (order.type === 'attack' && order.resumeNode != null) {
+    sendNextDeposit(state, unit, order.resumeNode)
+    return
+  }
+  if (order.type === 'construct') {
+    const next = nearestOpenSite(state, unit, order.buildingId)
+    if (next) {
+      noteProgress(unit)
+      unit.order = { type: 'construct', buildingId: next.id }
+      unit.nodeMemory = -1
+      stopMoving(unit)
+      return
+    }
+    sendNextDeposit(state, unit, null)
+    return
+  }
+  if (unit.goalX != null && unit.goalY != null) {
+    const gx = unit.goalX
+    const gy = unit.goalY
+    unit.path = []
+    setUnitDestination(state, unit, gx, gy)
+  }
+}
+
+function nearestOpenSite(state: MatchState, unit: Unit, excludeId: number): { id: number } | null {
+  let best: { id: number } | null = null
+  let bestD = Infinity
+  for (const building of state.buildings) {
+    if (building.id === excludeId || building.owner !== unit.owner || building.hp <= 0 || building.complete) continue
+    const center = buildingCenter(building)
+    const distance = (center.x - unit.x) ** 2 + (center.y - unit.y) ** 2
+    if (distance < bestD) {
+      bestD = distance
+      best = building
+    }
+  }
+  return best
+}
+
+function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null): void {
+  const counts = new Map<number, number>()
+  for (const other of state.units) {
+    if (other.id === unit.id || other.owner !== unit.owner || other.kind !== 'porter' || other.hp <= 0) continue
+    const id = depositOf(other)
+    if (id == null) continue
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  let best: { id: number; tx: number; ty: number } | null = null
+  let bestD = Infinity
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    if (excludeId != null && node.id === excludeId) continue
+    if ((counts.get(node.id) ?? 0) >= MINERS_PER_DEPOSIT) continue
+    const raw = unit.owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
+    const distance = Number.isFinite(raw) ? raw : 1_000_000_000 + depositDistance(unit, node)
+    if (distance < bestD) {
+      bestD = distance
+      best = node
+    }
+  }
+  if (!best) {
+    unit.order = null
+    unit.nodeMemory = -1
+    unit.avoidNode = excludeId ?? -1
+    unit.avoidUntil = state.time + 8
+    stopMoving(unit)
+    return
+  }
+  giveDeposit(state, unit, best)
+}
+
 export function commandStop(state: MatchState, ids: number[]): void {
   if (state.outcome) return
   for (const unit of living(state, ids)) {
+    noteProgress(unit)
     unit.order = null
     unit.nodeMemory = -1
     unit.idleAcquire = false
@@ -179,6 +282,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
     } else {
       unit.order = { type: 'move', x: gx, y: gy }
     }
+    noteProgress(unit)
     unit.idleAcquire = false
     unit.nodeMemory = -1
     unit.leashX = null
@@ -234,6 +338,7 @@ export function commandAttack(
   })
   if (!units.length) return
   for (const unit of units) {
+    noteProgress(unit)
     unit.order = { type: 'attack', targetId, kind }
     unit.nodeMemory = -1
     unit.idleAcquire = false
@@ -284,6 +389,7 @@ export function commandConstruct(state: MatchState, ids: number[], buildingId: n
   const crew = living(state, ids).filter((unit) => unit.kind === 'porter' && unit.owner === building.owner)
   if (!crew.length) return
   for (const unit of crew) {
+    noteProgress(unit)
     unit.order = { type: 'construct', buildingId: building.id }
     unit.idleAcquire = false
     unit.nodeMemory = -1

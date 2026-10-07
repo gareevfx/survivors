@@ -19,6 +19,8 @@ export const SUPPLY_MAX = 60
 export const INTERACT = 42
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
+/** A worker who makes no progress on an order for this long is sent to the next target. */
+export const STUCK_REDIRECT_SECONDS = 4
 
 export type PlayerId = 0 | 1
 export type UnitKind = 'porter' | 'pike' | 'howler'
@@ -102,6 +104,7 @@ export interface BuildingStats {
   cost: number
   buildTime: number
   supply: number
+  sight: number
 }
 
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
@@ -114,6 +117,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     cost: 0,
     buildTime: 1,
     supply: 12,
+    sight: 260,
   },
   yard: {
     label: 'Factory',
@@ -124,6 +128,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     cost: 160,
     buildTime: 18,
     supply: 0,
+    sight: 180,
   },
   silo: {
     label: 'Silo',
@@ -134,6 +139,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     cost: 80,
     buildTime: 11,
     supply: 8,
+    sight: 150,
   },
 }
 
@@ -172,6 +178,13 @@ export interface Unit {
   cargo: number
   gatherTimer: number
   stuckT: number
+  /** Seconds the worker has stayed put while an order still expects movement. */
+  stuckOrderT: number
+  stuckX: number
+  stuckY: number
+  /** Deposit skipped after a stuck redirect, so idle assignment does not send them straight back. */
+  avoidNode: number
+  avoidUntil: number
   leashX: number | null
   leashY: number | null
   idleAcquire: boolean
@@ -269,6 +282,10 @@ export interface MatchState {
   seed: number
   tiles: Uint8Array
   blocked: Uint8Array
+  /** Tiles the player has ever seen. Stays revealed after units leave. */
+  explored: Uint8Array
+  /** Tiles currently inside friendly sight. Rebuilt each step. */
+  visible: Uint8Array
   ore: OreNode[]
   rocks: Rock[]
   units: Unit[]

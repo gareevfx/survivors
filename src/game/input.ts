@@ -10,6 +10,7 @@ import {
   tryTrain,
 } from './commands'
 import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
+import { buildingSeen, tileExplored, unitSeen } from './vision'
 import {
   TILE,
   type BuildingKind,
@@ -612,13 +613,14 @@ function pick(
   y: number,
 ): { type: 'unit' | 'building' | 'ore' | 'rock'; id: number } | null {
   for (const node of state.ore) {
+    if (!tileExplored(state, node.tx, node.ty)) continue
     const cx = (node.tx + 0.5) * TILE
     const cy = (node.ty + 0.5) * TILE
     if (Math.hypot(cx - x, cy - y) <= 14) return { type: 'ore', id: node.id }
   }
   let best: { id: number; d: number } | null = null
   for (const unit of state.units) {
-    if (unit.hp <= 0) continue
+    if (unit.hp <= 0 || !unitSeen(state, unit)) continue
     const d = Math.hypot(unit.x - x, unit.y - y)
     const reach = (unit.kind === 'howler' ? 12 : 10) + 6
     if (d <= reach && (!best || d < best.d)) best = { id: unit.id, d }
@@ -626,7 +628,7 @@ function pick(
   if (best) return { type: 'unit', id: best.id }
   for (let i = state.buildings.length - 1; i >= 0; i--) {
     const building = state.buildings[i]
-    if (!building || building.hp <= 0) continue
+    if (!building || building.hp <= 0 || !buildingSeen(state, building)) continue
     const rect = {
       x: building.tx * TILE,
       y: building.ty * TILE,
@@ -637,7 +639,9 @@ function pick(
       return { type: 'building', id: building.id }
     }
   }
-  const rock = rockAt(state, Math.floor(x / TILE), Math.floor(y / TILE))
+  const tx = Math.floor(x / TILE)
+  const ty = Math.floor(y / TILE)
+  const rock = tileExplored(state, tx, ty) ? rockAt(state, tx, ty) : undefined
   if (rock) return { type: 'rock', id: rock.id }
   return null
 }

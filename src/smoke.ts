@@ -1,8 +1,9 @@
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
-import { buildingRect, canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
+import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
+import { tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -822,6 +823,122 @@ function aiBreaksRockClosestToMinerals(): void {
   )
 }
 
+function fogHidesUnexploredGround(): void {
+  const state = createMatch(1)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles')
+  assert(tileVisible(state, keep.tx + 1, keep.ty + 1), 'the player castle is not in sight')
+  assert(tileExplored(state, keep.tx + 1, keep.ty + 1), 'the player castle was not explored')
+  assert(!tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch is visible at the start')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch starts explored')
+  const foe = makeUnit(state, 1, 'pike', (enemy.tx + 1.5) * TILE, (enemy.ty + 5) * TILE)
+  updateVision(state)
+  assert(!unitSeen(state, foe), 'an enemy outside sight is shown')
+  const scout = makeUnit(state, 0, 'howler', foe.x + 30, foe.y)
+  updateVision(state)
+  assert(unitSeen(state, foe), 'a nearby friendly unit did not reveal the enemy')
+  assert(tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'scouting did not mark the ground explored')
+  scout.hp = 0
+  scout.x = (keep.tx + 1.5) * TILE
+  scout.y = (keep.ty + 1.5) * TILE
+  updateVision(state)
+  assert(!unitSeen(state, foe), 'the enemy stayed visible after the scout left')
+  assert(tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'explored ground was forgotten')
+  assert(!tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'abandoned ground stayed lit')
+}
+
+function shotsCannotCrossRocks(): void {
+  const state = createMatch(8)
+  const open: Array<[number, number]> = []
+  for (let y = 9; y <= 11; y++) {
+    for (const x of [10, 11, 13, 14]) open.push([x, y])
+  }
+  carveGround(state, open)
+  rebuildBlocked(state)
+  const gun = makeUnit(state, 0, 'howler', 10.5 * TILE, 10.5 * TILE)
+  const foe = makeUnit(state, 1, 'pike', 14.5 * TILE, 10.5 * TILE)
+  const before = foe.hp
+  commandAttack(state, [gun.id], foe.id, 'unit')
+  for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
+  assert(unitById(state, foe.id)?.hp === before, 'a shot passed through gray rock')
+  const blocker = state.rocks.find((rock) => rock.tx === 12 && rock.ty === 10)
+  assert(blocker, 'missing the rock on the line of fire')
+  blocker.hp = 0
+  step(state, 1 / 60)
+  commandAttack(state, [gun.id], foe.id, 'unit')
+  let hurt = false
+  for (let i = 0; i < 4 * 60; i++) {
+    step(state, 1 / 60)
+    if ((unitById(state, foe.id)?.hp ?? before) < before) {
+      hurt = true
+      break
+    }
+  }
+  assert(hurt, 'clearing the rock did not let the shot through')
+}
+
+function sealIsland(state: MatchState, tx: number, ty: number): void {
+  for (const [dx, dy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ] as const) {
+    const x = tx + dx
+    const y = ty + dy
+    state.tiles[y * MAP_W + x] = 2
+    state.rocks = state.rocks.filter((rock) => rock.tx !== x || rock.ty !== y)
+  }
+}
+
+function stuckWorkerRetargets(): void {
+  const state = createMatch(5)
+  const open: Array<[number, number]> = [[8, 8]]
+  for (let y = 20; y <= 22; y++) {
+    for (let x = 20; x <= 22; x++) open.push([x, y])
+    for (let x = 30; x <= 32; x++) open.push([x, y])
+  }
+  carveGround(state, open)
+  sealIsland(state, 8, 8)
+  for (const node of state.ore) node.amount = 0
+  const near = { id: state.nextId++, tx: 21, ty: 21, amount: 420 }
+  const far = { id: state.nextId++, tx: 31, ty: 21, amount: 420 }
+  state.ore.push(near, far)
+  rebuildBlocked(state)
+  const worker = makeUnit(state, 0, 'porter', 8.5 * TILE, 8.5 * TILE)
+  commandGather(state, [worker.id], near.id)
+  assert(assignedDeposit(worker) === near.id, 'worker did not take the nearer minerals')
+  for (let i = 0; i < 200; i++) step(state, 1 / 60)
+  assert(assignedDeposit(unitById(state, worker.id) ?? worker) === near.id, 'worker left the minerals before 4 seconds')
+  for (let i = 0; i < 120; i++) step(state, 1 / 60)
+  const moved = unitById(state, worker.id)
+  assert(moved && Math.floor(moved.x / TILE) === 8 && Math.floor(moved.y / TILE) === 8, 'caged worker left the sealed tile')
+  assert(assignedDeposit(moved) === far.id, 'stuck worker did not take the next minerals patch')
+
+  const sites = createMatch(6)
+  carveGround(sites, [[8, 8]])
+  sealIsland(sites, 8, 8)
+  rebuildBlocked(sites)
+  const builder = makeUnit(sites, 0, 'porter', 8.5 * TILE, 8.5 * TILE)
+  const closer = makeBuilding(sites, 0, 'silo', 18, 18, false)
+  const farther = makeBuilding(sites, 0, 'silo', 30, 18, false)
+  commandConstruct(sites, [builder.id], farther.id)
+  for (let i = 0; i < 200; i++) step(sites, 1 / 60)
+  const early = unitById(sites, builder.id)?.order
+  assert(early?.type === 'construct' && early.buildingId === farther.id, 'builder left the first site before 4 seconds')
+  for (let i = 0; i < 120; i++) step(sites, 1 / 60)
+  const order = unitById(sites, builder.id)?.order
+  assert(
+    order?.type === 'construct' && order.buildingId === closer.id,
+    'stuck builder did not switch to the nearer site',
+  )
+}
+
 pathAroundWall()
 routeExists()
 gatherWorks()
@@ -833,6 +950,9 @@ porterBreaksRockWhenOrdered()
 workersBreakRockToReachMinerals()
 aiHaulsTheShortestOpenPath()
 aiBreaksRockClosestToMinerals()
+fogHidesUnexploredGround()
+shotsCannotCrossRocks()
+stuckWorkerRetargets()
 threeMinersPerDeposit()
 minersSpreadToNearestOpenDeposit()
 aiUsesTheSameMinerCap()

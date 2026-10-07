@@ -1,6 +1,8 @@
 import { updateAi } from './ai'
-import { assignMiners, fillOpenGatherSlots } from './commands'
+import { assignMiners, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { rockShotClear } from './pathfind'
+import { updateVision } from './vision'
 import {
   buildingById,
   isWalkable,
@@ -23,7 +25,9 @@ import {
   GATHER_AMOUNT,
   GATHER_TIME,
   INTERACT,
+  MAP_H,
   MAP_W,
+  STUCK_REDIRECT_SECONDS,
   TILE,
   UNIT_STATS,
   type Building,
@@ -56,6 +60,8 @@ export function step(state: MatchState, dt: number): void {
   updateProjectiles(state, dt)
   cleanup(state)
   fillOpenGatherSlots(state)
+  watchStuckWorkers(state, dt)
+  updateVision(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
 }
@@ -140,7 +146,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
 }
 
 function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
-  if (inWeaponRange(unit, focus)) {
+  if (inWeaponRange(unit, focus) && shotClear(state, unit.x, unit.y, focus.x, focus.y)) {
     stopMoving(unit)
     unit.facing = Math.atan2(focus.y - unit.y, focus.x - unit.x)
     return
@@ -166,6 +172,16 @@ function standPoint(unit: Unit, focus: Target): { x: number; y: number } {
 function inWeaponRange(unit: Unit, focus: Target): boolean {
   const stats = UNIT_STATS[unit.kind]
   return dist(unit, focus) <= stats.range + focus.radius * 0.85
+}
+
+function shotClear(state: MatchState, x0: number, y0: number, x1: number, y1: number): boolean {
+  return rockShotClear(
+    state.tiles,
+    MAP_W,
+    MAP_H,
+    { tx: Math.floor(x0 / TILE), ty: Math.floor(y0 / TILE) },
+    { tx: Math.floor(x1 / TILE), ty: Math.floor(y1 / TILE) },
+  )
 }
 
 function dist(unit: Unit, focus: Target): number {
@@ -219,7 +235,7 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
     if (unit.goalX == null) {
       const spot = nearestParking(state, node.tx, node.ty, 1, 1, unit.x, unit.y)
       if (!spot) {
-        if (!clearBlockedGather(state, unit, node)) unit.order = null
+        clearBlockedGather(state, unit, node)
         return
       }
       if (!setUnitDestination(state, unit, spot.x, spot.y)) clearBlockedGather(state, unit, node)
@@ -550,6 +566,11 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     cargo: 0,
     gatherTimer: 0,
     stuckT: 0,
+    stuckOrderT: 0,
+    stuckX: spot.x,
+    stuckY: spot.y,
+    avoidNode: -1,
+    avoidUntil: 0,
     leashX: null,
     leashY: null,
     idleAcquire: false,
@@ -567,6 +588,7 @@ function tryFire(state: MatchState, unit: Unit): void {
   if (unit.attackCd > 0 || unit.hp <= 0) return
   const target = pickFireTarget(state, unit)
   if (!target || !inWeaponRange(unit, target)) return
+  if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
   const stats = UNIT_STATS[unit.kind]
   unit.attackCd = stats.cooldown
   unit.facing = Math.atan2(target.y - unit.y, target.x - unit.x)
@@ -803,6 +825,53 @@ function burst(state: MatchState, x: number, y: number, color: string, count: nu
       color,
     })
   }
+}
+
+const STUCK_SHIFT = 8
+
+function watchStuckWorkers(state: MatchState, dt: number): void {
+  for (const unit of state.units) {
+    if (unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.avoidNode >= 0 && state.time >= unit.avoidUntil) unit.avoidNode = -1
+    if (!unit.order || workingInPlace(state, unit)) {
+      unit.stuckOrderT = 0
+      unit.stuckX = unit.x
+      unit.stuckY = unit.y
+      continue
+    }
+    if (Math.hypot(unit.x - unit.stuckX, unit.y - unit.stuckY) >= STUCK_SHIFT) {
+      unit.stuckOrderT = 0
+      unit.stuckX = unit.x
+      unit.stuckY = unit.y
+      continue
+    }
+    unit.stuckOrderT += dt
+    if (unit.stuckOrderT < STUCK_REDIRECT_SECONDS) continue
+    redirectStuckPorter(state, unit)
+  }
+}
+
+function workingInPlace(state: MatchState, unit: Unit): boolean {
+  const order = unit.order
+  if (!order) return true
+  if (order.type === 'gather' && order.phase === 'mine') return true
+  if (order.type === 'gather' && order.phase === 'return') {
+    const keep = nearestCompleteKeep(state, unit.owner, unit.x, unit.y)
+    return !!keep && distToRect(unit.x, unit.y, buildingRect(keep)) <= INTERACT
+  }
+  if (order.type === 'construct') {
+    const building = buildingById(state, order.buildingId)
+    return !!building && building.hp > 0 && distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
+  }
+  if (order.type === 'attack') {
+    const target = getTarget(state, order.targetId, order.kind)
+    return !!target && inWeaponRange(unit, target) && shotClear(state, unit.x, unit.y, target.x, target.y)
+  }
+  if (order.type === 'attackMove' && order.focusId != null && order.focusKind) {
+    const target = getTarget(state, order.focusId, order.focusKind)
+    return !!target && inWeaponRange(unit, target) && shotClear(state, unit.x, unit.y, target.x, target.y)
+  }
+  return false
 }
 
 function fadeEffects(state: MatchState, dt: number): void {
