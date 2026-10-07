@@ -18,6 +18,15 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'Fog of war cleared for this match.')
     return true
   }
+  if (text === 'god mode') {
+    if (state.godMode) {
+      pushToast(state, 'God Mode is already on.')
+      return true
+    }
+    state.godMode = true
+    pushToast(state, 'God Mode is on for this match.')
+    return true
+  }
   pushToast(state, 'Unknown command.')
   return false
 }

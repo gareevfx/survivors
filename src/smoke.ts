@@ -868,6 +868,39 @@ function clearFogCommandRevealsTheMap(): void {
   assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'clear fog left part of the map dark')
 }
 
+function godModeSavesNorthmark(): void {
+  const state = createMatch(11)
+  const open: Array<[number, number]> = []
+  for (let y = 9; y <= 14; y++) {
+    for (let x = 10; x <= 16; x++) open.push([x, y])
+  }
+  carveGround(state, open)
+  rebuildBlocked(state)
+  const home = makeBuilding(state, 0, 'silo', 10, 10, true)
+  const worker = makeUnit(state, 0, 'porter', 14.5 * TILE, 10.5 * TILE)
+  const foe = makeUnit(state, 1, 'pike', worker.x + 28, worker.y)
+  const sieger = makeUnit(state, 1, 'howler', 13.5 * TILE, 12.5 * TILE)
+  assert(runCommand(state, 'God Mode'), 'God Mode was rejected')
+  assert(state.godMode, 'God Mode did not turn on')
+  const workerHp = worker.hp
+  const homeHp = home.hp
+  const foeHp = foe.hp
+  commandAttack(state, [foe.id], worker.id, 'unit')
+  commandAttack(state, [worker.id], foe.id, 'unit')
+  commandAttack(state, [sieger.id], home.id, 'building')
+  for (let i = 0; i < 5 * 60; i++) step(state, 1 / 60)
+  const workerNow = unitById(state, worker.id)
+  const homeNow = state.buildings.find((building) => building.id === home.id)
+  const foeNow = unitById(state, foe.id)
+  assert(workerNow && workerNow.hp === workerHp, 'a Northmark worker took damage in God Mode')
+  assert(homeNow && homeNow.hp === homeHp, 'a Northmark building took damage in God Mode')
+  assert(!foeNow || foeNow.hp < foeHp, 'God Mode also protected Dunmarch')
+  const fresh = createMatch(12)
+  assert(!fresh.godMode, 'a new match kept God Mode')
+  assert(runCommand(fresh, 'god mode'), 'god mode alias was rejected')
+  assert(fresh.godMode, 'the alias did not turn God Mode on')
+}
+
 function shotsCannotCrossRocks(): void {
   const state = createMatch(8)
   const open: Array<[number, number]> = []
@@ -972,6 +1005,7 @@ aiHaulsTheShortestOpenPath()
 aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
+godModeSavesNorthmark()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
 threeMinersPerDeposit()

@@ -288,6 +288,8 @@ export interface MatchState {
   visible: Uint8Array
   /** When set, fog stays off for the rest of this match. */
   fogCleared: boolean
+  /** When set, Northmark units and buildings take no damage until the next match. */
+  godMode: boolean
   ore: OreNode[]
   rocks: Rock[]
   units: Unit[]

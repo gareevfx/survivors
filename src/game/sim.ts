@@ -691,6 +691,7 @@ function updateProjectiles(state: MatchState, dt: number): void {
 }
 
 function applyHit(state: MatchState, target: Target, damage: number, sourceId: number): void {
+  if (state.godMode && target.owner === 0 && target.targetKind !== 'rock') return
   if (target.targetKind === 'rock') {
     const source = unitById(state, sourceId)
     if (source?.kind !== 'porter') return

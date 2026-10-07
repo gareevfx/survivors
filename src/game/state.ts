@@ -262,6 +262,7 @@ export function createMatch(seed: number): MatchState {
     explored: new Uint8Array(MAP_W * MAP_H),
     visible: new Uint8Array(MAP_W * MAP_H),
     fogCleared: false,
+    godMode: false,
     ore: [],
     rocks: [],
     units: [],
