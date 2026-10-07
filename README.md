@@ -1,4 +1,4 @@
-# Ridgekeep
+# Alternativen
 
 A single-player real-time strategy skirmish in the browser. Northmark and Dunmarch each hold a Castle on a ridge of minerals and rock. Gather minerals, raise a Factory and Silos, train workers, bikes, and tanks, and destroy the enemy Castle.
 

@@ -19,7 +19,7 @@ const idle = document.querySelector<HTMLButtonElement>('#idle')
 const muteButton = document.querySelector<HTMLButtonElement>('#mute')
 
 if (!view || !minimap || !help) {
-  throw new Error('Ridgekeep failed to find its canvas.')
+  throw new Error('Alternativen failed to find its canvas.')
 }
 
 const stage: HTMLCanvasElement = view
@@ -28,7 +28,7 @@ const helpPanel: HTMLElement = help
 const commandForm = document.querySelector<HTMLFormElement>('#console')
 const commandInput = document.querySelector<HTMLInputElement>('#console-input')
 if (!commandForm || !commandInput) {
-  throw new Error('Ridgekeep failed to find its command line.')
+  throw new Error('Alternativen failed to find its command line.')
 }
 const commandBar = commandForm
 const commandField = commandInput
