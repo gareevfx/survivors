@@ -1,8 +1,8 @@
-import { assignMiners, commandAttack, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
+import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { findPath } from './game/pathfind'
 import { step } from './game/sim'
-import { canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
-import { BUILDING_STATS, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, type MatchState } from './game/types'
+import { buildingRect, canPlace, createMatch, isWalkable, makeUnit, rebuildBlocked, unitById } from './game/state'
+import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -56,7 +56,7 @@ function gatherWorks(): void {
   const state = createMatch(4)
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
   let node = state.ore[0]
-  assert(node, 'missing ore')
+  assert(node, 'missing minerals')
   let best = Infinity
   for (const ore of state.ore) {
     const d = (ore.tx * TILE - (porters[0]?.x ?? 0)) ** 2 + (ore.ty * TILE - (porters[0]?.y ?? 0)) ** 2
@@ -73,12 +73,12 @@ function gatherWorks(): void {
   let onTarget = 0
   for (const porter of porters) {
     const id = assignedDeposit(porter)
-    assert(id != null, 'miner was not sent to a deposit')
+    assert(id != null, 'worker was not sent to a deposit')
     if (id === node.id) onTarget += 1
   }
-  assert(onTarget <= 3 && onTarget >= 1, `clicked deposit has ${onTarget} miners`)
+  assert(onTarget <= 3 && onTarget >= 1, `clicked deposit has ${onTarget} workers`)
   for (let i = 0; i < 20 * 30; i++) step(state, 1 / 30)
-  assert(state.oreHeld[0] > STARTING_ORE, `ore did not increase (${state.oreHeld[0]})`)
+  assert(state.oreHeld[0] > STARTING_ORE, `minerals did not increase (${state.oreHeld[0]})`)
 }
 
 function buildAndTrain(): void {
@@ -115,7 +115,14 @@ function buildAndTrain(): void {
   )
 }
 
-function pausedConstructionStillAdvances(): void {
+function distToBuilding(unit: { x: number; y: number }, building: Building): number {
+  const rect = buildingRect(building)
+  const cx = Math.max(rect.x, Math.min(unit.x, rect.x + rect.w))
+  const cy = Math.max(rect.y, Math.min(unit.y, rect.y + rect.h))
+  return Math.hypot(unit.x - cx, unit.y - cy)
+}
+
+function constructionPausesUntilWorkerReturns(): void {
   const state = createMatch(11)
   state.oreHeld[0] = 800
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
@@ -133,16 +140,48 @@ function pausedConstructionStillAdvances(): void {
   assert(placed === null, placed ?? 'place failed')
   const yard = state.buildings.find((building) => building.owner === 0 && building.kind === 'yard' && !building.complete)
   assert(yard, 'yard was not started')
-  for (const unit of state.units) {
-    if (unit.order?.type === 'construct') unit.order = null
+  let worked = false
+  for (let i = 0; i < 20 * 30; i++) {
+    step(state, 1 / 30)
+    if (yard.progress > 0.05) {
+      worked = true
+      break
+    }
   }
-  const before = yard.progress
-  step(state, 1)
-  assert(yard.progress > before, 'paused factory did not gain progress')
-  assert(!yard.complete, 'paused factory finished in one second')
-  const buildSeconds = BUILDING_STATS.yard.buildTime
-  for (let i = 0; i < buildSeconds; i++) step(state, 1)
-  assert(yard.complete, 'paused factory never finished')
+  assert(worked, 'worker never started the factory')
+  const crew = state.units.filter((unit) => unit.order?.type === 'construct' && unit.order.buildingId === yard.id)
+  assert(crew.length > 0, 'no worker stayed on the factory')
+  commandMove(state, crew.map((unit) => unit.id), 40, 40, false)
+  let left = false
+  for (let i = 0; i < 25 * 30; i++) {
+    step(state, 1 / 30)
+    if (crew.every((unit) => distToBuilding(unit, yard) > INTERACT)) {
+      left = true
+      break
+    }
+  }
+  assert(left, 'workers did not leave the factory')
+  const saved = yard.progress
+  assert(saved < 1 && !yard.complete, 'factory finished before the workers left')
+  for (let i = 0; i < 3 * 30; i++) step(state, 1 / 30)
+  assert(yard.progress === saved, 'paused factory gained progress with no worker on site')
+  const pausedPanel = describeSelection({ ...state, selectedBuilding: yard.id, selectedUnits: [] })
+  assert(pausedPanel.includes('paused'), 'paused factory panel omitted the pause')
+  assert(!pausedPanel.includes('still building'), 'paused factory panel still claims it is building')
+  commandConstruct(state, crew.map((unit) => unit.id), yard.id)
+  let resumed = false
+  for (let i = 0; i < 40 * 30; i++) {
+    step(state, 1 / 30)
+    if (yard.progress > saved) {
+      resumed = true
+      break
+    }
+  }
+  assert(resumed, 'returning worker did not resume the factory')
+  assert(yard.progress < 1 || yard.complete, 'resume reset or skipped the saved progress')
+  for (let i = 0; i < 40 * 30 && !yard.complete; i++) step(state, 1 / 30)
+  assert(yard.complete, 'factory never finished after the worker returned')
+  assert(yard.progress === 1, 'finished factory did not keep a full bar')
 }
 
 function howlerCannotBreakRock(): void {
@@ -279,13 +318,13 @@ function porterBreaksRockWhenOrdered(): void {
   commandAttack(state, [porter.id], rock.id, 'rock')
   for (let i = 0; i < 4 * 60; i++) step(state, 1 / 60)
   const still = state.rocks.find((entry) => entry.id === rock.id)
-  assert((still?.hp ?? 0) < before, 'ordered porter did not damage the rock')
+  assert((still?.hp ?? 0) < before, 'ordered worker did not damage the rock')
 }
 
 function aiPortersBreakRockForOre(): void {
   const state = createMatch(9)
   const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
-  assert(node, 'no southern ore')
+  assert(node, 'no southern minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
   }
@@ -299,7 +338,7 @@ function aiPortersBreakRockForOre(): void {
   }
   rebuildBlocked(state)
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
-  assert(porters.length > 0, 'Dunmarch has no porters')
+  assert(porters.length > 0, 'Dunmarch has no workers')
   let placed = 0
   for (let tx = 4; tx < MAP_W - 4 && placed < porters.length; tx++) {
     if (!isWalkable(state, tx, 20)) continue
@@ -314,9 +353,9 @@ function aiPortersBreakRockForOre(): void {
     porter.goalY = null
     placed += 1
   }
-  assert(placed > 0, 'no open ground for Dunmarch porters')
+  assert(placed > 0, 'no open ground for Dunmarch workers')
   const origin = porters[0]
-  assert(origin, 'missing porter')
+  assert(origin, 'missing worker')
   let south: { tx: number; ty: number } | null = null
   for (let ty = wallY + 1; ty < MAP_H && !south; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
@@ -329,7 +368,7 @@ function aiPortersBreakRockForOre(): void {
   assert(south, 'no open ground south of the wall')
   assert(
     findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty) === null,
-    'ore stayed reachable through the wall',
+    'minerals stayed reachable through the wall',
   )
   state.oreHeld[1] = 40
   state.aiAttacking = false
@@ -337,7 +376,7 @@ function aiPortersBreakRockForOre(): void {
   const breaker = porters
     .map((unit) => unitById(state, unit.id))
     .find((unit) => unit?.order?.type === 'attack' && unit.order.kind === 'rock')
-  assert(breaker?.order?.type === 'attack' && breaker.order.kind === 'rock', 'porters did not attack a rock to reach ore')
+  assert(breaker?.order?.type === 'attack' && breaker.order.kind === 'rock', 'workers did not attack a rock to reach minerals')
   const targetId = breaker.order.targetId
   let broke = false
   for (let i = 0; i < 30 * 60; i++) {
@@ -347,12 +386,12 @@ function aiPortersBreakRockForOre(): void {
       break
     }
   }
-  assert(broke, 'porters did not break the ore blockage')
+  assert(broke, 'workers did not break the minerals blockage')
   for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
   const resumed = unitById(state, breaker.id)
   assert(
     resumed?.order?.type === 'gather' || !(resumed?.order?.type === 'attack' && resumed.order.kind === 'rock'),
-    'porter kept sieging after the ore route opened',
+    'worker kept sieging after the minerals route opened',
   )
 }
 
@@ -367,12 +406,12 @@ function assignedDeposit(unit: { order: { type: string; nodeId?: number; kind?: 
 function threeMinersPerDeposit(): void {
   const state = createMatch(4)
   const node = state.ore.find((entry) => entry.amount > 0)
-  assert(node, 'missing ore')
+  assert(node, 'missing minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
   }
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
-  assert(porters.length >= 4, `need 4 miners, have ${porters.length}`)
+  assert(porters.length >= 4, `need 4 workers, have ${porters.length}`)
   commandGather(
     state,
     porters.map((unit) => unit.id),
@@ -380,14 +419,14 @@ function threeMinersPerDeposit(): void {
   )
   const assigned = porters.filter((unit) => assignedDeposit(unit) === node.id)
   const waiting = porters.filter((unit) => unit.order == null && unit.nodeMemory === 0)
-  assert(assigned.length === 3, `expected 3 miners on the deposit, got ${assigned.length}`)
+  assert(assigned.length === 3, `expected 3 workers on the deposit, got ${assigned.length}`)
   assert(waiting.length === porters.length - 3, `expected extras to wait, got ${waiting.length}`)
   const victim = assigned[0]
-  assert(victim, 'missing assigned miner')
+  assert(victim, 'missing assigned worker')
   victim.hp = 0
   step(state, 1 / 60)
   const filled = waiting.filter((unit) => assignedDeposit(unitById(state, unit.id) ?? { order: null }) === node.id)
-  assert(filled.length === 1, 'waiting miner did not take the slot freed by a death')
+  assert(filled.length === 1, 'waiting worker did not take the slot freed by a death')
 }
 
 function minersSpreadToNearestOpenDeposit(): void {
@@ -405,23 +444,23 @@ function minersSpreadToNearestOpenDeposit(): void {
   const counts = new Map<number, number>()
   for (const porter of porters) {
     const id = assignedDeposit(porter)
-    assert(id != null, 'miner was not assigned a deposit')
+    assert(id != null, 'worker was not assigned a deposit')
     counts.set(id, (counts.get(id) ?? 0) + 1)
   }
-  for (const count of counts.values()) assert(count <= 3, `a deposit has ${count} miners`)
-  assert(counts.get(target.id) === 3, `clicked deposit has ${counts.get(target.id)} miners`)
-  assert(counts.size >= 2, 'extra miners stayed on the full deposit')
+  for (const count of counts.values()) assert(count <= 3, `a deposit has ${count} workers`)
+  assert(counts.get(target.id) === 3, `clicked deposit has ${counts.get(target.id)} workers`)
+  assert(counts.size >= 2, 'extra workers stayed on the full deposit')
 }
 
 function aiUsesTheSameMinerCap(): void {
   const state = createMatch(2)
   const node = state.ore.find((entry) => entry.amount > 0)
-  assert(node, 'missing ore')
+  assert(node, 'missing minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
   }
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
-  assert(porters.length >= 4, `Dunmarch needs 4 miners, has ${porters.length}`)
+  assert(porters.length >= 4, `Dunmarch needs 4 workers, has ${porters.length}`)
   for (const porter of porters) {
     porter.order = null
     porter.nodeMemory = -1
@@ -429,25 +468,35 @@ function aiUsesTheSameMinerCap(): void {
   }
   assignMiners(state, porters, null)
   const onNode = porters.filter((unit) => assignedDeposit(unit) === node.id)
-  assert(onNode.length === 3, `Dunmarch put ${onNode.length} miners on one deposit`)
+  assert(onNode.length === 3, `Dunmarch put ${onNode.length} workers on one deposit`)
 }
 
 function oreSelectionShowsAmount(): void {
   const state = createMatch(3)
   const node = state.ore.find((entry) => entry.amount > 0)
-  assert(node, 'missing ore')
+  assert(node, 'missing minerals')
   state.selectedOre = node.id
   const text = describeSelection(state)
-  assert(text.includes('Ore'), 'ore panel missing title')
-  assert(text.includes(`${node.amount} remaining`), `ore panel missing amount: ${text}`)
+  assert(text.includes('Minerals'), 'minerals panel missing title')
+  assert(!text.includes('>Ore<'), 'minerals panel still says Ore')
+  assert(text.includes(`${node.amount} remaining`), `minerals panel missing amount: ${text}`)
+  const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(worker, 'missing worker')
+  state.selectedOre = null
+  state.selectedUnits = [worker.id]
+  const workerPanel = describeSelection(state)
+  assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Worker', 'selection does not say Worker')
+  assert(workerPanel.includes('minerals'), 'worker panel does not say minerals')
+  state.selectedUnits = []
+  state.selectedOre = node.id
   node.amount = 80
-  assert(describeSelection(state).includes('80 remaining'), 'ore panel did not follow the amount')
+  assert(describeSelection(state).includes('80 remaining'), 'minerals panel did not follow the amount')
 }
 
 function minersClearRockToGather(): void {
   const state = createMatch(9)
   const node = state.ore.find((entry) => entry.ty > 28 && entry.tx < 18)
-  assert(node, 'no southern ore')
+  assert(node, 'no southern minerals')
   for (const ore of state.ore) {
     if (ore.id !== node.id) ore.amount = 0
   }
@@ -463,14 +512,14 @@ function minersClearRockToGather(): void {
   for (let tx = 4; tx < MAP_W - 4 && !spot; tx++) {
     if (isWalkable(state, tx, 20)) spot = { tx, ty: 20 }
   }
-  assert(spot, 'no open ground north of the ore wall')
+  assert(spot, 'no open ground north of the minerals wall')
   const miner = makeUnit(state, 0, 'porter', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
   const tank = makeUnit(state, 0, 'howler', (spot.tx + 1.5) * TILE, (spot.ty + 0.5) * TILE)
   commandGather(state, [miner.id, tank.id], node.id)
   const ordered = unitById(state, miner.id)
   assert(
     ordered?.order?.type === 'attack' && ordered.order.kind === 'rock' && ordered.order.resumeNode === node.id,
-    'miner did not attack the rock sealing the ore',
+    'worker did not attack the rock sealing the minerals',
   )
   const tankOrder = unitById(state, tank.id)?.order
   assert(!(tankOrder?.type === 'attack' && tankOrder.kind === 'rock'), 'tank was sent to break rock')
@@ -479,13 +528,13 @@ function minersClearRockToGather(): void {
   for (let i = 0; i < 40 * 60; i++) {
     step(state, 1 / 60)
     const tankNow = unitById(state, tank.id)?.order
-    assert(!(tankNow?.type === 'attack' && tankNow.kind === 'rock'), 'tank attacked a rock while miners gathered')
+    assert(!(tankNow?.type === 'attack' && tankNow.kind === 'rock'), 'tank attacked a rock while workers gathered')
     if (!state.rocks.some((rock) => rock.id === targetId)) {
       broke = true
       break
     }
   }
-  assert(broke, 'miner did not break the rock sealing the ore')
+  assert(broke, 'worker did not break the rock sealing the minerals')
   let resumed = false
   for (let i = 0; i < 3 * 60; i++) {
     step(state, 1 / 60)
@@ -495,7 +544,7 @@ function minersClearRockToGather(): void {
       break
     }
   }
-  assert(resumed, 'miner did not go back to gathering after the rock fell')
+  assert(resumed, 'worker did not go back to gathering after the rock fell')
 }
 
 function aiIgnoresRocksOnOpenRoute(): void {
@@ -598,7 +647,7 @@ routeExists()
 gatherWorks()
 buildAndTrain()
 howlerCannotBreakRock()
-pausedConstructionStillAdvances()
+constructionPausesUntilWorkerReturns()
 aiBreaksBlockingRock()
 porterBreaksRockWhenOrdered()
 aiPortersBreakRockForOre()

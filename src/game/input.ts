@@ -1,6 +1,7 @@
 import { clampCamera, screenToWorld, worldToScreen, type Camera } from './camera'
 import {
   commandAttack,
+  commandConstruct,
   commandGather,
   commandMove,
   commandRally,
@@ -87,7 +88,7 @@ export function attachInput(opts: {
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
     const keepOk = keep?.owner === 0 && keep.kind === 'keep'
     if (!porters && !keepOk && !state.units.some((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)) {
-      pushToast(state, 'Select a miner or the Castle first.')
+      pushToast(state, 'Select a worker or the Castle first.')
       return
     }
     state.placement = state.placement === kind ? null : kind
@@ -254,6 +255,13 @@ function clearSelection(state: MatchState): void {
     }
     if (hit?.type === 'building') {
       const building = buildingById(state, hit.id)
+      if (building && building.owner === 0 && !building.complete) {
+        const workers = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter' && unitById(state, id)?.hp)
+        if (workers) {
+          commandConstruct(state, state.selectedUnits, hit.id)
+          return
+        }
+      }
       if (building && building.owner === 1) {
         commandAttack(state, state.selectedUnits, hit.id, 'building')
         return

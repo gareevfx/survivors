@@ -77,7 +77,7 @@ function selectIdlePorters(): void {
     .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
     .map((unit) => unit.id)
   if (!ids.length) {
-    pushToast(match, 'Every miner is already busy.')
+    pushToast(match, 'Every worker is already busy.')
     return
   }
   match.selectedUnits = ids

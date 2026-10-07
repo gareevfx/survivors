@@ -278,6 +278,22 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
   }
 }
 
+/** Send workers back to an unfinished building. Progress already on the site is kept. */
+export function commandConstruct(state: MatchState, ids: number[], buildingId: number): void {
+  if (state.outcome) return
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || building.complete) return
+  const crew = living(state, ids).filter((unit) => unit.kind === 'porter' && unit.owner === building.owner)
+  if (!crew.length) return
+  for (const unit of crew) {
+    unit.order = { type: 'construct', buildingId: building.id }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    stopMoving(unit)
+  }
+  noteOrder(state, crew)
+}
+
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
   if (state.outcome) return
   const building = buildingById(state, buildingId)
@@ -293,11 +309,11 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
-  if (building.kind === 'keep' && kind !== 'porter') return 'The Castle trains miners'
+  if (building.kind === 'keep' && kind !== 'porter') return 'The Castle trains workers'
   if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains fighters'
   if (building.kind === 'silo') return 'A silo does not train anyone'
   const stats = UNIT_STATS[kind]
-  if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} ore`
+  if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} minerals`
   if (state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
     return 'Population cap reached — raise a Silo'
   }
@@ -347,7 +363,7 @@ export function tryPlace(
   if (state.outcome) return 'The battle is over'
   if (kind === 'keep') return 'The Castle is already standing'
   const stats = BUILDING_STATS[kind]
-  if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} ore`
+  if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} minerals`
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
 
   const porters = state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)
@@ -360,9 +376,12 @@ export function tryPlace(
     const db = (b.x - (tx + stats.w / 2) * TILE) ** 2 + (b.y - (ty + stats.h / 2) * TILE) ** 2
     return da - db
   })
-  if (!choices.length) return 'You need a miner to build'
-  const limit = preferred.size === 0 ? 1 : Math.min(2, choices.length)
-  const crew = choices.slice(0, limit)
+  if (!choices.length) return 'You need a worker to build'
+  // A new site with nobody selected takes a free worker. Builders stay on the job they already have.
+  const free = preferred.size === 0 ? choices.filter((unit) => unit.order?.type !== 'construct') : []
+  const ranked = free.length ? free : choices
+  const limit = preferred.size === 0 ? 1 : Math.min(2, ranked.length)
+  const crew = ranked.slice(0, limit)
 
   state.oreHeld[owner] -= stats.cost
   const building = makeBuilding(state, owner, kind, tx, ty, false)
@@ -409,7 +428,7 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   if (state.selectedBuilding === building.id) state.selectedBuilding = null
   rebuildBlocked(state)
   recomputeSupply(state)
-  if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} ore.`)
+  if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} minerals.`)
 }
 
 export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo'): boolean {

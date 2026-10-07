@@ -272,7 +272,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   ctx.fillStyle = '#f6e7b0'
   ctx.font = '12px Georgia, serif'
   ctx.textAlign = 'center'
-  ctx.fillText('Right-click ore', best.x, best.y - 20)
+  ctx.fillText('Right-click minerals', best.x, best.y - 20)
   ctx.restore()
 }
 

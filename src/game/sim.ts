@@ -478,18 +478,16 @@ function advanceConstruct(state: MatchState, dt: number): void {
       if (unit.hp <= 0 || unit.order?.type !== 'construct' || unit.order.buildingId !== building.id) return false
       return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
     })
-    // No miner on site is the "Paused" label. The site still builds at the one-miner rate.
-    // Extra miners on site speed it up; the first miner matches the unattended rate.
-    const speed = crew.length === 0 ? 1 : 1 + (crew.length - 1) * 0.6
+    // A site with no worker in range is paused. Progress stays where it is until someone returns.
+    if (!crew.length) continue
+    const speed = 1 + (crew.length - 1) * 0.6
     building.progress += (dt * speed) / BUILDING_STATS[building.kind].buildTime
     if (building.progress < 1) continue
     building.progress = 1
     building.complete = true
-    for (const unit of state.units) {
-      if (unit.order?.type === 'construct' && unit.order.buildingId === building.id) {
-        unit.order = null
-        stopMoving(unit)
-      }
+    for (const unit of crew) {
+      unit.order = null
+      stopMoving(unit)
     }
     recomputeSupply(state)
     if (building.owner === 0) {

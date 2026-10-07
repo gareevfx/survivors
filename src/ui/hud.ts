@@ -66,7 +66,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   if (mode) {
     if (state.placement) {
       const stats = BUILDING_STATS[state.placement]
-      mode.textContent = `Placing ${stats.label} (${stats.cost} ore). Left-click the map. Right-click cancels.`
+      mode.textContent = `Placing ${stats.label} (${stats.cost} minerals). Left-click the map. Right-click cancels.`
       mode.classList.remove('hidden')
     } else if (state.attackMoveArmed) {
       mode.textContent = 'Attack-move: left-click the ground. Units fight anything they meet. Esc cancels.'
@@ -135,7 +135,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           id: 'cancel-build',
           label: 'Cancel',
           detail: '75% back',
-          title: 'Cancel construction and refund most of the ore',
+          title: 'Cancel construction and refund most of the minerals',
           disabled: false,
           run: () => cancelBuilding(state, building.id),
         },
@@ -213,8 +213,8 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
     id: `place-${kind}`,
     label: stats.label,
     hotkey: kind === 'yard' ? 'Y' : 'L',
-    detail: `${stats.cost} ore`,
-    title: afford ? stats.blurb : `Need ${stats.cost} ore`,
+    detail: `${stats.cost} minerals`,
+    title: afford ? stats.blurb : `Need ${stats.cost} minerals`,
     disabled: !afford,
     armed: state.placement === kind,
     run: () => actions.armPlace(kind),
@@ -226,13 +226,13 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   const afford = state.oreHeld[0] >= stats.cost
   const room = state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
   let title = stats.blurb
-  if (!afford) title = `Need ${stats.cost} ore`
+  if (!afford) title = `Need ${stats.cost} minerals`
   else if (!room) title = 'Population cap reached — raise a Silo'
   return {
     id: `train-${kind}`,
     label: stats.label,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : 'J',
-    detail: `${stats.cost} ore · ${stats.supply} pop`,
+    detail: `${stats.cost} minerals · ${stats.supply} pop`,
     title,
     disabled: !afford || !room,
     run: () => {
@@ -249,7 +249,7 @@ function paintCommands(commands: Cmd[]): void {
   if (!commands.length) {
     const empty = document.createElement('p')
     empty.className = 'cmd-empty'
-    empty.textContent = 'Select miners, the Castle, or a Factory.'
+    empty.textContent = 'Select workers, the Castle, or a Factory.'
     root.append(empty)
     return
   }
@@ -291,18 +291,18 @@ export function describeSelection(state: MatchState): string {
         return index === 0 ? `${label} ${Math.ceil(job.remaining)}s` : label
       })
       .join(', ')
+    const raising = state.units.some(
+      (unit) => unit.hp > 0 && unit.order?.type === 'construct' && unit.order.buildingId === building.id,
+    )
     const status = !building.complete
-      ? `Construction ${Math.floor(building.progress * 100)}%${
-          state.units.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id)
-            ? ''
-            : ' · paused, still building'
-        }`
+      ? `Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
       : stats.blurb
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
       <h2>${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
+      ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Worker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
       ${building.complete ? '<p class="meta">Right-click the map to set the rally point.</p>' : ''}
     `
@@ -312,7 +312,7 @@ export function describeSelection(state: MatchState): string {
   if (ore && state.selectedUnits.length === 0) {
     return `
       <p class="eyebrow">Northmark</p>
-      <h2>Ore</h2>
+      <h2>Minerals</h2>
       <p class="meta">${ore.amount} remaining</p>
     `
   }
@@ -324,7 +324,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select miners and right-click ore. Up to 3 miners work each patch; extras spread to the nearest open one. Build a Factory, train bikes and tanks, and destroy the red Castle. Miners and bikes break gray rock: select them and right-click the stone. Click an ore patch to see how much is left.</p>
+      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest open one. Build a Factory, train bikes and tanks, and destroy the red Castle. Workers and bikes break gray rock: select them and right-click the stone. Click a minerals patch to see how much is left.</p>
     `
   }
   if (units.length === 1) {
@@ -332,7 +332,7 @@ export function describeSelection(state: MatchState): string {
     if (!unit) return ''
     const stats = UNIT_STATS[unit.kind]
     const pct = Math.max(0, unit.hp / stats.hp)
-    const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} ore.` : ''
+    const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} minerals.` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
       <h2>${stats.label}</h2>

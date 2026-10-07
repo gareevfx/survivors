@@ -1,6 +1,6 @@
 # Ridgekeep
 
-A single-player real-time strategy skirmish in the browser. Northmark and Dunmarch each hold a Castle on a ridge of ore and rock. Gather ore, raise a Factory and Silos, train miners, bikes, and tanks, and destroy the enemy Castle.
+A single-player real-time strategy skirmish in the browser. Northmark and Dunmarch each hold a Castle on a ridge of minerals and rock. Gather minerals, raise a Factory and Silos, train workers, bikes, and tanks, and destroy the enemy Castle.
 
 The factions, names, and shapes are original. The map is drawn with canvas geometry — there is no borrowed art.
 
@@ -24,14 +24,14 @@ No account, server, or network connection is required after install.
 
 ## How to play
 
-You start with a Castle, four miners, and a little ore — not enough for a Factory. The red Dunmarch base is across the ridge and will mine, build, and march on you.
+You start with a Castle, four workers, and a small store of minerals — not enough for a Factory. The red Dunmarch base is across the ridge and will gather, build, and march on you.
 
-1. Select the miners (click or drag a box) and right-click a gold ore patch. Up to three miners work that patch. Any extras walk to the nearest patch that still has room. If gray rock seals a patch, those miners break it, then haul.
-2. They mine, walk the ore back to your Castle, and repeat. The count is in the top bar.
-3. Select a miner (or the Castle) and place a **Factory**. It keeps building even while the site reads **Paused** (no miner standing on it). A second miner on site speeds the work.
+1. Select the workers (click or drag a box) and right-click a gold minerals patch. Up to three workers work that patch. Any extras walk to the nearest patch that still has room. If gray rock seals a patch, those workers break it, then haul.
+2. They gather, walk the minerals back to your Castle, and repeat. The count is in the top bar.
+3. Select a worker (or the Castle) and place a **Factory**. The site rises only while a worker stands on it. Order that worker away and the label switches to **Paused** with no further progress. The work already done is kept. Select the worker and right-click the site to resume. A second worker on the site speeds the work.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
 5. Select the Factory and train **bikes** (short reach) and **tanks** (long reach).
-6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with miners or bikes to break it — tanks cannot — and the stone stops blocking once it shatters. Left-click an ore patch to see how much is left. Miners sent to a sealed patch break the rocks in the way, then haul.
+6. Right-click enemies to attack, or press **Q** and left-click for attack-move. Right-click gray rock with workers or bikes to break it — tanks cannot — and the stone stops blocking once it shatters. Left-click a minerals patch to see how much is left. Workers sent to a sealed patch break the rocks in the way, then haul.
 7. Destroy the Dunmarch Castle to win. If your Castle falls, the skirmish is lost.
 
 ## Controls
@@ -43,11 +43,11 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 | Move | Right-click ground, or the Move button then left-click |
 | Attack | Right-click an enemy or gray rock |
 | Attack-move | `Q`, then left-click |
-| Gather | Right-click ore with miners selected. At most 3 miners per patch; extras take the nearest open patch. They break gray rock that seals their patch. |
-| Ore amount | Left-click an ore patch |
+| Gather | Right-click minerals with workers selected. At most 3 workers per patch; extras take the nearest open patch. They break gray rock that seals their patch. |
+| Minerals amount | Left-click a minerals patch |
 | Stop | `X` |
 | Factory / Silo | `Y` / `L`, then left-click the map |
-| Train miner | Select the Castle, `P` |
+| Train worker | Select the Castle, `P` |
 | Train bike / tank | Select the Factory, `K` / `J` |
 | Rally point | Select a building, right-click the ground |
 | Cancel placement or clear selection | `Esc` or right-click |
@@ -56,7 +56,7 @@ You start with a Castle, four miners, and a little ore — not enough for a Fact
 | Zoom | Mouse wheel |
 | Jump camera | Click the minimap |
 | Center camera | `Space` (selection, or your Castle) |
-| Idle miners | `F` or the Idle button |
+| Idle workers | `F` or the Idle button |
 | Control groups | `Ctrl+1`–`9` to save, `1`–`9` to recall. Tap the number again to center. |
 | Mute | `M` |
 | Controls overlay | `?` or `F1` |
@@ -66,7 +66,7 @@ Touch: drag pans the map, a tap selects, a tap on open ground moves the selectio
 ## Known limitations
 
 - No fog of war, save games, or multiplayer.
-- One map, one ore type, and one enemy script. Dunmarch mines, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends bikes to break the stone (miners, when it has no free bike), then resumes the attack. Tanks never damage rock. The same rule opens ore: a sealed haul is always cleared by miners, and a long detour is cleared only when the ore bank or the ore they can already reach is under 80. Each deposit takes at most 3 miners from one side; the rest spread to the nearest deposit with room. Your bikes break rock only when you right-click it. Your miners do that too, and they also break rock that seals a patch you told them to gather.
-- Units slide around each other instead of hard-blocking. Buildings, rock, and ore block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
-- Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Miners shoot back at point-blank range but keep hauling unless they were idle.
+- One map, one minerals type, and one enemy script. Dunmarch gathers, builds a Factory and Silos, trains fighters, and attack-moves once it has a small force or once you show up at its Castle. If gray rock seals that march, or forces a detour of about a dozen tiles, Dunmarch sends bikes to break the stone (workers, when it has no free bike), then resumes the attack. Tanks never damage rock. The same rule opens minerals: a sealed haul is always cleared by workers, and a long detour is cleared only when the minerals bank or the minerals they can already reach is under 80. Each deposit takes at most 3 workers from one side; the rest spread to the nearest deposit with room. Your bikes break rock only when you right-click it. Your workers do that too, and they also break rock that seals a patch you told them to gather. An unfinished building gains progress only while a worker is constructing on that site.
+- Units slide around each other instead of hard-blocking. Buildings, rock, and minerals block movement until a rock is destroyed. Pathing is grid A*. Ordered attacks hit gray rock; idle units and attack-move do not seek stones out.
+- Combat is automatic once units are told to attack, attack-move, or (for fighters) left idle near an enemy. Workers shoot back at point-blank range but keep hauling unless they were idle.
 - Placeholder shapes stand in for sprites and audio is a few synthesized tones.
