@@ -8,8 +8,8 @@ export interface OreSpawn {
 }
 
 function protect(tx: number, ty: number): boolean {
-  const player = tx >= 2 && tx <= 17 && ty >= 29 && ty <= 45
-  const enemy = tx >= MAP_W - 18 && tx <= MAP_W - 3 && ty >= 2 && ty <= 18
+  const player = tx >= 2 && tx <= 18 && ty >= 28 && ty <= 42
+  const enemy = tx >= MAP_W - 19 && tx <= MAP_W - 3 && ty >= 2 && ty <= 16
   return player || enemy
 }
 
@@ -66,7 +66,7 @@ export function generateBattlefield(seed: number): { tiles: Uint8Array; ore: Ore
   const rng = mulberry32(seed)
   const tiles = new Uint8Array(MAP_W * MAP_H)
 
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 52; i++) {
     const cx = 2 + Math.floor(rng() * (MAP_W - 4))
     const cy = 2 + Math.floor(rng() * (MAP_H - 4))
     const rad = 1.15 + rng() * 2.3
@@ -92,42 +92,73 @@ export function generateBattlefield(seed: number): { tiles: Uint8Array; ore: Ore
     if (!ore.some((o) => o.tx === tx && o.ty === ty)) ore.push({ tx, ty })
   }
 
-  const home: Array<[number, number]> = [
-    [8, 33],
-    [9, 33],
-    [10, 33],
-    [9, 32],
-    [7, 34],
-    [11, 34],
-    [4, 37],
-    [4, 38],
-    [3, 36],
-    [5, 36],
-    [5, 39],
+  const clusters: Array<Array<[number, number]>> = [
+    [
+      [12, 30],
+      [13, 30],
+      [14, 30],
+      [12, 31],
+      [13, 31],
+      [14, 31],
+      [12, 32],
+      [13, 32],
+    ],
+    [
+      [22, 33],
+      [23, 33],
+      [24, 33],
+      [22, 34],
+      [23, 34],
+      [24, 34],
+    ],
+    [
+      [28, 8],
+      [29, 8],
+      [30, 8],
+      [28, 9],
+      [29, 9],
+    ],
+    [
+      [30, 36],
+      [31, 36],
+      [32, 36],
+      [30, 37],
+      [31, 37],
+    ],
+    [
+      [36, 14],
+      [37, 14],
+      [38, 14],
+      [36, 15],
+      [37, 15],
+    ],
+    [
+      [36, 28],
+      [37, 28],
+      [38, 28],
+      [36, 29],
+      [37, 29],
+    ],
+    [
+      [46, 18],
+      [47, 18],
+      [48, 18],
+      [46, 19],
+      [47, 19],
+      [48, 19],
+      [47, 20],
+      [48, 20],
+    ],
   ]
-  for (const [x, y] of home) {
-    add(x, y)
-    add(MAP_W - 1 - x, MAP_H - 1 - y)
+  for (const cluster of clusters) {
+    for (const [x, y] of cluster) {
+      add(x, y)
+      add(MAP_W - 1 - x, MAP_H - 1 - y)
+    }
   }
 
-  const center: Array<[number, number]> = [
-    [23, 23],
-    [24, 23],
-    [23, 24],
-    [24, 24],
-    [22, 23],
-    [25, 23],
-    [23, 22],
-    [24, 22],
-    [23, 25],
-    [24, 25],
-    [22, 24],
-    [25, 24],
-  ]
-  for (const [x, y] of center) add(x, y)
-
-  const startX = PLAYER_KEEP_TX + 1
-  const startY = PLAYER_KEEP_TY + 5
+  const startX = PLAYER_KEEP_TX + 4
+  const startY = PLAYER_KEEP_TY + 4
   const goalX = MAP_W - 1 - startX
   const goalY = MAP_H - 1 - startY
   tiles[startY * MAP_W + startX] = 0

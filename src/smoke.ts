@@ -4,7 +4,7 @@ import { findPath } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
-import { tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
+import { aiTileExplored, depositKnown, objectInSight, tileExplored, tileVisible, unitSeen, updateVision } from './game/vision'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -269,6 +269,13 @@ function aiBreaksBlockingRock(): void {
   const howler = makeUnit(state, 1, 'howler', (spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)
   const before = findPath(state.blocked, MAP_W, MAP_H, spot.tx, spot.ty, spot.tx, wallY + 3)
   assert(before === null, 'wall did not seal the march')
+  const playerKeep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(playerKeep, 'missing the player castle to scout')
+  state.aiSpotted.push({
+    id: playerKeep.id,
+    x: (playerKeep.tx + 1.5) * TILE,
+    y: (playerKeep.ty + 1.5) * TILE,
+  })
   state.aiAttacking = true
   step(state, 0.5)
   const howlerOrder = unitById(state, howler.id)?.order
@@ -283,7 +290,7 @@ function aiBreaksBlockingRock(): void {
   const target = state.rocks.find((rock) => rock.id === targetId)
   assert(target, 'rock order pointed at nothing')
   let broke = false
-  for (let i = 0; i < 40 * 60; i++) {
+  for (let i = 0; i < 70 * 60; i++) {
     step(state, 1 / 60)
     const stillHowler = unitById(state, howler.id)?.order
     const stillPike = unitById(state, pike.id)?.order
@@ -336,6 +343,7 @@ function workersBreakRockToReachMinerals(): void {
     if (ore.id !== node.id) ore.amount = 0
   }
   node.amount = 420
+  state.aiExplored[node.ty * MAP_W + node.tx] = 1
   const wallY = 24
   for (let tx = 0; tx < MAP_W; tx++) {
     if (footprintBlocks(state, tx, wallY)) continue
@@ -485,6 +493,7 @@ function aiUsesTheSameMinerCap(): void {
     porter.nodeMemory = -1
     porter.cargo = 0
   }
+  state.aiExplored[node.ty * MAP_W + node.tx] = 1
   assignMiners(state, porters, null)
   const onNode = porters.filter((unit) => assignedDeposit(unit) === node.id)
   assert(onNode.length === 3, `Dunmarch put ${onNode.length} workers on one deposit`)
@@ -750,6 +759,8 @@ function aiHaulsTheShortestOpenPath(): void {
   const far = { id: state.nextId++, tx: 10, ty: 18, amount: 420 }
   const near = { id: state.nextId++, tx: 14, ty: 10, amount: 420 }
   state.ore.push(far, near)
+  state.aiExplored[far.ty * MAP_W + far.tx] = 1
+  state.aiExplored[near.ty * MAP_W + near.tx] = 1
   rebuildBlocked(state)
   const worker = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
   assert(worker, 'missing Dunmarch worker')
@@ -795,6 +806,7 @@ function aiBreaksRockClosestToMinerals(): void {
   for (const node of state.ore) node.amount = 0
   const node = { id: state.nextId++, tx: 10, ty: 18, amount: 420 }
   state.ore.push(node)
+  state.aiExplored[node.ty * MAP_W + node.tx] = 1
   rebuildBlocked(state)
   const nearRock = state.rocks.find((rock) => rock.tx === 10 && rock.ty === 13)
   const farRock = state.rocks.find((rock) => rock.tx === 10 && rock.ty === 16)
@@ -847,6 +859,8 @@ function fogHidesUnexploredGround(): void {
   assert(!unitSeen(state, foe), 'the enemy stayed visible after the scout left')
   assert(tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'explored ground was forgotten')
   assert(!tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'abandoned ground stayed lit')
+  assert(!objectInSight(state, enemy.tx + 1, enemy.ty + 1), 'an object on shrouded ground stayed visible')
+  assert(!aiTileExplored(state, keep.tx + 1, keep.ty + 1), 'Dunmarch started with a view of Northmark')
 }
 
 function clearFogCommandRevealsTheMap(): void {
@@ -860,6 +874,8 @@ function clearFogCommandRevealsTheMap(): void {
   assert(state.fogCleared, 'the command did not mark fog cleared')
   assert(tileVisible(state, 0, 0) && tileExplored(state, MAP_W - 1, MAP_H - 1), 'a corner of the map stayed hidden')
   assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed hidden after the command')
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home && !aiTileExplored(state, home.tx + 1, home.ty + 1), 'Clear Fog of War also revealed the map for Dunmarch')
   step(state, 0.5)
   assert(state.fogCleared && tileVisible(state, enemy.tx, enemy.ty), 'fog returned after the command')
   const again = createMatch(2)
@@ -1000,6 +1016,8 @@ function stuckWorkerRetargets(): void {
   const near = { id: state.nextId++, tx: 21, ty: 21, amount: 420 }
   const far = { id: state.nextId++, tx: 31, ty: 21, amount: 420 }
   state.ore.push(near, far)
+  state.explored[near.ty * MAP_W + near.tx] = 1
+  state.explored[far.ty * MAP_W + far.tx] = 1
   rebuildBlocked(state)
   const worker = makeUnit(state, 0, 'porter', 8.5 * TILE, 8.5 * TILE)
   commandGather(state, [worker.id], near.id)
@@ -1028,6 +1046,53 @@ function stuckWorkerRetargets(): void {
     order?.type === 'construct' && order.buildingId === closer.id,
     'stuck builder did not switch to the nearer site',
   )
+}
+
+function wideMapHidesObjectsAndMakesDunmarchScout(): void {
+  assert(MAP_W * 9 === MAP_H * 16, `map is ${MAP_W}x${MAP_H}, not 16:9`)
+  const state = createMatch(1)
+  assert(state.ore.length >= 40, `expected more mineral patches, saw ${state.ore.length}`)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles')
+  const known = state.ore.filter((node) => depositKnown(state, 0, node.tx, node.ty))
+  const hidden = state.ore.filter((node) => !depositKnown(state, 0, node.tx, node.ty))
+  const aiKnown = state.ore.filter((node) => depositKnown(state, 1, node.tx, node.ty))
+  const aiHidden = state.ore.filter((node) => !depositKnown(state, 1, node.tx, node.ty))
+  assert(known.length >= 4, `Northmark starts with ${known.length} minerals in sight`)
+  assert(hidden.length >= 8, 'Northmark can already see every mineral')
+  assert(aiKnown.length >= 4, `Dunmarch starts with ${aiKnown.length} minerals in sight`)
+  assert(aiHidden.length >= 8, 'Dunmarch can already see every mineral')
+  assert(!aiTileExplored(state, keep.tx + 1, keep.ty + 1), 'Dunmarch starts knowing the player castle')
+  const shrouded = hidden[0]
+  assert(shrouded, 'missing a hidden mineral')
+  state.explored[shrouded.ty * MAP_W + shrouded.tx] = 1
+  assert(tileExplored(state, shrouded.tx, shrouded.ty), 'revealing a mineral did not mark the ground')
+  assert(!objectInSight(state, shrouded.tx, shrouded.ty), 'a mineral under the shroud is still shown')
+  assert(depositKnown(state, 0, shrouded.tx, shrouded.ty), 'a revealed mineral was forgotten for gathering')
+
+  const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter')
+  assert(worker, 'missing worker')
+  for (const node of state.ore) node.amount = 0
+  const seen = { id: state.nextId++, tx: 16, ty: 38, amount: 400 }
+  const unseen = { id: state.nextId++, tx: 50, ty: 22, amount: 400 }
+  state.ore.push(seen, unseen)
+  state.explored[seen.ty * MAP_W + seen.tx] = 1
+  rebuildBlocked(state)
+  assignMiners(state, [worker], null)
+  assert(assignedDeposit(worker) === seen.id, 'worker walked toward minerals still under the fog')
+  seen.amount = 0
+  worker.order = null
+  worker.nodeMemory = 0
+  assignMiners(state, [worker], null)
+  assert(worker.order == null, 'worker took a mineral that was never revealed')
+
+  const before = state.aiExplored.reduce((sum, bit) => sum + bit, 0)
+  for (let i = 0; i < 12 * 30; i++) step(state, 1 / 30)
+  const after = state.aiExplored.reduce((sum, bit) => sum + bit, 0)
+  assert(after > before + 10, 'Dunmarch did not scout new ground')
+  assert(!state.aiAttacking, 'Dunmarch marched on Northmark before seeing the Castle')
+  assert(!state.aiSpotted.some((spot) => spot.id === keep.id), 'Dunmarch recorded the Castle without seeing it')
 }
 
 pathAroundWall()
@@ -1059,4 +1124,5 @@ attacksBuildings()
 combatResolves()
 keepDecidesTheField()
 enemyPlays()
+wideMapHidesObjectsAndMakesDunmarchScout()
 console.log('smoke ok')

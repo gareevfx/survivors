@@ -3,7 +3,7 @@ import { Sfx } from './game/audio'
 import { centerCamera, clampCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
-import { buildTerrain, renderMinimap, renderWorld } from './game/render'
+import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
 import type { MatchState } from './game/types'
@@ -145,8 +145,9 @@ muteButton?.addEventListener('click', () => {
 let miniDrag = false
 const jumpMinimap = (event: PointerEvent) => {
   const rect = mini.getBoundingClientRect()
-  const x = ((event.clientX - rect.left) / rect.width) * terrain.width
-  const y = ((event.clientY - rect.top) / rect.height) * terrain.height
+  const frame = minimapFrame(rect.width, rect.height)
+  const x = ((event.clientX - rect.left - frame.x) / frame.w) * terrain.width
+  const y = ((event.clientY - rect.top - frame.y) / frame.h) * terrain.height
   focus(x, y)
 }
 mini.addEventListener('pointerdown', (event) => {

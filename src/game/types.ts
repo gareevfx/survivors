@@ -1,11 +1,12 @@
 export const TILE = 32
-export const MAP_W = 48
-export const MAP_H = 48
+/** 80×45 tiles is a 16:9 battlefield, wider than the old square map. */
+export const MAP_W = 80
+export const MAP_H = 45
 export const MAP_PX_W = TILE * MAP_W
 export const MAP_PX_H = TILE * MAP_H
 
-export const PLAYER_KEEP_TX = 8
-export const PLAYER_KEEP_TY = 36
+export const PLAYER_KEEP_TX = 6
+export const PLAYER_KEEP_TY = 34
 
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
@@ -282,11 +283,19 @@ export interface MatchState {
   seed: number
   tiles: Uint8Array
   blocked: Uint8Array
-  /** Tiles the player has ever seen. Stays revealed after units leave. */
+  /** Tiles Northmark has ever seen. Stays revealed after units leave. */
   explored: Uint8Array
-  /** Tiles currently inside friendly sight. Rebuilt each step. */
+  /** Tiles currently inside Northmark sight. Rebuilt each step. */
   visible: Uint8Array
-  /** When set, fog stays off for the rest of this match. */
+  /** Tiles Dunmarch has scouted. Minerals and enemies outside this are unknown. */
+  aiExplored: Uint8Array
+  /** Tiles currently inside Dunmarch sight. Rebuilt each step. */
+  aiVisible: Uint8Array
+  /** Player buildings Dunmarch has seen. The last position is kept until that building is gone. */
+  aiSpotted: Array<{ id: number; x: number; y: number }>
+  /** Worker or fighter currently walking into unexplored ground. */
+  aiScout: number
+  /** When set, the player's fog stays off for the rest of this match. Dunmarch still scouts. */
   fogCleared: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean

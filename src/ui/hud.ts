@@ -324,7 +324,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest open one. If gray rock seals a patch, those workers break it, then haul. Build a Factory, train bikes and tanks, and destroy the red Castle. Bikes and tanks cannot break rock.</p>
+      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest revealed one. Minerals under the fog stay hidden until you scout them. If gray rock seals a patch, those workers break it, then haul. Build a Factory, train bikes and tanks, and destroy the red Castle. Bikes and tanks cannot break rock.</p>
     `
   }
   if (units.length === 1) {

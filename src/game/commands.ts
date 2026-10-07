@@ -1,4 +1,5 @@
 import { findBuildSpot, gatherBlockRock, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { depositKnown } from './vision'
 import {
   buildingById,
   buildingCenter,
@@ -126,6 +127,7 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
       if (!unit) continue
       for (const node of state.ore) {
         if (!room(node.id)) continue
+        if (!depositKnown(state, owner, node.tx, node.ty)) continue
         if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
         const distance = owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
         if (distance < bestD) {
@@ -232,6 +234,7 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
   for (const node of state.ore) {
     if (node.amount <= 0) continue
     if (excludeId != null && node.id === excludeId) continue
+    if (!depositKnown(state, unit.owner, node.tx, node.ty)) continue
     if ((counts.get(node.id) ?? 0) >= MINERS_PER_DEPOSIT) continue
     const raw = unit.owner === 1 ? haulCost(state, unit, node) : depositDistance(unit, node)
     const distance = Number.isFinite(raw) ? raw : 1_000_000_000 + depositDistance(unit, node)

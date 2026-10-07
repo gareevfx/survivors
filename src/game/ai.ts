@@ -3,12 +3,69 @@ import { nearestWalkable } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, rockAt } from './state'
 import { BUILDING_STATS, MAP_H, MAP_W, TILE, type MatchState, type Rock, type Unit } from './types'
+import { aiTileVisible } from './vision'
 
 /** Extra tiles of walking that justify stopping to break a rock for the army. */
 const ROCK_DETOUR = 12
 
 function idlePorter(unit: Unit): boolean {
   return unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && !unit.order
+}
+
+/** Keep one spare worker (or an idle fighter) walking into ground Dunmarch has not seen. */
+function claimScout(state: MatchState, idle: Unit[]): Unit | null {
+  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const current = state.units.find((unit) => unit.id === state.aiScout && unit.owner === 1 && unit.hp > 0)
+  if (current && current.order?.type !== 'construct' && current.cargo <= 0) {
+    if (current.kind !== 'porter' && !state.aiAttacking) return current
+    if (current.kind === 'porter' && porters.length >= 2) return current
+  }
+  if (!state.aiAttacking) {
+    const fighter = state.units.find((unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.hp > 0 && !unit.order)
+    if (fighter) return fighter
+  }
+  if (idle.length >= 2 && porters.length >= 2) return idle[idle.length - 1] ?? null
+  return null
+}
+
+function sendScout(state: MatchState, scout: Unit | null): void {
+  if (!scout) return
+  const goal = nextScoutGoal(state)
+  if (!goal) return
+  const order = scout.order
+  if (order && (order.type === 'move' || order.type === 'attackMove')) {
+    if (Math.hypot(scout.x - order.x, scout.y - order.y) > 80) return
+  }
+  state.aiScout = scout.id
+  commandMove(state, [scout.id], goal.x, goal.y, scout.kind !== 'porter')
+}
+
+function nextScoutGoal(state: MatchState): { x: number; y: number } | null {
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  if (!keep) return null
+  const home = buildingCenter(keep)
+  let best: { x: number; y: number; d: number } | null = null
+  for (let ty = 0; ty < MAP_H; ty += 2) {
+    for (let tx = 0; tx < MAP_W; tx += 2) {
+      if (state.aiExplored[ty * MAP_W + tx] !== 0) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      const d = (x - home.x) ** 2 + (y - home.y) ** 2
+      if (!best || d < best.d) best = { x, y, d }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null
+}
+
+function knownEnemyBuilding(state: MatchState): { x: number; y: number } | null {
+  let fallback: { x: number; y: number } | null = null
+  for (const spot of state.aiSpotted) {
+    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner === 0)
+    if (!building) continue
+    if (building.kind === 'keep') return { x: spot.x, y: spot.y }
+    fallback = { x: spot.x, y: spot.y }
+  }
+  return fallback
 }
 
 export function updateAi(state: MatchState, dt: number): void {
@@ -18,11 +75,14 @@ export function updateAi(state: MatchState, dt: number): void {
   state.aiAcc = 0
 
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const idle = porters.filter((unit) => idlePorter(unit))
+  const scout = claimScout(state, idle)
   assignMiners(
     state,
-    porters.filter((unit) => idlePorter(unit)),
+    idle.filter((unit) => unit.id !== scout?.id),
     null,
   )
+  sendScout(state, scout)
 
   const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
   if (!keep?.complete) return
@@ -54,22 +114,18 @@ export function updateAi(state: MatchState, dt: number): void {
   }
 
   const army = state.units.filter((unit) => unit.owner === 1 && unit.kind !== 'porter' && unit.hp > 0)
-  const playerKeep = state.buildings.find(
-    (building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0,
-  )
   const keepPoint = buildingCenter(keep)
-  const threatened = state.units.some(
-    (unit) =>
-      unit.owner === 0 &&
-      unit.kind !== 'porter' &&
-      unit.hp > 0 &&
-      Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) < 340,
-  )
-  if (threatened || army.length >= 10 || (state.time > 105 && army.length >= 5)) state.aiAttacking = true
+  const threatened = state.units.some((unit) => {
+    if (unit.owner !== 0 || unit.kind === 'porter' || unit.hp <= 0) return false
+    if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) >= 340) return false
+    return aiTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
+  })
+  const spotted = knownEnemyBuilding(state)
+  if (threatened || (spotted && (army.length >= 10 || (state.time > 105 && army.length >= 5)))) state.aiAttacking = true
   if (!threatened && army.length === 0) state.aiAttacking = false
-  if (!state.aiAttacking || !playerKeep) return
+  if (!state.aiAttacking || (!threatened && !spotted)) return
 
-  const dest = threatened ? keepPoint : buildingCenter(playerKeep)
+  const dest = threatened || !spotted ? keepPoint : { x: spotted.x, y: spotted.y }
   const blocker = rockBlockingMarch(state, army, dest.x, dest.y)
   if (blocker) assignRockBreakers(state, blocker.rock, blocker.trapped)
   for (const unit of army) {

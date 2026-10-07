@@ -261,6 +261,10 @@ export function createMatch(seed: number): MatchState {
     blocked: new Uint8Array(MAP_W * MAP_H),
     explored: new Uint8Array(MAP_W * MAP_H),
     visible: new Uint8Array(MAP_W * MAP_H),
+    aiExplored: new Uint8Array(MAP_W * MAP_H),
+    aiVisible: new Uint8Array(MAP_W * MAP_H),
+    aiSpotted: [],
+    aiScout: 0,
     fogCleared: false,
     godMode: false,
     ore: [],
@@ -320,10 +324,10 @@ export function createMatch(seed: number): MatchState {
   enemyKeep.rallyY = enemyOrigin.ty * TILE - 18
 
   const porterTiles: Array<[number, number]> = [
-    [8, 40],
-    [9, 40],
-    [10, 40],
-    [11, 40],
+    [9, 38],
+    [10, 38],
+    [11, 38],
+    [12, 38],
   ]
   for (const [tx, ty] of porterTiles) {
     makeUnit(state, 0, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)

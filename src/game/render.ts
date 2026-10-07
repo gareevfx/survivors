@@ -1,7 +1,7 @@
 import type { Camera } from './camera'
 import { hash2 } from './rng'
 import { buildingCenter, buildingRect, playerKeep } from './state'
-import { buildingSeen, tileExplored, tileVisible, unitSeen } from './vision'
+import { buildingSeen, objectInSight, tileExplored, tileVisible, unitSeen } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
@@ -118,7 +118,7 @@ export function renderWorld(
 
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
-    if (!tileExplored(state, rock.tx, rock.ty)) continue
+    if (!objectInSight(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -135,7 +135,7 @@ export function renderWorld(
   }
 
   for (const node of state.ore) {
-    if (!tileExplored(state, node.tx, node.ty)) continue
+    if (!objectInSight(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
@@ -288,7 +288,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   const origin = buildingCenter(keep)
   let best: { x: number; y: number; d: number } | null = null
   for (const node of state.ore) {
-    if (node.tx > 18 || node.ty < 28) continue
+    if (!objectInSight(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     const d = (x - origin.x) ** 2 + (y - origin.y) ** 2
@@ -635,6 +635,18 @@ function roundRect(
   ctx.closePath()
 }
 
+/** Fit the 16:9 map inside the minimap element without stretching it. */
+export function minimapFrame(cssW: number, cssH: number): { x: number; y: number; w: number; h: number } {
+  const aspect = MAP_W / MAP_H
+  const box = cssW / Math.max(1, cssH)
+  if (box > aspect) {
+    const w = cssH * aspect
+    return { x: (cssW - w) / 2, y: 0, w, h: cssH }
+  }
+  const h = cssW / aspect
+  return { x: 0, y: (cssH - h) / 2, w: cssW, h }
+}
+
 export function renderMinimap(
   canvas: HTMLCanvasElement,
   state: MatchState,
@@ -657,54 +669,57 @@ export function renderMinimap(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = '#070806'
   ctx.fillRect(0, 0, cssW, cssH)
-  const sx = cssW / MAP_W
-  const sy = cssH / MAP_H
+  const frame = minimapFrame(cssW, cssH)
+  const sx = frame.w / MAP_W
+  const sy = frame.h / MAP_H
+  const ox = frame.x
+  const oy = frame.y
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
       if (!tileExplored(state, tx, ty)) continue
       ctx.fillStyle = tileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
-      ctx.fillRect(tx * sx, ty * sy, sx, sy)
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#3a3832'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (!tileExplored(state, tx, ty)) continue
-      if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(tx * sx, ty * sy, sx, sy)
+      if (!tileVisible(state, tx, ty)) continue
+      if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#e6c15a'
   for (const node of state.ore) {
-    if (!tileExplored(state, node.tx, node.ty)) continue
-    ctx.fillRect(node.tx * sx, node.ty * sy, sx, sy)
+    if (!objectInSight(state, node.tx, node.ty)) continue
+    ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
   }
   for (const building of state.buildings) {
     if (!buildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
     ctx.fillStyle = building.owner === 0 ? '#7ecfff' : '#ff7d70'
     ctx.globalAlpha = building.complete ? 1 : 0.55
-    ctx.fillRect(building.tx * sx, building.ty * sy, stats.w * sx, stats.h * sy)
+    ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {
     if (!unitSeen(state, unit)) continue
     ctx.fillStyle = unit.owner === 0 ? '#d8f4ff' : '#ffd0c8'
-    const px = (unit.x / TILE) * sx
-    const py = (unit.y / TILE) * sy
+    const px = ox + (unit.x / TILE) * sx
+    const py = oy + (unit.y / TILE) * sy
     ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
   }
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
       if (!tileExplored(state, tx, ty) || tileVisible(state, tx, ty)) continue
-      ctx.fillRect(tx * sx, ty * sy, sx, sy)
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.strokeStyle = '#f4f1c4'
   ctx.lineWidth = 1
   ctx.strokeRect(
-    (cam.x / TILE) * sx,
-    (cam.y / TILE) * sy,
+    ox + (cam.x / TILE) * sx,
+    oy + (cam.y / TILE) * sy,
     (viewW / cam.zoom / TILE) * sx,
     (viewH / cam.zoom / TILE) * sy,
   )
