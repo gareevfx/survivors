@@ -261,6 +261,7 @@ export function createMatch(seed: number): MatchState {
     playerAiScout: 0,
     fogCleared: false,
     enemyCam: false,
+    bothCam: false,
     godMode: false,
     aiControl: false,
     ore: [],

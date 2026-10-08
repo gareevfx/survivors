@@ -60,12 +60,14 @@ export function groundShown(state: MatchState, tx: number, ty: number): boolean 
   return tileExplored(state, tx, ty)
 }
 
-/** Sight used for drawing. Enemy cam shows Dunmarch's fog instead of Northmark's. */
+/** Sight used for drawing. Both cam merges the two fogs. Enemy cam shows only Dunmarch. */
 export function viewTileVisible(state: MatchState, tx: number, ty: number): boolean {
+  if (state.bothCam) return tileVisible(state, tx, ty) || aiTileVisible(state, tx, ty)
   return state.enemyCam ? aiTileVisible(state, tx, ty) : tileVisible(state, tx, ty)
 }
 
 export function viewTileExplored(state: MatchState, tx: number, ty: number): boolean {
+  if (state.bothCam) return tileExplored(state, tx, ty) || aiTileExplored(state, tx, ty)
   return state.enemyCam ? aiTileExplored(state, tx, ty) : tileExplored(state, tx, ty)
 }
 
@@ -74,12 +76,12 @@ export function viewGroundShown(state: MatchState, tx: number, ty: number): bool
 }
 
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
-  if (unit.owner === (state.enemyCam ? 1 : 0)) return true
+  if (!state.bothCam && unit.owner === (state.enemyCam ? 1 : 0)) return true
   return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
 
 export function viewBuildingSeen(state: MatchState, building: Building): boolean {
-  if (building.owner === (state.enemyCam ? 1 : 0)) return true
+  if (!state.bothCam && building.owner === (state.enemyCam ? 1 : 0)) return true
   const stats = BUILDING_STATS[building.kind]
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {

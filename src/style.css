@@ -223,7 +223,8 @@ button, canvas { font: inherit; }
   text-transform: uppercase;
 }
 
-#ai-badge {
+#ai-badge,
+#both-badge {
   position: absolute;
   top: 14px;
   left: 50%;
@@ -238,6 +239,10 @@ button, canvas { font: inherit; }
   font-size: 15px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+#both-badge {
+  top: 52px;
 }
 
 #modeflag {

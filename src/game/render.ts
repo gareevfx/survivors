@@ -188,7 +188,7 @@ export function renderWorld(
     drawUnit(ctx, state, unit, selected.has(unit.id))
   }
 
-  const viewer = state.enemyCam ? 1 : 0
+  const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
     if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
     ctx.fillStyle = shot.owner === 0 ? '#e9f7ff' : '#ffd2c8'
@@ -219,6 +219,7 @@ export function renderWorld(
   }
 
   drawFog(ctx, state, view)
+  if (state.bothCam) drawBothSight(ctx, state, view)
 
   if (state.placement && overlay.pointer) {
     const stats = BUILDING_STATS[state.placement]
@@ -251,6 +252,44 @@ export function renderWorld(
     ctx.strokeRect(overlay.drag.x, overlay.drag.y, overlay.drag.w, overlay.drag.h)
   }
   return { viewW, viewH }
+}
+
+/** Faint rings so Both cam shows which side is lighting the ground. */
+function drawBothSight(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  view: { l: number; t: number; r: number; b: number },
+): void {
+  ctx.save()
+  ctx.lineWidth = 1.25
+  ctx.setLineDash([5, 7])
+  const sources: Array<{ x: number; y: number; radius: number; owner: 0 | 1 }> = []
+  for (const unit of state.units) {
+    if (unit.hp <= 0) continue
+    sources.push({ x: unit.x, y: unit.y, radius: UNIT_STATS[unit.kind].sight, owner: unit.owner })
+  }
+  for (const building of state.buildings) {
+    if (building.hp <= 0) continue
+    const stats = BUILDING_STATS[building.kind]
+    sources.push({
+      x: (building.tx + stats.w / 2) * TILE,
+      y: (building.ty + stats.h / 2) * TILE,
+      radius: stats.sight,
+      owner: building.owner,
+    })
+  }
+  for (const owner of [0, 1] as const) {
+    ctx.strokeStyle = owner === 0 ? 'rgba(94, 200, 255, 0.28)' : 'rgba(255, 93, 78, 0.28)'
+    for (const source of sources) {
+      if (source.owner !== owner) continue
+      if (source.x + source.radius < view.l || source.x - source.radius > view.r) continue
+      if (source.y + source.radius < view.t || source.y - source.radius > view.b) continue
+      ctx.beginPath()
+      ctx.arc(source.x, source.y, source.radius, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  }
+  ctx.restore()
 }
 
 function drawFog(

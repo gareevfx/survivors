@@ -2,6 +2,17 @@ import { pushToast } from './state'
 import type { MatchState } from './types'
 import { clearFog, restoreFog } from './vision'
 
+function normalView(state: MatchState): boolean {
+  return !state.fogCleared && !state.enemyCam && !state.bothCam
+}
+
+/** Drop every special view except the one about to be shown. Clearing FOW restores real sight. */
+function leaveViews(state: MatchState, keep: 'normal' | 'clear' | 'enemy' | 'both'): void {
+  if (keep !== 'clear' && state.fogCleared) restoreFog(state)
+  if (keep !== 'enemy') state.enemyCam = false
+  if (keep !== 'both') state.bothCam = false
+}
+
 /**
  * Run one line from the command bar.
  * Returns true when the line was a known command.
@@ -9,22 +20,23 @@ import { clearFog, restoreFog } from './vision'
 export function runCommand(state: MatchState, raw: string): boolean {
   const text = raw.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!text) return false
-  if (text === 'off fog of war') {
-    if (state.fogCleared) {
-      pushToast(state, 'Fog of war is already off.')
+  if (text === 'off fow' || text === 'off fog of war') {
+    if (state.fogCleared && !state.enemyCam && !state.bothCam) {
+      pushToast(state, 'FOW is already off.')
       return true
     }
+    leaveViews(state, 'clear')
     clearFog(state)
-    pushToast(state, 'Fog of war is off.')
+    pushToast(state, 'FOW is off.')
     return true
   }
-  if (text === 'fog of war') {
-    if (!state.fogCleared) {
-      pushToast(state, 'Fog of war is already on.')
+  if (text === 'fow' || text === 'fog of war') {
+    if (normalView(state)) {
+      pushToast(state, 'FOW is already on.')
       return true
     }
-    restoreFog(state)
-    pushToast(state, 'Fog of war is on.')
+    leaveViews(state, 'normal')
+    pushToast(state, 'FOW is on.')
     return true
   }
   if (text === 'god mode') {
@@ -46,10 +58,11 @@ export function runCommand(state: MatchState, raw: string): boolean {
     return true
   }
   if (text === 'show enemy cam') {
-    if (state.enemyCam) {
+    if (state.enemyCam && !state.bothCam && !state.fogCleared) {
       pushToast(state, 'Enemy cam is already on.')
       return true
     }
+    leaveViews(state, 'enemy')
     state.enemyCam = true
     pushToast(state, 'Enemy cam is on.')
     return true
@@ -61,6 +74,25 @@ export function runCommand(state: MatchState, raw: string): boolean {
     }
     state.enemyCam = false
     pushToast(state, 'Enemy cam is off.')
+    return true
+  }
+  if (text === 'both cam') {
+    if (state.bothCam && !state.enemyCam && !state.fogCleared) {
+      pushToast(state, 'Both cam is already on.')
+      return true
+    }
+    leaveViews(state, 'both')
+    state.bothCam = true
+    pushToast(state, 'Both cam is on.')
+    return true
+  }
+  if (text === 'off both cam') {
+    if (!state.bothCam) {
+      pushToast(state, 'Both cam is already off.')
+      return true
+    }
+    state.bothCam = false
+    pushToast(state, 'Both cam is off.')
     return true
   }
   if (text === 'ai control') {

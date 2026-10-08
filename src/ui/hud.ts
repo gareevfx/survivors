@@ -44,6 +44,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   const pause = document.querySelector<HTMLButtonElement>('#pause')
   const pausedBanner = document.querySelector('#paused')
   const aiBadge = document.querySelector('#ai-badge')
+  const bothBadge = document.querySelector('#both-badge')
   const inspect = document.querySelector('#inspect')
   const toasts = document.querySelector('#toasts')
   const overlay = document.querySelector('#overlay')
@@ -72,6 +73,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   }
   if (pausedBanner) pausedBanner.classList.toggle('hidden', !state.paused)
   if (aiBadge) aiBadge.classList.toggle('hidden', !state.aiControl)
+  if (bothBadge) bothBadge.classList.toggle('hidden', !state.bothCam)
 
   if (mode) {
     if (state.placement) {

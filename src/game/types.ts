@@ -323,10 +323,12 @@ export interface MatchState {
   aiScout: number
   /** Northmark scout while AI control is on. */
   playerAiScout: number
-  /** When set, the player's fog stays off for the rest of this match. Dunmarch still scouts. */
+  /** When set, the player's fog stays off until FOW is turned back on. Dunmarch still scouts. */
   fogCleared: boolean
   /** When set, the map is drawn with Dunmarch's fog instead of Northmark's. */
   enemyCam: boolean
+  /** When set, the map is drawn with both sides' fog combined. Rendering only. */
+  bothCam: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean
   /** When set, Dunmarch's build-and-fight loop plays Northmark from Northmark's own sight. */

@@ -1256,6 +1256,71 @@ function enemyCamShowsDunmarchSight(): void {
   assert(!fresh.enemyCam, 'a new match kept enemy cam')
 }
 
+function bothCamMergesSight(): void {
+  const state = createMatch(1)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles')
+  assert(!state.bothCam, 'a match started on both cam')
+  assert(!runCommand(state, 'both'), 'a partial both cam line was accepted')
+  assert(!state.bothCam, 'a partial line turned both cam on')
+  assert(runCommand(state, '  Both Cam  '), 'both cam was rejected')
+  assert(state.bothCam && !state.enemyCam && !state.fogCleared, 'both cam did not replace the normal view')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is on.', 'both cam did not announce itself')
+  assert(runCommand(state, 'BOTH CAM'), 'repeating both cam was rejected')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is already on.', 'the repeat used the wrong notice')
+  assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark went dark on both cam')
+  assert(viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed dark on both cam')
+  assert(viewBuildingSeen(state, keep) && viewBuildingSeen(state, enemy), 'a castle was hidden on both cam')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'both cam revealed Dunmarch to Northmark')
+  assert(!aiTileExplored(state, keep.tx + 1, keep.ty + 1), 'both cam revealed Northmark to Dunmarch')
+  const foe = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(foe && viewUnitSeen(state, foe), 'a Dunmarch worker inside its own sight was hidden')
+  let sharedBlack: { tx: number; ty: number } | null = null
+  let secondBlack: { tx: number; ty: number } | null = null
+  for (let ty = 0; ty < MAP_H && (!sharedBlack || !secondBlack); ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (tileExplored(state, tx, ty) || aiTileExplored(state, tx, ty)) continue
+      if (tileVisible(state, tx, ty) || aiTileVisible(state, tx, ty)) continue
+      if (!sharedBlack) sharedBlack = { tx, ty }
+      else if (!secondBlack) secondBlack = { tx, ty }
+    }
+  }
+  assert(sharedBlack && secondBlack, 'the map started fully explored by someone')
+  assert(!viewGroundShown(state, sharedBlack.tx, sharedBlack.ty), 'ground neither side has seen is drawn')
+  state.aiExplored[sharedBlack.ty * MAP_W + sharedBlack.tx] = 1
+  assert(
+    viewGroundShown(state, sharedBlack.tx, sharedBlack.ty) && !viewTileVisible(state, sharedBlack.tx, sharedBlack.ty),
+    'Dunmarch shroud did not merge into the gray',
+  )
+  assert(!tileExplored(state, sharedBlack.tx, sharedBlack.ty), 'merged shroud was written into Northmark memory')
+  state.explored[secondBlack.ty * MAP_W + secondBlack.tx] = 1
+  assert(
+    viewGroundShown(state, secondBlack.tx, secondBlack.ty) && !viewTileVisible(state, secondBlack.tx, secondBlack.ty),
+    'Northmark shroud did not merge into the gray',
+  )
+  assert(runCommand(state, 'show enemy cam'), 'enemy cam was rejected while both cam was on')
+  assert(state.enemyCam && !state.bothCam && !state.fogCleared, 'enemy cam did not replace both cam')
+  assert(!viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark stayed lit after switching to enemy cam')
+  assert(runCommand(state, 'both cam'), 'both cam was rejected after enemy cam')
+  assert(state.bothCam && !state.enemyCam, 'both cam did not replace enemy cam')
+  assert(runCommand(state, 'off fow'), 'off fow was rejected while both cam was on')
+  assert(state.fogCleared && !state.bothCam && !state.enemyCam, 'off fow did not replace both cam')
+  assert(viewTileVisible(state, 0, 0), 'off fow left a corner dark')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'FOW is off.', 'off fow used the old notice')
+  assert(runCommand(state, 'FOW'), 'fow was rejected')
+  assert(!state.fogCleared && !state.bothCam && !state.enemyCam, 'fow did not return to the normal view')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'FOW is on.', 'fow used the old notice')
+  assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'the normal view lost Northmark')
+  assert(!viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the normal view kept Dunmarch lit')
+  assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'fow left the enemy castle explored')
+  assert(runCommand(state, 'off both cam'), 'off both cam was rejected while already off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is already off.', 'the off notice was wrong')
+  assert(runCommand(state, 'both cam') && runCommand(state, 'Off Both Cam'), 'off both cam was rejected')
+  assert(!state.bothCam && !state.enemyCam && !state.fogCleared, 'off both cam left a special view on')
+  assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1) && !viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'off both cam did not return to Northmark')
+}
+
 function fogHidesUnexploredGround(): void {
   const state = createMatch(1)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -1856,6 +1921,7 @@ aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
+bothCamMergesSight()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()
