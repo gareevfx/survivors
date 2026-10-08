@@ -507,7 +507,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   if (building.kind === 'silo') return 'A storage does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
-  if (state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
+  if (stats.supply > 0 && state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
     return 'Store Cells cap reached — raise a Storage'
   }
   if (building.queue.length >= 5) return 'Training queue is full'

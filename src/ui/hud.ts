@@ -241,15 +241,16 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
   const afford = state.oreHeld[0] >= stats.cost
-  const room = state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
+  const room = stats.supply === 0 || state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
   let title = stats.blurb
   if (!afford) title = `Need ${stats.cost} dumps`
   else if (!room) title = 'Store Cells cap reached — raise a Storage'
+  const detail = stats.supply === 0 ? `${stats.cost} dumps · no store cells` : `${stats.cost} dumps · ${stats.supply} store cells`
   return {
     id: `train-${kind}`,
     label: stats.label,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : 'H',
-    detail: `${stats.cost} dumps · ${stats.supply} store cells`,
+    detail,
     title,
     disabled: !afford || !room,
     run: () => {

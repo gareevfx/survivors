@@ -1951,6 +1951,7 @@ wideMapHidesObjectsAndMakesDunmarchScout()
 aiBuildingsLeaveAGapAndAvoidMinerals()
 aiDroneNeverIdles()
 droneFliesFromTheFactory()
+hoverCostsDumpsAndNoStoreCells()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
@@ -2079,6 +2080,66 @@ function aiDroneNeverIdles(): void {
   const playerDrone = makeUnit(north, 0, 'drone', (castle.tx + 1.5) * TILE, (castle.ty + 1.5) * TILE)
   step(north, 0.5)
   assert(unitById(north, playerDrone.id)?.order?.type === 'move', 'AI Control left the Northmark Drone idle')
+}
+
+function hoverCostsDumpsAndNoStoreCells(): void {
+  assert(UNIT_STATS.drone.cost === 75, `hover cost is ${UNIT_STATS.drone.cost}, not 75 dumps`)
+  assert(UNIT_STATS.drone.supply === 0, 'hover still uses store cells')
+  assert(
+    UNIT_STATS.drone.blurb.includes('75 dumps') && UNIT_STATS.drone.blurb.includes('no store cells'),
+    'hover tooltip omits the cost',
+  )
+
+  const state = createMatch(21)
+  const yard = makeBuilding(state, 0, 'yard', 14, 30, true)
+  let guard = 0
+  while (state.supplyUsed[0] < state.supplyCap[0] && guard++ < 40) {
+    makeUnit(state, 0, 'pike', 80 + guard * 6, 80)
+    recomputeSupply(state)
+  }
+  assert(state.supplyUsed[0] === state.supplyCap[0], 'store cells were not full')
+  const used = state.supplyUsed[0]
+  state.oreHeld[0] = 75
+  assert(tryTrain(state, yard.id, 'drone') === null, 'a full store cells bar refused a hover')
+  assert(state.oreHeld[0] === 0, 'hover was not charged 75 dumps')
+  assert(state.supplyUsed[0] === used, 'queueing a hover raised store cells')
+  const queued = yard.queue[0]
+  assert(queued?.kind === 'drone', 'hover was not queued')
+  if (!queued) return
+  queued.remaining = 0.01
+  step(state, 0.05)
+  assert(
+    state.units.some((unit) => unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0),
+    'hover did not finish training',
+  )
+  assert(state.supplyUsed[0] === used, 'a finished hover raised store cells')
+
+  const foe = createMatch(22)
+  guard = 0
+  while (foe.supplyUsed[1] < foe.supplyCap[1] && guard++ < 40) {
+    makeUnit(foe, 1, 'pike', 80 + guard * 6, 80)
+    recomputeSupply(foe)
+  }
+  const foeUsed = foe.supplyUsed[1]
+  const foeYard = makeBuilding(foe, 1, 'yard', 14, 8, true)
+  foe.oreHeld[1] = 75
+  step(foe, 0.5)
+  assert(
+    foeYard.queue.some((job) => job.kind === 'drone'),
+    'the AI waited for store cells before a hover',
+  )
+  assert(foe.supplyUsed[1] === foeUsed, 'the AI hover raised store cells')
+
+  const capped = createMatch(23)
+  const capYard = makeBuilding(capped, 1, 'yard', 14, 8, true)
+  makeUnit(capped, 1, 'drone', 200, 200)
+  makeUnit(capped, 1, 'drone', 240, 200)
+  recomputeSupply(capped)
+  capped.oreHeld[1] = 500
+  step(capped, 0.5)
+  const hoverJobs = capYard.queue.filter((job) => job.kind === 'drone').length
+  const hoverUnits = capped.units.filter((unit) => unit.owner === 1 && unit.kind === 'drone' && unit.hp > 0).length
+  assert(hoverUnits + hoverJobs === 2, `AI trained past 2 hovers (${hoverUnits} living, ${hoverJobs} queued)`)
 }
 
 function droneFliesFromTheFactory(): void {
