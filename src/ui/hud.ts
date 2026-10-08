@@ -78,7 +78,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   if (mode) {
     if (state.placement) {
       const stats = BUILDING_STATS[state.placement]
-      mode.textContent = `Placing ${stats.label} (${stats.cost} minerals). Left-click the map. Right-click cancels.`
+      mode.textContent = `Placing ${stats.label} (${stats.cost} dumps). Left-click the map. Right-click cancels.`
       mode.classList.remove('hidden')
     } else if (state.attackMoveArmed) {
       mode.textContent = 'Attack-move: left-click the ground. Units fight anything they meet. Esc cancels.'
@@ -99,13 +99,13 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   if (overlay && endKicker && endTitle && endCopy && endSeed) {
     overlay.classList.toggle('hidden', state.outcome == null)
     if (state.outcome === 'win') {
-      endKicker.textContent = 'Northmark'
-      endTitle.textContent = 'The ridge is yours'
-      endCopy.textContent = 'The Dunmarch Castle is rubble. Your banners stay on the field.'
+      endKicker.textContent = PLAYER_NAME[0]
+      endTitle.textContent = 'New Ground is yours'
+      endCopy.textContent = `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
     } else if (state.outcome === 'lose') {
-      endKicker.textContent = 'Dunmarch'
-      endTitle.textContent = 'The castle has fallen'
-      endCopy.textContent = 'Your Castle is gone. Dunmarch takes the ridge.'
+      endKicker.textContent = PLAYER_NAME[1]
+      endTitle.textContent = 'The silo has fallen'
+      endCopy.textContent = `Your Silo is gone. ${PLAYER_NAME[1]} takes New Ground.`
     }
     endSeed.textContent = `Field ${state.seed}`
   }
@@ -147,7 +147,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           id: 'cancel-build',
           label: 'Cancel',
           detail: '75% back',
-          title: 'Cancel construction and refund most of the minerals',
+          title: 'Cancel construction and refund most of the dumps',
           disabled: false,
           run: () => cancelBuilding(state, building.id),
         },
@@ -230,8 +230,8 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
     id: `place-${kind}`,
     label: stats.label,
     hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : 'T',
-    detail: `${stats.cost} minerals`,
-    title: afford ? stats.blurb : `Need ${stats.cost} minerals`,
+    detail: `${stats.cost} dumps`,
+    title: afford ? stats.blurb : `Need ${stats.cost} dumps`,
     disabled: !afford,
     armed: state.placement === kind,
     run: () => actions.armPlace(kind),
@@ -243,13 +243,13 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   const afford = state.oreHeld[0] >= stats.cost
   const room = state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
   let title = stats.blurb
-  if (!afford) title = `Need ${stats.cost} minerals`
-  else if (!room) title = 'Population cap reached — raise a Silo'
+  if (!afford) title = `Need ${stats.cost} dumps`
+  else if (!room) title = 'Store Cells cap reached — raise a Storage'
   return {
     id: `train-${kind}`,
     label: stats.label,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : 'H',
-    detail: `${stats.cost} minerals · ${stats.supply} pop`,
+    detail: `${stats.cost} dumps · ${stats.supply} store cells`,
     title,
     disabled: !afford || !room,
     run: () => {
@@ -266,7 +266,7 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
   if (!commands.length) {
     const empty = document.createElement('p')
     empty.className = 'cmd-empty'
-    empty.textContent = 'Select workers, the Castle, or a Factory.'
+    empty.textContent = 'Select stalkers, the Silo, or a Factory.'
     root.append(empty)
     return
   }
@@ -329,8 +329,8 @@ export function describeSelection(state: MatchState): string {
       <h2>${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
-      ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Drones take half.</p>` : ''}
-      ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Worker to resume.</p>' : ''}
+      ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
+      ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
       ${building.complete ? '<p class="meta">Right-click the map to set the rally point.</p>' : ''}
     `
@@ -339,8 +339,8 @@ export function describeSelection(state: MatchState): string {
   const ore = state.selectedOre != null ? state.ore.find((node) => node.id === state.selectedOre) : undefined
   if (ore && state.selectedUnits.length === 0) {
     return `
-      <p class="eyebrow">Northmark</p>
-      <h2>Minerals</h2>
+      <p class="eyebrow">${PLAYER_NAME[0]}</p>
+      <h2>Dumps</h2>
       <p class="meta">${ore.amount} remaining</p>
     `
   }
@@ -350,9 +350,9 @@ export function describeSelection(state: MatchState): string {
     .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.hp > 0)
   if (!units.length) {
     return `
-      <p class="eyebrow">Northmark</p>
-      <h2>Ash ridge</h2>
-      <p class="meta">Destroy the enemy Castle. If your Castle falls, the field is lost. Workers mine the minerals beside your Castle first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and minerals block every ground unit. Raise a Tower inside Castle sight. It shoots the closest enemy in its own sight. Bikes and tanks cannot break rock. A Drone flies and does not shoot.</p>
+      <p class="eyebrow">${PLAYER_NAME[0]}</p>
+      <h2>New Ground</h2>
+      <p class="meta">Destroy the enemy Silo. If your Silo falls, the field is lost. Stalkers mine the dumps beside your Silo first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and dumps block every ground unit. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
     `
   }
   if (units.length === 1) {
@@ -360,7 +360,7 @@ export function describeSelection(state: MatchState): string {
     if (!unit) return ''
     const stats = UNIT_STATS[unit.kind]
     const pct = Math.max(0, unit.hp / stats.hp)
-    const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} minerals.` : ''
+    const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} dumps.` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
       <h2>${stats.label}</h2>
@@ -373,7 +373,7 @@ export function describeSelection(state: MatchState): string {
   for (const unit of units) counts.set(UNIT_STATS[unit.kind].label, (counts.get(UNIT_STATS[unit.kind].label) ?? 0) + 1)
   const summary = [...counts.entries()].map(([label, count]) => `${count} ${label}${count > 1 ? 's' : ''}`).join(', ')
   return `
-    <p class="eyebrow">Northmark</p>
+    <p class="eyebrow">${PLAYER_NAME[0]}</p>
     <h2>${units.length} selected</h2>
     <p class="meta">${escapeHtml(summary)}</p>
   `

@@ -49,8 +49,8 @@ export interface UnitStats {
 
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
-    label: 'Worker',
-    blurb: 'Hauls minerals and raises structures. Breaks gray rock and trees that seal a minerals patch.',
+    label: 'Stalker',
+    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -66,7 +66,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     flying: false,
   },
   pike: {
-    label: 'Bike',
+    label: 'Flasher',
     blurb: 'Quick rider with a short reach.',
     hp: 58,
     speed: 104,
@@ -83,7 +83,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     flying: false,
   },
   howler: {
-    label: 'Tank',
+    label: 'Gorilla',
     blurb: 'Slow gunner with a long reach.',
     hp: 74,
     speed: 66,
@@ -100,8 +100,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     flying: false,
   },
   drone: {
-    label: 'Drone',
-    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Castle. Bikes deal half damage; tanks cannot attack it.',
+    label: 'Hover',
+    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Flashers deal half damage; gorillas cannot attack it.',
     hp: 40,
     speed: 118,
     radius: 8,
@@ -134,8 +134,8 @@ export interface BuildingStats {
 
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
-    label: 'Castle',
-    blurb: 'Drop-off for minerals and home of the workers. If it falls, the field is lost.',
+    label: 'Silo',
+    blurb: 'Drop-off for dumps and home of the stalkers. If it falls, the field is lost.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -146,7 +146,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains bikes, tanks, and drones.',
+    blurb: 'Trains flashers, gorillas, and hovers.',
     w: 3,
     h: 2,
     hp: 720,
@@ -156,8 +156,8 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     sight: 180,
   },
   silo: {
-    label: 'Silo',
-    blurb: 'Raises the population cap by 8.',
+    label: 'Storage',
+    blurb: 'Raises the store cells cap by 8.',
     w: 2,
     h: 2,
     hp: 400,
@@ -167,8 +167,8 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     sight: 150,
   },
   tower: {
-    label: 'Tower',
-    blurb: 'One cell. Sees as far as a Drone and shoots the closest enemy in that sight for 8/3 damage, at a Bike\'s rate. Drones take half of that. Place it inside Castle sight.',
+    label: 'Pillar',
+    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. Hovers take half of that. Place it inside Silo sight.',
     w: 1,
     h: 1,
     hp: 320,
@@ -180,7 +180,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
 }
 
-export const PLAYER_NAME = ['Northmark', 'Dunmarch'] as const
+export const PLAYER_NAME = ['Silo_01', 'Silo_02'] as const
 export const PLAYER_COLOR = ['#5ec8ff', '#ff5d4e'] as const
 
 export type Order =

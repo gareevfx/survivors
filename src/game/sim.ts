@@ -995,7 +995,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   building.alert = 8
   if (building.owner === 0 && state.underAttackCd <= 0) {
     state.underAttackCd = 8
-    const label = building.kind === 'keep' ? 'The Castle is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
+    const label = building.kind === 'keep' ? 'The Silo is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
     state.toasts.push({ text: label, life: 3.4 })
   }
 }

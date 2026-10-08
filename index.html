@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Alternativen</title>
+    <title>Ridgekeep</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>
@@ -12,23 +12,23 @@
         <div class="brand">
           <span class="mark" aria-hidden="true"></span>
           <div>
-            <strong>Alternativen</strong>
-            <em>Northmark against Dunmarch</em>
+            <strong>Ridgekeep</strong>
+            <em>Silo_01 against Silo_02</em>
           </div>
         </div>
-        <div class="readout" title="Minerals in the Castle">
+        <div class="readout" title="Dumps in the Silo">
           <span class="swatch ore"></span>
-          <span>Minerals</span>
+          <span>Dumps</span>
           <b id="ore">0</b>
         </div>
-        <div class="readout" title="Population, including units still in training">
+        <div class="readout" title="Store Cells, including units still in training">
           <span class="swatch pop"></span>
-          <span>Pop</span>
+          <span>Store Cells</span>
           <b id="supply">0 / 0</b>
         </div>
         <div id="clock">0:00</div>
         <div class="top-actions">
-          <button id="idle" type="button" title="Select idle workers (F)">Idle</button>
+          <button id="idle" type="button" title="Select idle stalkers (F)">Idle</button>
           <button id="mute" type="button">Sound</button>
           <button id="help-btn" type="button">Controls</button>
           <button id="pause" type="button" aria-pressed="false" title="Pause the match (Pause)">Pause</button>
@@ -36,12 +36,12 @@
       </header>
 
       <div id="hint">
-        <p>Destroy the enemy Castle and defend your own. Select the workers and right-click the gold minerals beside the Castle.</p>
+        <p>Destroy the enemy Silo and defend your own. Select the stalkers and right-click the gold dumps beside the Silo.</p>
         <button id="hint-x" type="button">Got it</button>
       </div>
 
       <div id="stage">
-        <canvas id="view" tabindex="0" aria-label="Alternativen battlefield"></canvas>
+        <canvas id="view" tabindex="0" aria-label="Ridgekeep battlefield"></canvas>
         <div id="paused" class="hidden">Paused</div>
         <div id="ai-badge" class="hidden">AI control</div>
         <div id="both-badge" class="hidden">Both cam</div>
@@ -72,21 +72,21 @@
       <div id="help" class="hidden">
         <div class="card help-card">
           <p class="eyebrow">Field notes</p>
-          <h2>How to hold the ridge</h2>
+          <h2>How to hold New Ground</h2>
           <ul>
             <li><b>Left-click</b> a friendly unit or building. Drag a box to select several. Shift adds.</li>
             <li><b>Double-click</b> a unit to grab every visible one of that type.</li>
-            <li><b>Right-click</b> ground to move, an enemy to attack, minerals to gather, or gray rock or a tree with workers to break it. Bikes and tanks cannot break rock or trees, and shots cannot pass through either. Up to 3 workers work each minerals patch; extras take the nearest revealed patch they can reach. When those patches are mined out, workers break the rocks that open the next minerals soonest. Workers break rock or trees that seal their patch, then haul. Each match places the two Castles in opposite corners, with the nearest minerals on the edge of that Castle's sight. Units steer around each other. A worker who is boxed in for 4 seconds goes to the next revealed patch or building site. Dunmarch’s army tries to destroy your Castle once it has seen it.</li>
-            <li>Unexplored ground is black and hides everything. Ground you have seen stays dark gray: rocks, trees, and minerals stay on that ground, and enemies stay hidden until a unit or building is watching that tile. Workers only walk themselves to minerals you have already found. Dunmarch has the same units and the same fog. Its Drones keep scouting the black for minerals and the far map for your Castle, then the gray ground, and they stay clear of Bikes.</li>
-            <li><b>Enter</b> opens the command line. <b>Off FOW</b> reveals the map, and <b>FOW</b> hides it again. <b>God Mode</b> stops damage to your units and buildings, and <b>Off God Mode</b> lets them take damage again. <b>Show Enemy Cam</b> draws only what Dunmarch can see, and <b>Off Enemy Cam</b> returns to your sight. <b>Both Cam</b> draws both sides at once, and <b>Off Both Cam</b> returns to your sight. <b>AI Control</b> lets the computer play Northmark from your own sight, and <b>Off AI Control</b> gives those orders back. Escape closes the line.</li>
+            <li><b>Right-click</b> ground to move, an enemy to attack, dumps to gather, or gray rock or a tree with stalkers to break it. Flashers and gorillas cannot break rock or trees, and shots cannot pass through either. Up to 3 stalkers work each dumps patch; extras take the nearest revealed patch they can reach. When those patches are mined out, stalkers break the rocks that open the next dumps soonest. Stalkers break rock or trees that seal their patch, then haul. Each match places the two Silos in opposite corners, with the nearest dumps on the edge of that Silo's sight. Units steer around each other. A stalker who is boxed in for 4 seconds goes to the next revealed patch or building site. Silo_02’s army tries to destroy your Silo once it has seen it.</li>
+            <li>Unexplored ground is black and hides everything. Ground you have seen stays dark gray: rocks, trees, and dumps stay on that ground, and enemies stay hidden until a unit or building is watching that tile. Stalkers only walk themselves to dumps you have already found. Silo_02 has the same units and the same fog. Its Hovers keep scouting the black for dumps and the far map for your Silo, then the gray ground, and they stay clear of Flashers.</li>
+            <li><b>Enter</b> opens the command line. <b>Off FOW</b> reveals the map, and <b>FOW</b> hides it again. <b>God Mode</b> stops damage to your units and buildings, and <b>Off God Mode</b> lets them take damage again. <b>Show Enemy Cam</b> draws only what Silo_02 can see, and <b>Off Enemy Cam</b> returns to your sight. <b>Both Cam</b> draws both sides at once, and <b>Off Both Cam</b> returns to your sight. <b>AI Control</b> lets the computer play Silo_01 from your own sight, and <b>Off AI Control</b> gives those orders back. Escape closes the line.</li>
             <li><b>Q</b>, then left-click, orders an attack-move. <b>X</b> stops.</li>
-            <li>The match is won by destroying the enemy Castle and lost if your own Castle falls. Dunmarch keeps a few fighters and Towers at home, and pulls the army back when that Castle or a building beside it is under attack.</li>
-            <li><b>Y</b> places a Factory, <b>L</b> a Silo, and <b>T</b> a Tower. A Tower is one cell and sees as far as a Drone. It automatically shoots the closest enemy in that sight for 8/3 damage, at a Bike's rate. Drones take half of that. It keeps that target until they leave sight or die. Rocks and trees block the shot. The placement ring is Castle sight: green ground inside it will take a Tower, red ground will not. From the Castle, the nearest idle Worker walks to the site. If every Worker is hauling, the nearest miner goes instead. A building rises only while a Worker is on the site. If that Worker dies or is sent away, the next free Worker takes the job.</li>
-            <li><b>P</b> trains a Worker from the Castle. <b>K</b> trains a Bike, <b>J</b> a Tank, and <b>H</b> a Drone, when a Factory is selected. A Drone flies over the ground, does not shoot, and sees as far as a Castle. Tanks cannot attack it. Bikes and Towers can, for half damage.</li>
-            <li><b>Pause</b> freezes the match: units, mining, building, training, and Dunmarch all wait. The Pause button sits beside Controls, and the Pause key does the same. Resume continues from that moment. Orders given while paused are ignored. The command line still opens.</li>
+            <li>The match is won by destroying the enemy Silo and lost if your own Silo falls. Silo_02 keeps a few fighters and Pillars at home, and pulls the army back when that Silo or a building beside it is under attack.</li>
+            <li><b>Y</b> places a Factory, <b>L</b> a Storage, and <b>T</b> a Pillar. A Pillar is one cell and sees as far as a Hover. It automatically shoots the closest enemy in that sight for 8/3 damage, at a Flasher's rate. Hovers take half of that. It keeps that target until they leave sight or die. Rocks and trees block the shot. The placement ring is Silo sight: green ground inside it will take a Pillar, red ground will not. From the Silo, the nearest idle Stalker walks to the site. If every Stalker is hauling, the nearest miner goes instead. A building rises only while a Stalker is on the site. If that Stalker dies or is sent away, the next free Stalker takes the job.</li>
+            <li><b>P</b> trains a Stalker from the Silo. <b>K</b> trains a Flasher, <b>J</b> a Gorilla, and <b>H</b> a Hover, when a Factory is selected. A Hover flies over the ground, does not shoot, and sees as far as a Silo. Gorillas cannot attack it. Flashers and Pillars can, for half damage.</li>
+            <li><b>Pause</b> freezes the match: units, mining, building, training, and Silo_02 all wait. The Pause button sits beside Controls, and the Pause key does the same. Resume continues from that moment. Orders given while paused are ignored. The command line still opens.</li>
             <li><b>WASD</b> or the arrow keys pan. Wheel zooms. Edge of the map scrolls.</li>
             <li>Middle-drag pans. Click the minimap to jump. <b>Space</b> recenters.</li>
-            <li><b>F</b> selects idle workers. <b>Ctrl+1–9</b> saves a group, <b>1–9</b> recalls it.</li>
+            <li><b>F</b> selects idle stalkers. <b>Ctrl+1–9</b> saves a group, <b>1–9</b> recalls it.</li>
             <li>Right-click with a building selected to set its rally point. <b>M</b> mutes.</li>
           </ul>
           <p class="meta">Touch: drag to pan, tap to select, tap the ground to move, tap an enemy to attack.</p>

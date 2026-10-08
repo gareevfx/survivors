@@ -502,13 +502,13 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
-  if (building.kind === 'keep' && kind !== 'porter') return 'The Castle trains workers'
-  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains bikes, tanks, and drones'
-  if (building.kind === 'silo') return 'A silo does not train anyone'
+  if (building.kind === 'keep' && kind !== 'porter') return 'The Silo trains stalkers'
+  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains flashers, gorillas, and hovers'
+  if (building.kind === 'silo') return 'A storage does not train anyone'
   const stats = UNIT_STATS[kind]
-  if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} minerals`
+  if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
   if (state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
-    return 'Population cap reached — raise a Silo'
+    return 'Store Cells cap reached — raise a Storage'
   }
   if (building.queue.length >= 5) return 'Training queue is full'
   state.oreHeld[building.owner] -= stats.cost
@@ -555,11 +555,11 @@ export function tryPlace(
 ): string | null {
   if (state.paused) return null
   if (state.outcome) return 'The battle is over'
-  if (kind === 'keep') return 'The Castle is already standing'
+  if (kind === 'keep') return 'The Silo is already standing'
   const stats = BUILDING_STATS[kind]
-  if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} minerals`
+  if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} dumps`
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
-  if (!placementAllowed(state, owner, kind, tx, ty)) return 'Towers must stand inside Castle sight'
+  if (!placementAllowed(state, owner, kind, tx, ty)) return 'Pillars must stand inside Silo sight'
 
   const porters = state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)
   const preferred = new Set(preferredPorterIds)
@@ -568,8 +568,8 @@ export function tryPlace(
     const choice = nearestFreeBuilder(state, owner, tx, ty, stats.w, stats.h)
     if (!choice) {
       return porters.length
-        ? 'No free Worker. Idle workers build first, then miners.'
-        : 'You need a worker to build'
+        ? 'No free Stalker. Idle stalkers build first, then miners.'
+        : 'You need a stalker to build'
     }
     crew = [choice]
   } else {
@@ -579,7 +579,7 @@ export function tryPlace(
       const db = (b.x - (tx + stats.w / 2) * TILE) ** 2 + (b.y - (ty + stats.h / 2) * TILE) ** 2
       return da - db
     })
-    if (!choices.length) return 'You need a worker to build'
+    if (!choices.length) return 'You need a stalker to build'
     crew = choices.slice(0, Math.min(2, choices.length))
   }
 
@@ -628,7 +628,7 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   if (state.selectedBuilding === building.id) state.selectedBuilding = null
   rebuildBlocked(state)
   recomputeSupply(state)
-  if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} minerals.`)
+  if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} dumps.`)
 }
 
 /**

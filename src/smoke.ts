@@ -109,7 +109,7 @@ function castleSendsTheNearestFreeWorker(): void {
   }
   assert(refusedSpot, 'no open silo site')
   const refused = tryPlace(state, 0, 'silo', refusedSpot.tx, refusedSpot.ty, [])
-  assert(refused === 'No free Worker. Idle workers build first, then miners.', refused ?? 'a busy camp was allowed to build')
+  assert(refused === 'No free Stalker. Idle stalkers build first, then miners.', refused ?? 'a busy camp was allowed to build')
   assert(state.oreHeld[0] === held, 'minerals were spent with no free worker')
   assert(state.buildings.length === before, 'a building was placed with no free worker')
 
@@ -872,7 +872,7 @@ function oreSelectionShowsAmount(): void {
   assert(node, 'missing minerals')
   state.selectedOre = node.id
   const text = describeSelection(state)
-  assert(text.includes('Minerals'), 'minerals panel missing title')
+  assert(text.includes('Dumps'), 'dumps panel missing title')
   assert(!text.includes('>Ore<'), 'minerals panel still says Ore')
   assert(text.includes(`${node.amount} remaining`), `minerals panel missing amount: ${text}`)
   const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
@@ -880,8 +880,8 @@ function oreSelectionShowsAmount(): void {
   state.selectedOre = null
   state.selectedUnits = [worker.id]
   const workerPanel = describeSelection(state)
-  assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Worker', 'selection does not say Worker')
-  assert(workerPanel.includes('minerals'), 'worker panel does not say minerals')
+  assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Stalker', 'selection does not say Stalker')
+  assert(workerPanel.includes('dumps'), 'stalker panel does not say dumps')
   state.selectedUnits = []
   state.selectedOre = node.id
   node.amount = 80
@@ -2296,7 +2296,7 @@ function towerFitsInsideCastleSightAndShoots(): void {
   assert(placementAllowed(state, 0, 'tower', inside.tx, inside.ty), 'a cell inside Castle sight rejected the Tower')
   assert(!placementAllowed(state, 0, 'tower', outside.tx, outside.ty), 'a cell outside Castle sight accepted the Tower')
   const refused = tryPlace(state, 0, 'tower', outside.tx, outside.ty, [])
-  assert(refused === 'Towers must stand inside Castle sight', refused ?? 'the outside Tower was built')
+  assert(refused === 'Pillars must stand inside Silo sight', refused ?? 'the outside Tower was built')
   assert(BUILDING_STATS.tower.w === 1 && BUILDING_STATS.tower.h === 1, 'the Tower is not one cell')
   assert(BUILDING_STATS.tower.sight === UNIT_STATS.drone.sight, 'Tower sight does not match the Drone')
   assert(BUILDING_STATS.tower.damage === 8 / 3, 'Tower damage is not one third of 8')
