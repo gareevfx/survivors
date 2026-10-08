@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelLastStalker, cancelTrain, commandStop, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/commands'
 import { toggleScanner } from '../game/scanner'
 import { buildingById, unitById } from '../game/state'
 import {
@@ -155,21 +155,14 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       ]
     }
     if (building.kind === 'keep') {
-      const stalkerQueued = building.queue.some((job) => job.kind === 'porter')
-      return [
+      const cmds = [
         trainButton(state, building.id, 'porter'),
-        {
-          id: 'cancel-stalker',
-          label: 'Cancel (last order)',
-          hotkey: 'Z',
-          title: stalkerQueued ? 'Refund the latest Stalker and its cells' : 'No Stalker is queued',
-          disabled: !stalkerQueued,
-          run: () => cancelLastStalker(state, building.id),
-        },
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
       ]
+      if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
+      return cmds
     }
     if (building.kind === 'yard') {
       const cmds = [
@@ -177,16 +170,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         trainButton(state, building.id, 'howler'),
         trainButton(state, building.id, 'drone'),
       ]
-      if (building.queue.length) {
-        cmds.push({
-          id: 'cancel-train',
-          label: 'Cancel',
-          detail: 'last order',
-          title: 'Refund the latest training order',
-          disabled: false,
-          run: () => cancelTrain(state, building.id),
-        })
-      }
+      if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
     }
     return []
@@ -245,6 +229,17 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
     return cmds
   }
   return []
+}
+
+function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
+  return {
+    id: 'cancel-train',
+    label: 'Cancel',
+    detail: 'last order',
+    title: 'Refund the latest training order',
+    disabled: false,
+    run: () => cancelTrain(state, buildingId),
+  }
 }
 
 function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions): Cmd {

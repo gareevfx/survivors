@@ -5,7 +5,6 @@ import {
   commandGather,
   commandMove,
   commandRally,
-  cancelLastStalker,
   commandStop,
   tryPlace,
   tryTrain,
@@ -506,8 +505,7 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyJ' ||
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
-        event.code === 'KeyC' ||
-        event.code === 'KeyZ')
+        event.code === 'KeyC')
     ) {
       return
     }
@@ -550,12 +548,6 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyH') {
       trainSelected('drone')
-      return
-    }
-    if (event.code === 'KeyZ') {
-      if (state.paused || state.selectedUnits.length) return
-      const silo = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
-      if (silo?.owner === 0 && silo.kind === 'keep' && silo.complete) cancelLastStalker(state, silo.id)
       return
     }
     if (event.code === 'KeyC') {
