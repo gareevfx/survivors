@@ -300,6 +300,13 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
   }
 }
 
+/** Show a third-based damage value as a fraction, so 8/3 does not print as a long decimal. */
+function formatThirds(value: number): string {
+  const thirds = Math.round(value * 3)
+  if (Math.abs(value * 3 - thirds) < 1e-6 && thirds % 3 !== 0) return `${thirds}/3`
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
+
 export function describeSelection(state: MatchState): string {
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building && state.selectedUnits.length === 0) {
@@ -322,6 +329,7 @@ export function describeSelection(state: MatchState): string {
       <h2>${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
+      ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Drones take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Worker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
       ${building.complete ? '<p class="meta">Right-click the map to set the rally point.</p>' : ''}

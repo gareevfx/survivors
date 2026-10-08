@@ -128,6 +128,8 @@ export interface BuildingStats {
   buildTime: number
   supply: number
   sight: number
+  /** Shot damage. Only a Tower fires. Hit points keep the fraction. */
+  damage?: number
 }
 
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
@@ -166,7 +168,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Tower',
-    blurb: 'One cell. Sees as far as a Drone and shoots the closest enemy in that sight, with a Bike\'s damage and rate, including half damage to Drones. Place it inside Castle sight.',
+    blurb: 'One cell. Sees as far as a Drone and shoots the closest enemy in that sight for 8/3 damage, at a Bike\'s rate. Drones take half of that. Place it inside Castle sight.',
     w: 1,
     h: 1,
     hp: 320,
@@ -174,6 +176,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     buildTime: 14,
     supply: 0,
     sight: UNIT_STATS.drone.sight,
+    damage: 8 / 3,
   },
 }
 

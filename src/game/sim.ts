@@ -745,7 +745,7 @@ function tryFire(state: MatchState, unit: Unit): void {
 }
 
 /**
- * A finished Tower uses the Bike's damage and rate, and the Drone's sight as its range.
+ * A finished Tower uses its own damage, a Bike's rate, and the Drone's sight as its range.
  * It holds the closest enemy it can see until that enemy leaves sight or dies.
  * Rocks and trees block the shot. Ground the Tower cannot currently see is ignored.
  */
@@ -757,6 +757,8 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     return
   }
   const pike = UNIT_STATS.pike
+  const damage = BUILDING_STATS.tower.damage
+  if (damage == null) return
   const origin = buildingCenter(building)
   let target = lockedTowerTarget(state, building, origin)
   if (!target) {
@@ -779,7 +781,7 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     y: origin.y + Math.sin(aim) * 14,
     targetId: target.id,
     targetKind: target.targetKind,
-    damage: pike.damage,
+    damage,
     speed: pike.projectileSpeed,
     radius: pike.projectileRadius,
     life: 2.6,

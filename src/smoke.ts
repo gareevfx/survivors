@@ -27,6 +27,11 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+/** Hit points are numbers, so 8/3 is stored. Subtracting it from a whole value can be off by one bit. */
+function sameDamage(actual: number, expected: number): boolean {
+  return Math.abs(actual - expected) < 1e-9
+}
+
 function castleSendsTheNearestFreeWorker(): void {
   const state = createMatch(4)
   state.oreHeld[0] = 800
@@ -2294,6 +2299,8 @@ function towerFitsInsideCastleSightAndShoots(): void {
   assert(refused === 'Towers must stand inside Castle sight', refused ?? 'the outside Tower was built')
   assert(BUILDING_STATS.tower.w === 1 && BUILDING_STATS.tower.h === 1, 'the Tower is not one cell')
   assert(BUILDING_STATS.tower.sight === UNIT_STATS.drone.sight, 'Tower sight does not match the Drone')
+  assert(BUILDING_STATS.tower.damage === 8 / 3, 'Tower damage is not one third of 8')
+  assert(UNIT_STATS.pike.damage === 8, 'Bike damage changed with the Tower')
   const built = tryPlace(state, 0, 'tower', inside.tx, inside.ty, [])
   assert(built === null, built ?? 'the Tower inside Castle sight was refused')
   const placed = state.buildings.find((building) => building.kind === 'tower')
@@ -2335,7 +2342,7 @@ function towerFitsInsideCastleSightAndShoots(): void {
       break
     }
   }
-  assert(drop === UNIT_STATS.pike.damage, `the Tower dealt ${drop}, not a Bike's ${UNIT_STATS.pike.damage}`)
+  assert(sameDamage(drop, BUILDING_STATS.tower.damage ?? 0), `the Tower dealt ${drop}, not ${BUILDING_STATS.tower.damage}`)
   foe.hp = 0
   const drone = makeUnit(fight, 1, 'drone', origin.x + 28, origin.y + 6)
   let droneDrop = 0
@@ -2347,7 +2354,7 @@ function towerFitsInsideCastleSightAndShoots(): void {
       break
     }
   }
-  assert(droneDrop === UNIT_STATS.pike.damage / 2, `the Tower dealt ${droneDrop} to a Drone`)
+  assert(sameDamage(droneDrop, (BUILDING_STATS.tower.damage ?? 0) / 2), `the Tower dealt ${droneDrop} to a Drone`)
   drone.hp = 0
   const rockTx = spot.tx + 1 < MAP_W ? spot.tx + 1 : spot.tx - 1
   fight.tiles[spot.ty * MAP_W + rockTx] = 1
@@ -2493,7 +2500,7 @@ function towerFiresOutToItsSight(): void {
     const shot = state.projectiles.find((entry) => entry.sourceId === tower.id)
     if (
       shot &&
-      shot.damage === UNIT_STATS.pike.damage &&
+      shot.damage === BUILDING_STATS.tower.damage &&
       shot.speed === UNIT_STATS.pike.projectileSpeed &&
       shot.radius === UNIT_STATS.pike.projectileRadius
     ) {
@@ -2505,7 +2512,7 @@ function towerFiresOutToItsSight(): void {
     }
   }
   assert(shotSeen, 'the Tower shot was not a Bike projectile')
-  assert(drop === UNIT_STATS.pike.damage, `the Tower dealt ${drop} at the edge of its sight`)
+  assert(sameDamage(drop, BUILDING_STATS.tower.damage ?? 0), `the Tower dealt ${drop} at the edge of its sight`)
   assert(behindRock.hp === UNIT_STATS.porter.hp, 'the Tower shot through a rock')
   assert(behindTree.hp === UNIT_STATS.porter.hp, 'the Tower shot through a tree')
   assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower shot an enemy outside its sight')
@@ -2538,7 +2545,7 @@ function towerFiresOutToItsSight(): void {
       break
     }
   }
-  assert(closerDrop === UNIT_STATS.pike.damage, `the Tower did not retarget after the kill (${closerDrop})`)
+  assert(sameDamage(closerDrop, BUILDING_STATS.tower.damage ?? 0), `the Tower did not retarget after the kill (${closerDrop})`)
   assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower fired into the fog after retargeting')
 
   const foeHome = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
@@ -2584,7 +2591,7 @@ function towerFiresOutToItsSight(): void {
       break
     }
   }
-  assert(foeDrop === UNIT_STATS.pike.damage, `the Dunmarch Tower dealt ${foeDrop} at the edge of its sight`)
+  assert(sameDamage(foeDrop, BUILDING_STATS.tower.damage ?? 0), `the Dunmarch Tower dealt ${foeDrop} at the edge of its sight`)
 
   victim.hp = 0
   const drone = makeUnit(state, 0, 'drone', victim.x, victim.y)
@@ -2598,7 +2605,7 @@ function towerFiresOutToItsSight(): void {
       break
     }
   }
-  assert(droneDrop === UNIT_STATS.pike.damage / 2, `the Tower dealt ${droneDrop} to a Drone at the edge of its sight`)
+  assert(sameDamage(droneDrop, (BUILDING_STATS.tower.damage ?? 0) / 2), `the Tower dealt ${droneDrop} to a Drone at the edge of its sight`)
 }
 
 function workersMineCastleMineralsThenTheNearestPatch(): void {
