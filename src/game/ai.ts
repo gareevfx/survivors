@@ -66,6 +66,9 @@ function idlePorter(unit: Unit, owner: PlayerId): boolean {
 
 /** Unexplored ground this close to the scout is searched first, so new minerals are found before a long hunt. */
 const SCOUT_LOCAL = 16 * TILE
+/** A Drone stays this far from a Bike it can see. A Bike's shot reaches 46. */
+export const DRONE_BIKE_AVOID = 80
+const DRONE_KEEP = 2
 
 /**
  * Pick the next patch of fog to enter.
@@ -113,10 +116,125 @@ function scoutFor(state: MatchState, side: Brain, fromX: number, fromY: number):
   return null
 }
 
-/** A Drone, else a Bike, else one spare Worker. Tanks stay with the army. */
+function seenEnemyBikes(state: MatchState, side: Brain): Array<{ x: number; y: number }> {
+  const bikes: Array<{ x: number; y: number }> = []
+  for (const unit of state.units) {
+    if (unit.owner !== side.foe || unit.kind !== 'pike' || unit.hp <= 0) continue
+    if (!tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    bikes.push({ x: unit.x, y: unit.y })
+  }
+  return bikes
+}
+
+function nearBike(bikes: Array<{ x: number; y: number }>, x: number, y: number): boolean {
+  return bikes.some((bike) => Math.hypot(bike.x - x, bike.y - y) < DRONE_BIKE_AVOID)
+}
+
+/**
+ * Next flight for a Drone. Nearby black ground comes first (hidden minerals),
+ * then unexplored ground toward the enemy Castle, then gray ground that is
+ * not being watched. After the whole map is in sight, the Drone patrols.
+ */
+function droneGoal(
+  state: MatchState,
+  side: Brain,
+  fromX: number,
+  fromY: number,
+  reserved: Array<{ x: number; y: number }>,
+): { x: number; y: number } {
+  const bikes = seenEnemyBikes(state, side)
+  const castle = spottedKeep(state, side.owner)
+  const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
+  const home = keep ? buildingCenter(keep) : { x: fromX, y: fromY }
+  const far = { x: MAP_W * TILE - home.x, y: MAP_H * TILE - home.y }
+  const foes = state.units.filter(
+    (unit) =>
+      unit.owner === side.foe &&
+      unit.hp > 0 &&
+      unit.kind !== 'pike' &&
+      tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE)),
+  )
+  const crowded = (x: number, y: number) => reserved.some((spot) => Math.hypot(spot.x - x, spot.y - y) < 8 * TILE)
+  let local: { x: number; y: number; d: number } | null = null
+  let hunt: { x: number; y: number; score: number } | null = null
+  let shroud: { x: number; y: number; score: number } | null = null
+  for (let ty = 0; ty < MAP_H; ty += 2) {
+    for (let tx = 0; tx < MAP_W; tx += 2) {
+      const index = ty * MAP_W + tx
+      const explored = side.explored[index] === 1
+      const visible = side.visible[index] === 1
+      if (explored && visible) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      const fromScout = Math.hypot(x - fromX, y - fromY)
+      if (fromScout < TILE * 2) continue
+      if (nearBike(bikes, x, y)) continue
+      const share = crowded(x, y) ? 2400 : 0
+      const towardEnemy = Math.hypot(x - far.x, y - far.y)
+      if (!explored) {
+        if (fromScout <= SCOUT_LOCAL && (!local || fromScout + share < local.d)) local = { x, y, d: fromScout + share }
+        const score = fromScout + towardEnemy * 0.35 + share
+        if (!hunt || score < hunt.score) hunt = { x, y, score }
+        continue
+      }
+      let score = fromScout + 700 + share
+      if (castle) score += Math.hypot(x - castle.x, y - castle.y) * 0.2
+      for (const foe of foes) {
+        if (Math.hypot(x - foe.x, y - foe.y) < 220) score -= 280
+      }
+      if (!shroud || score < shroud.score) shroud = { x, y, score }
+    }
+  }
+  if (local && local.d <= SCOUT_LOCAL) return { x: local.x, y: local.y }
+  if (hunt) return { x: hunt.x, y: hunt.y }
+  if (local) return { x: local.x, y: local.y }
+  if (shroud) return { x: shroud.x, y: shroud.y }
+  const patrol = [
+    { x: 4.5 * TILE, y: 4.5 * TILE },
+    { x: (MAP_W - 4.5) * TILE, y: 4.5 * TILE },
+    { x: 4.5 * TILE, y: (MAP_H - 4.5) * TILE },
+    { x: (MAP_W - 4.5) * TILE, y: (MAP_H - 4.5) * TILE },
+    { x: far.x, y: far.y },
+  ]
+  let best = patrol[0] ?? { x: fromX + TILE * 4, y: fromY }
+  let bestD = -1
+  for (const spot of patrol) {
+    if (nearBike(bikes, spot.x, spot.y)) continue
+    const distance = Math.hypot(spot.x - fromX, spot.y - fromY) - (crowded(spot.x, spot.y) ? 10000 : 0)
+    if (distance > bestD) {
+      bestD = distance
+      best = spot
+    }
+  }
+  return best
+}
+
+/** Every living Drone stays on a scout flight. A second Drone takes a different patch. */
+function dispatchDrones(state: MatchState, side: Brain): void {
+  const drones = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
+  if (!drones.length) return
+  const bikes = seenEnemyBikes(state, side)
+  const reserved: Array<{ x: number; y: number }> = []
+  for (const drone of drones) {
+    const order = drone.order
+    const traveling = order?.type === 'move' && Math.hypot(drone.x - order.x, drone.y - order.y) > 80
+    const threatened =
+      nearBike(bikes, drone.x, drone.y) || (order?.type === 'move' && nearBike(bikes, order.x, order.y))
+    if (traveling && !threatened) {
+      reserved.push({ x: order.x, y: order.y })
+      side.scout = drone.id
+      continue
+    }
+    const goal = droneGoal(state, side, drone.x, drone.y, reserved)
+    reserved.push(goal)
+    side.scout = drone.id
+    commandMove(state, [drone.id], goal.x, goal.y, false)
+  }
+}
+
+/** A Bike, else one spare Worker, while no Drone is flying. Tanks stay with the army. */
 function claimScout(state: MatchState, side: Brain, idle: Unit[]): Unit | null {
-  const drone = state.units.find((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
-  if (drone) return drone
+  if (state.units.some((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)) return null
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const castleKnown = spottedKeep(state, side.owner) != null
   const current = state.units.find((unit) => unit.id === side.scout && unit.owner === side.owner && unit.hp > 0)
@@ -200,8 +318,30 @@ export function updateAi(state: MatchState, dt: number): void {
   runSide(state, 0)
 }
 
+function dronesToTrain(state: MatchState, side: Brain): number {
+  let living = 0
+  for (const unit of state.units) {
+    if (unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0) living += 1
+  }
+  let queued = 0
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.hp <= 0) continue
+    for (const job of building.queue) if (job.kind === 'drone') queued += 1
+  }
+  const have = living + queued
+  if (have >= DRONE_KEEP) return 0
+  if (have === 0) return 1
+  let combat = 0
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.hp <= 0) continue
+    if (unit.kind === 'pike' || unit.kind === 'howler') combat += 1
+  }
+  return combat >= 2 ? 1 : 0
+}
+
 function runSide(state: MatchState, owner: PlayerId): void {
   const side = brain(state, owner)
+  dispatchDrones(state, side)
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const idle = porters.filter((unit) => idlePorter(unit, side.owner))
   const scout = claimScout(state, side, idle)
@@ -238,16 +378,11 @@ function runSide(state: MatchState, owner: PlayerId): void {
   const readyYards = state.buildings.filter(
     (building) => building.owner === side.owner && building.kind === 'yard' && building.complete && building.hp > 0,
   )
-  let wantsDrone =
-    !state.units.some((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0) &&
-    !state.buildings.some(
-      (building) =>
-        building.owner === side.owner && building.hp > 0 && building.queue.some((job) => job.kind === 'drone'),
-    )
+  let dronesLeft = dronesToTrain(state, side)
   for (const readyYard of readyYards) {
     if (readyYard.queue.length >= 1) continue
-    if (wantsDrone && tryTrain(state, readyYard.id, 'drone') === null) {
-      wantsDrone = false
+    if (dronesLeft > 0 && tryTrain(state, readyYard.id, 'drone') === null) {
+      dronesLeft -= 1
       continue
     }
     const first = side.next

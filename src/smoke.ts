@@ -1,7 +1,8 @@
-import { scoutArea } from './game/ai'
+import { DRONE_BIKE_AVOID, scoutArea } from './game/ai'
 import { runCommand } from './game/console'
-import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD } from './game/map'
+import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
@@ -1876,8 +1877,133 @@ combatResolves()
 keepDecidesTheField()
 enemyPlays()
 wideMapHidesObjectsAndMakesDunmarchScout()
+aiBuildingsLeaveAGapAndAvoidMinerals()
+aiDroneNeverIdles()
 droneFliesFromTheFactory()
 console.log('smoke ok')
+
+function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
+  const dx = ox < tx ? tx - ox : ox > tx + w - 1 ? ox - (tx + w - 1) : 0
+  const dy = oy < ty ? ty - oy : oy > ty + h - 1 ? oy - (ty + h - 1) : 0
+  return Math.max(dx, dy)
+}
+
+function aiBuildingsLeaveAGapAndAvoidMinerals(): void {
+  for (const seed of [1, 2, 5, 8]) {
+    const state = createMatch(seed)
+    state.oreHeld[1] = 8000
+    const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+    assert(keep, 'missing Dunmarch castle')
+    for (let n = 0; n < 4; n++) {
+      const placed = aiPlaceNearKeep(state, n % 2 === 0 ? 'yard' : 'silo', 1)
+      assert(placed, `seed ${seed} could not place AI building ${n}`)
+      const building = state.buildings[state.buildings.length - 1]
+      assert(building, 'placement did not add a building')
+      building.complete = true
+      building.progress = 1
+      for (const unit of state.units) {
+        if (unit.order?.type !== 'construct') continue
+        unit.order = null
+        unit.path = []
+        unit.goalX = null
+        unit.goalY = null
+      }
+      rebuildBlocked(state)
+    }
+    const built = state.buildings.filter((building) => building.owner === 1 && building.kind !== 'keep')
+    assert(built.length >= 4, `seed ${seed} placed ${built.length} AI buildings`)
+    const lanes = mineralLaneTiles(state, keep.tx + 1, keep.ty + 1)
+    for (const building of built) {
+      const stats = BUILDING_STATS[building.kind]
+      for (let y = building.ty - AI_BUILD_GAP; y <= building.ty + stats.h - 1 + AI_BUILD_GAP; y++) {
+        for (let x = building.tx - AI_BUILD_GAP; x <= building.tx + stats.w - 1 + AI_BUILD_GAP; x++) {
+          const inside = x >= building.tx && x < building.tx + stats.w && y >= building.ty && y < building.ty + stats.h
+          if (inside) continue
+          assert(x >= 0 && y >= 0 && x < MAP_W && y < MAP_H, `seed ${seed} building touches the map edge`)
+          assert(isWalkable(state, x, y), `seed ${seed} ${building.kind} has no free cell at ${x},${y}`)
+          assert(state.tiles[y * MAP_W + x] !== 1 && state.tiles[y * MAP_W + x] !== 3, 'a rock or tree touches an AI building')
+        }
+      }
+      for (const node of state.ore) {
+        if (node.amount <= 0) continue
+        const gap = footprintGap(building.tx, building.ty, stats.w, stats.h, node.tx, node.ty)
+        assert(gap >= AI_MINERAL_KEEP, `seed ${seed} ${building.kind} is ${gap} tiles from minerals`)
+      }
+      for (let y = 0; y < stats.h; y++) {
+        for (let x = 0; x < stats.w; x++) {
+          assert(
+            !lanes.has((building.ty + y) * MAP_W + (building.tx + x)),
+            `seed ${seed} ${building.kind} sits on the haul to minerals`,
+          )
+        }
+      }
+    }
+  }
+}
+
+function aiDroneNeverIdles(): void {
+  const state = createMatch(3)
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing Dunmarch castle')
+  const drone = makeUnit(state, 1, 'drone', (enemy.tx + 1.5) * TILE, (enemy.ty + 1.5) * TILE)
+  const startX = drone.x
+  const startY = drone.y
+  let idle = 0
+  for (let i = 0; i < 40; i++) {
+    step(state, 0.5)
+    const now = unitById(state, drone.id)
+    assert(now && now.hp > 0, 'the Drone died while scouting')
+    if (!now.order) idle += 1
+    else idle = 0
+    assert(idle <= 1, 'the Drone stayed idle for more than a moment')
+  }
+  const flown = unitById(state, drone.id)
+  assert(flown, 'missing the Drone')
+  assert(Math.hypot(flown.x - startX, flown.y - startY) > 80, 'the Drone did not fly a scout route')
+  if (flown.order?.type === 'move') {
+    flown.x = flown.order.x
+    flown.y = flown.order.y
+  }
+  flown.order = null
+  flown.path = []
+  flown.goalX = null
+  flown.goalY = null
+  step(state, 0.5)
+  const resumed = unitById(state, drone.id)
+  assert(resumed?.order?.type === 'move', 'the Drone stayed idle after arriving')
+
+  const bike = makeUnit(state, 0, 'pike', resumed.x + 30, resumed.y)
+  state.aiVisible[Math.floor(bike.y / TILE) * MAP_W + Math.floor(bike.x / TILE)] = 1
+  step(state, 0.5)
+  const avoiding = unitById(state, drone.id)
+  assert(avoiding?.order?.type === 'move', 'the Drone had no flight away from the Bike')
+  if (avoiding.order?.type === 'move') {
+    const distance = Math.hypot(avoiding.order.x - bike.x, avoiding.order.y - bike.y)
+    assert(distance >= DRONE_BIKE_AVOID, `the Drone flew toward a Bike (${distance.toFixed(0)})`)
+  }
+
+  const second = createMatch(6)
+  const yard = makeBuilding(second, 1, 'yard', 60, 10, true)
+  second.oreHeld[1] = 500
+  const home = second.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a castle for the second Drone')
+  makeUnit(second, 1, 'drone', (home.tx + 1.5) * TILE, (home.ty + 1.5) * TILE)
+  makeUnit(second, 1, 'pike', (home.tx + 4.5) * TILE, (home.ty + 1.5) * TILE)
+  makeUnit(second, 1, 'pike', (home.tx + 5.5) * TILE, (home.ty + 1.5) * TILE)
+  step(second, 0.5)
+  assert(
+    yard.queue.some((job) => job.kind === 'drone'),
+    'Dunmarch did not train a second Drone',
+  )
+
+  const north = createMatch(4)
+  north.aiControl = true
+  const castle = north.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(castle, 'missing the Northmark castle')
+  const playerDrone = makeUnit(north, 0, 'drone', (castle.tx + 1.5) * TILE, (castle.ty + 1.5) * TILE)
+  step(north, 0.5)
+  assert(unitById(north, playerDrone.id)?.order?.type === 'move', 'AI Control left the Northmark Drone idle')
+}
 
 function droneFliesFromTheFactory(): void {
   const state = createMatch(16)

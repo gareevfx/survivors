@@ -1,6 +1,19 @@
 import { findPath } from './pathfind'
 import { canPlace, isWalkable, rockAt } from './state'
-import { GATHER_TIME, MAP_H, MAP_PX_H, MAP_PX_W, MAP_W, ROCK_HP, TILE, UNIT_STATS, type MatchState, type Rock, type Unit } from './types'
+import {
+  BUILDING_STATS,
+  GATHER_TIME,
+  MAP_H,
+  MAP_PX_H,
+  MAP_PX_W,
+  MAP_W,
+  ROCK_HP,
+  TILE,
+  UNIT_STATS,
+  type MatchState,
+  type Rock,
+  type Unit,
+} from './types'
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -128,6 +141,37 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
   return true
 }
 
+/** Walkable tiles kept around every side of an AI building, including corners. */
+export const AI_BUILD_GAP = 1
+/**
+ * Chebyshev tiles between an AI footprint and any mineral tile.
+ * A gap of 3 leaves two open tiles between the building and the patch.
+ */
+export const AI_MINERAL_KEEP = 3
+/**
+ * Mineral patches this close to the Castle center reserve the straight haul.
+ * The starting patches sit about eight tiles out, so 12 covers them and
+ * leaves the long roads to distant patches free for building.
+ */
+export const AI_MINERAL_LANE = 12
+
+/** Tiles on the straight haul from a Castle center to each nearby mineral patch. */
+export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set<number> {
+  const lanes = new Set<number>()
+  const reach = AI_MINERAL_LANE * AI_MINERAL_LANE
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    const dx = node.tx - cx
+    const dy = node.ty - cy
+    if (dx * dx + dy * dy > reach) continue
+    for (const [tx, ty] of lineTiles(cx, cy, node.tx, node.ty)) {
+      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
+      lanes.add(ty * MAP_W + tx)
+    }
+  }
+  return lanes
+}
+
 export function findBuildSpot(
   state: MatchState,
   kind: 'yard' | 'silo',
@@ -136,15 +180,75 @@ export function findBuildSpot(
 ): { tx: number; ty: number } | null {
   const cx = anchorTx + 1
   const cy = anchorTy + 1
+  const lanes = mineralLaneTiles(state, cx, cy)
   for (let r = 5; r < MAP_W; r++) {
     for (let y = cy - r; y <= cy + r; y++) {
       for (let x = cx - r; x <= cx + r; x++) {
         if (Math.abs(x - cx) !== r && Math.abs(y - cy) !== r) continue
-        if (canPlace(state, kind, x, y)) return { tx: x, ty: y }
+        if (aiMayBuild(state, kind, x, y, lanes)) return { tx: x, ty: y }
       }
     }
   }
   return null
+}
+
+function aiMayBuild(
+  state: MatchState,
+  kind: 'yard' | 'silo',
+  tx: number,
+  ty: number,
+  lanes: Set<number>,
+): boolean {
+  if (!canPlace(state, kind, tx, ty)) return false
+  const stats = BUILDING_STATS[kind]
+  for (let y = ty - AI_BUILD_GAP; y <= ty + stats.h - 1 + AI_BUILD_GAP; y++) {
+    for (let x = tx - AI_BUILD_GAP; x <= tx + stats.w - 1 + AI_BUILD_GAP; x++) {
+      const footprint = x >= tx && x < tx + stats.w && y >= ty && y < ty + stats.h
+      if (footprint) continue
+      if (!isWalkable(state, x, y)) return false
+    }
+  }
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    if (footprintDistance(tx, ty, stats.w, stats.h, node.tx, node.ty) < AI_MINERAL_KEEP) return false
+  }
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (lanes.has((ty + y) * MAP_W + (tx + x))) return false
+    }
+  }
+  return true
+}
+
+function footprintDistance(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
+  const dx = ox < tx ? tx - ox : ox > tx + w - 1 ? ox - (tx + w - 1) : 0
+  const dy = oy < ty ? ty - oy : oy > ty + h - 1 ? oy - (ty + h - 1) : 0
+  return Math.max(dx, dy)
+}
+
+function lineTiles(x0: number, y0: number, x1: number, y1: number): Array<[number, number]> {
+  const tiles: Array<[number, number]> = []
+  const dx = Math.abs(x1 - x0)
+  const dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  let x = x0
+  let y = y0
+  for (let guard = 0; guard <= dx + dy + 1; guard++) {
+    tiles.push([x, y])
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+  }
+  return tiles
 }
 
 const APPROACH: ReadonlyArray<readonly [number, number]> = [
