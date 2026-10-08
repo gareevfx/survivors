@@ -306,13 +306,15 @@ export function createMatch(seed: number): MatchState {
 
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (field.tiles[tileIndex(tx, ty)] !== 1) continue
+      const tile = field.tiles[tileIndex(tx, ty)]
+      if (tile !== 1 && tile !== 3) continue
       state.rocks.push({
         id: state.nextId++,
         tx,
         ty,
         hp: ROCK_HP,
         hitFlash: 0,
+        kind: tile === 3 ? 'tree' : 'rock',
       })
     }
   }

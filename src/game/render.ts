@@ -57,6 +57,30 @@ export function buildTerrain(seed: number): HTMLCanvasElement {
   return canvas
 }
 
+function drawTree(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
+  const x = tx * TILE + TILE / 2
+  const y = ty * TILE + TILE / 2
+  const j = hash2(tx + 11, ty + 4, seed)
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'
+  ctx.beginPath()
+  ctx.ellipse(x + 1, y + 9, 11, 4.2, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = j > 0.5 ? '#6b4423' : '#8a5a32'
+  ctx.fillRect(x - 2.2, y + 1, 4.4, 11)
+  ctx.fillStyle = j > 0.45 ? '#6d4a28' : '#3f6b32'
+  ctx.beginPath()
+  ctx.arc(x + 4, y - 1, 7.5, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = j > 0.5 ? '#3c8f38' : '#4ea24a'
+  ctx.beginPath()
+  ctx.arc(x - 2, y - 5, 9.2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = j > 0.6 ? '#8d6230' : '#d2e07a'
+  ctx.beginPath()
+  ctx.arc(x - 5, y - 8, 3.1, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 function drawRock(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
   const x = tx * TILE + TILE / 2
   const y = ty * TILE + TILE / 2
@@ -122,7 +146,8 @@ export function renderWorld(
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    drawRock(ctx, rock.tx, rock.ty, state.seed)
+    if (rock.kind === 'tree') drawTree(ctx, rock.tx, rock.ty, state.seed)
+    else drawRock(ctx, rock.tx, rock.ty, state.seed)
     if (rock.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
       ctx.beginPath()
@@ -708,11 +733,13 @@ export function renderMinimap(
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
-  ctx.fillStyle = '#3a3832'
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
       if (!viewTileExplored(state, tx, ty)) continue
-      if (state.tiles[ty * MAP_W + tx] === 1) ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
+      const tile = state.tiles[ty * MAP_W + tx]
+      if (tile !== 1 && tile !== 3) continue
+      ctx.fillStyle = tile === 3 ? '#3d9a45' : '#3a3832'
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
   ctx.fillStyle = '#e6c15a'

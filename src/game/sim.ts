@@ -873,7 +873,7 @@ function clearBrokenRocks(state: MatchState): void {
   const deadIds = new Set(dead.map((rock) => rock.id))
   for (const rock of dead) {
     state.tiles[rock.ty * MAP_W + rock.tx] = 0
-    burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, '#b7b1a6', 7)
+    burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, rock.kind === 'tree' ? '#6ea84a' : '#b7b1a6', 7)
   }
   state.rocks = state.rocks.filter((rock) => rock.hp > 0)
   rebuildBlocked(state)

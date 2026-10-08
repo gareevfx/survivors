@@ -276,7 +276,8 @@ export function rockShotClear(
     if (tx === a.tx && ty === a.ty) return false
     if (tx === b.tx && ty === b.ty) return false
     if (tx < 0 || ty < 0 || tx >= w || ty >= h) return true
-    return tiles[ty * w + tx] === 1
+    const tile = tiles[ty * w + tx] ?? 0
+    return tile === 1 || tile === 3
   }
   const guardMax = dx + dy + 4
   for (let guard = 0; guard < guardMax; guard++) {

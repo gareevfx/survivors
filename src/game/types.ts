@@ -50,7 +50,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Worker',
-    blurb: 'Hauls minerals and raises structures. Breaks gray rock that seals a minerals patch.',
+    blurb: 'Hauls minerals and raises structures. Breaks gray rock and trees that seal a minerals patch.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -250,6 +250,8 @@ export interface Rock {
   ty: number
   hp: number
   hitFlash: number
+  /** Trees block, hide behind fog, and break the same way as stone. */
+  kind?: 'rock' | 'tree'
 }
 
 export interface Projectile {

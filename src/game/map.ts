@@ -14,6 +14,8 @@ export interface KeepSite {
 
 const KEEP_W = BUILDING_STATS.keep.w
 const KEEP_H = BUILDING_STATS.keep.h
+/** Open tiles around each Castle footprint, with no rocks or trees. */
+export const CASTLE_YARD = 9
 const KEEP_SIGHT = BUILDING_STATS.keep.sight
 /** Largest integer tile-offset whose center still falls inside Castle sight. */
 const RIM_MAX_R2 = Math.floor((KEEP_SIGHT * KEEP_SIGHT) / (TILE * TILE))
@@ -126,6 +128,7 @@ export function generateBattlefield(
     const cx = 2 + Math.floor(rng() * (MAP_W - 4))
     const cy = 2 + Math.floor(rng() * (MAP_H - 4))
     const rad = 1.15 + rng() * 2.3
+    const grove = rng() < 0.42 ? 3 : 1
     for (let y = -4; y <= 4; y++) {
       for (let x = -4; x <= 4; x++) {
         if (x * x + y * y > rad * rad) continue
@@ -133,7 +136,9 @@ export function generateBattlefield(
         const ty = cy + y
         if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue
         if (guarded(tx, ty)) continue
-        tiles[ty * MAP_W + tx] = 1
+        const index = ty * MAP_W + tx
+        if (tiles[index] !== 0) continue
+        tiles[index] = grove
       }
     }
   }
@@ -203,7 +208,12 @@ export function generateBattlefield(
 }
 
 function inCamp(site: KeepSite, tx: number, ty: number): boolean {
-  return tx >= site.tx - 6 && tx <= site.tx + KEEP_W + 5 && ty >= site.ty - 6 && ty <= site.ty + KEEP_H + 5
+  return (
+    tx >= site.tx - CASTLE_YARD &&
+    tx <= site.tx + KEEP_W - 1 + CASTLE_YARD &&
+    ty >= site.ty - CASTLE_YARD &&
+    ty <= site.ty + KEEP_H - 1 + CASTLE_YARD
+  )
 }
 
 function coversFootprint(site: KeepSite, tx: number, ty: number): boolean {

@@ -26,7 +26,7 @@ No account, server, or network connection is required after install.
 
 You start with a Castle, four workers, and a small store of minerals — not enough for a Factory. Each match places the two Castles in opposite corners, as far apart as that map allows. The nearest minerals sit on the edge of each Castle's sight: inside the starting view, not beside the walls. The red Dunmarch base will gather, build, and march on you.
 
-1. Select the workers (click or drag a box) and right-click a gold minerals patch. Up to three workers work that patch. Any extras walk to the nearest revealed patch that still has room. They do not set out for minerals still under the fog. If gray rock seals a patch, those workers break it, then haul.
+1. Select the workers (click or drag a box) and right-click a gold minerals patch. Up to three workers work that patch. Any extras walk to the nearest revealed patch that still has room. They do not set out for minerals still under the fog. If gray rock or a tree seals a patch, those workers break it, then haul. Trees block and break the same way as rock.
 2. They gather, walk the minerals back to your Castle, and repeat. The count is in the top bar.
 3. Select a worker (or the Castle) and place a **Factory**. Ordering it from the Castle sends the nearest idle Worker, or the nearest miner if every Worker is already hauling. The site rises only while a worker stands on it. If that worker dies or is sent away, the next free Worker takes over. With nobody left to send, the label switches to **Paused** and the minerals stay spent until you cancel. A second worker on the site speeds the work.
 4. Place a **Silo** when the population bar is full. Each Silo adds room for 8 more.
@@ -41,9 +41,9 @@ You start with a Castle, four workers, and a small store of minerals — not eno
 | Select | Left-click. Drag a box for several units. Shift adds. |
 | Select all of one type on screen | Double-click a unit |
 | Move | Right-click ground, or the Move button then left-click |
-| Attack | Right-click an enemy. Right-click gray rock with workers to break it. Bikes and tanks cannot. |
+| Attack | Right-click an enemy. Right-click gray rock or a tree with workers to break it. Bikes and tanks cannot. |
 | Attack-move | `Q`, then left-click |
-| Gather | Right-click minerals with workers selected. At most 3 workers per patch; extras take the nearest revealed patch. They break gray rock that seals their patch. |
+| Gather | Right-click minerals with workers selected. At most 3 workers per patch; extras take the nearest revealed patch. They break gray rock or trees that seal their patch. |
 | Minerals amount | Left-click a minerals patch |
 | Stop | `X` |
 | Factory / Silo | `Y` / `L`, then left-click the map |

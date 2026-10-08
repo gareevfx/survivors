@@ -1,7 +1,8 @@
 import { scoutArea } from './game/ai'
 import { runCommand } from './game/console'
 import { assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
-import { findPath } from './game/pathfind'
+import { CASTLE_YARD } from './game/map'
+import { findPath, rockShotClear } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
@@ -260,6 +261,100 @@ function northmarkPlaysItself(): void {
   assert(fresh.toasts[fresh.toasts.length - 1]?.text === 'AI control is already off.', 'the off notice was wrong')
 }
 
+function castleYardsStayOpen(): void {
+  const stats = BUILDING_STATS.keep
+  for (let seed = 1; seed <= 16; seed++) {
+    const state = createMatch(seed)
+    for (const owner of [0, 1] as const) {
+      const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep')
+      assert(keep, `seed ${seed} side ${owner} is missing a castle`)
+      for (let ty = keep.ty - CASTLE_YARD; ty <= keep.ty + stats.h - 1 + CASTLE_YARD; ty++) {
+        for (let tx = keep.tx - CASTLE_YARD; tx <= keep.tx + stats.w - 1 + CASTLE_YARD; tx++) {
+          if (tx >= keep.tx && tx < keep.tx + stats.w && ty >= keep.ty && ty < keep.ty + stats.h) continue
+          if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
+          const blocker = state.rocks.find((rock) => rock.tx === tx && rock.ty === ty && rock.hp > 0)
+          assert(!blocker, `seed ${seed} side ${owner} has a ${blocker?.kind ?? 'blocker'} in the castle yard`)
+        }
+      }
+    }
+  }
+}
+
+function treesGrowInGrovesAndBlockLikeRocks(): void {
+  let trees = 0
+  let stones = 0
+  let groved = 0
+  for (let seed = 1; seed <= 12; seed++) {
+    const state = createMatch(seed)
+    const treeAt = new Set(
+      state.rocks.filter((rock) => rock.kind === 'tree' && rock.hp > 0).map((rock) => rock.ty * MAP_W + rock.tx),
+    )
+    for (const rock of state.rocks) {
+      if (rock.hp <= 0) continue
+      if (rock.kind === 'tree') {
+        trees += 1
+        let neighbor = false
+        for (let dy = -1; dy <= 1 && !neighbor; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue
+            if (treeAt.has((rock.ty + dy) * MAP_W + (rock.tx + dx))) neighbor = true
+          }
+        }
+        if (neighbor) groved += 1
+        assert(state.tiles[rock.ty * MAP_W + rock.tx] === 3, 'a tree tile is not marked as a tree')
+        assert(!isWalkable(state, rock.tx, rock.ty), 'a tree does not block movement')
+      } else {
+        stones += 1
+        assert(state.tiles[rock.ty * MAP_W + rock.tx] === 1, 'a rock tile is not marked as stone')
+      }
+    }
+  }
+  const share = trees / (trees + stones)
+  assert(trees > 0 && stones > 0, 'the map is missing trees or rocks')
+  assert(share >= 0.33 && share <= 0.5, `trees are ${share.toFixed(2)} of the blockers`)
+  assert(groved / trees >= 0.8, 'trees are scattered as single tiles instead of groves')
+
+  const state = createMatch(6)
+  const tree = state.rocks.find((rock) => rock.kind === 'tree' && rock.hp > 0 && rock.tx > 2 && rock.tx < MAP_W - 3)
+  assert(tree, 'missing a tree to clear')
+  assert(
+    !rockShotClear(state.tiles, MAP_W, MAP_H, { tx: tree.tx - 2, ty: tree.ty }, { tx: tree.tx + 2, ty: tree.ty }),
+    'a shot passes through a tree',
+  )
+  const around = findPath(state.blocked, MAP_W, MAP_H, tree.tx - 1, tree.ty, tree.tx + 1, tree.ty)
+  if (around) {
+    assert(
+      around.every((step) => step.tx !== tree.tx || step.ty !== tree.ty),
+      'a path stepped on a tree',
+    )
+  }
+  let stand: { tx: number; ty: number } | null = null
+  for (let dy = -1; dy <= 1 && !stand; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (isWalkable(state, tree.tx + dx, tree.ty + dy)) {
+        stand = { tx: tree.tx + dx, ty: tree.ty + dy }
+        break
+      }
+    }
+  }
+  assert(stand, 'no open tile beside a tree')
+  const before = tree.hp
+  const porter = makeUnit(state, 0, 'porter', (stand.tx + 0.5) * TILE, (stand.ty + 0.5) * TILE)
+  commandAttack(state, [porter.id], tree.id, 'rock')
+  for (let i = 0; i < 4 * 60; i++) step(state, 1 / 60)
+  const still = state.rocks.find((rock) => rock.id === tree.id)
+  assert((still?.hp ?? 0) < before, 'a worker did not damage the tree')
+
+  const other = state.rocks.find((rock) => rock.kind === 'tree' && rock.hp > 0 && rock.id !== tree.id)
+  assert(other, 'missing a second tree')
+  const bike = makeUnit(state, 0, 'pike', (other.tx + 0.5) * TILE + 20, (other.ty + 0.5) * TILE)
+  const bikeHp = other.hp
+  commandAttack(state, [bike.id], other.id, 'rock')
+  assert(bike.order?.type !== 'attack', 'a bike was sent to chop a tree')
+  for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
+  assert(state.rocks.find((rock) => rock.id === other.id)?.hp === bikeHp, 'a bike damaged a tree')
+}
+
 function pathAroundWall(): void {
   const w = 12
   const h = 12
@@ -449,7 +544,7 @@ function howlerCannotBreakRock(): void {
     [0, 1],
     [0, -1],
   ]
-  const rock = state.rocks.find((entry) => offsets.some(([dx, dy]) => isWalkable(state, entry.tx + dx, entry.ty + dy)))
+  const rock = state.rocks.find((entry) => isWalkable(state, entry.tx + 1, entry.ty))
   assert(rock, 'map has no rock beside open ground')
   assert(!isWalkable(state, rock.tx, rock.ty), 'rock tile should block')
   const before = rock.hp
@@ -498,15 +593,31 @@ function footprintBlocks(state: MatchState, tx: number, ty: number): boolean {
   })
 }
 
-function aiBreaksBlockingRock(): void {
-  const state = createMatch(9)
-  const wallY = 24
+function sealRow(state: MatchState, wallY: number): void {
+  // Open the approach and everything past the wall so one broken rock
+  // is the whole seal. Groves south of the line would otherwise keep
+  // the worker chopping after the gap opens.
+  for (let ty = Math.max(0, wallY - 4); ty < MAP_H; ty++) {
+    if (ty === wallY) continue
+    state.rocks = state.rocks.filter((rock) => rock.ty !== ty)
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (footprintBlocks(state, tx, ty)) continue
+      const tile = state.tiles[ty * MAP_W + tx]
+      if (tile === 1 || tile === 3) state.tiles[ty * MAP_W + tx] = 0
+    }
+  }
   for (let tx = 0; tx < MAP_W; tx++) {
     if (footprintBlocks(state, tx, wallY)) continue
-    if (state.tiles[wallY * MAP_W + tx] === 1) continue
+    state.rocks = state.rocks.filter((rock) => rock.tx !== tx || rock.ty !== wallY)
     state.tiles[wallY * MAP_W + tx] = 1
     state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
   }
+}
+
+function aiBreaksBlockingRock(): void {
+  const state = createMatch(9)
+  const wallY = 24
+  sealRow(state, wallY)
   rebuildBlocked(state)
 
   let spot: { tx: number; ty: number } | null = null
@@ -600,12 +711,7 @@ function workersBreakRockToReachMinerals(): void {
   node.amount = 420
   state.aiExplored[node.ty * MAP_W + node.tx] = 1
   const wallY = 24
-  for (let tx = 0; tx < MAP_W; tx++) {
-    if (footprintBlocks(state, tx, wallY)) continue
-    if (state.tiles[wallY * MAP_W + tx] === 1) continue
-    state.tiles[wallY * MAP_W + tx] = 1
-    state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
-  }
+  sealRow(state, wallY)
   rebuildBlocked(state)
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
   assert(porters.length > 0, 'Dunmarch has no workers')
@@ -784,12 +890,7 @@ function minersClearRockToGather(): void {
     if (ore.id !== node.id) ore.amount = 0
   }
   const wallY = 24
-  for (let tx = 0; tx < MAP_W; tx++) {
-    if (footprintBlocks(state, tx, wallY)) continue
-    if (state.tiles[wallY * MAP_W + tx] === 1) continue
-    state.tiles[wallY * MAP_W + tx] = 1
-    state.rocks.push({ id: state.nextId++, tx, ty: wallY, hp: ROCK_HP, hitFlash: 0 })
-  }
+  sealRow(state, wallY)
   rebuildBlocked(state)
   let spot: { tx: number; ty: number } | null = null
   for (let tx = 4; tx < MAP_W - 4 && !spot; tx++) {
@@ -1737,6 +1838,8 @@ pathAroundWall()
 routeExists()
 castlesSpawnFarApart()
 mineralsSitOnTheVisionEdge()
+castleYardsStayOpen()
+treesGrowInGrovesAndBlockLikeRocks()
 pauseFreezesTheSimulation()
 castleSendsTheNearestFreeWorker()
 buriedMineralsPreferTheFasterRock()
