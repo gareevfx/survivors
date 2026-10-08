@@ -6,6 +6,7 @@ import {
   buildingRect,
   canPlace,
   makeBuilding,
+  placementAllowed,
   pushToast,
   rebuildBlocked,
   recomputeSupply,
@@ -64,6 +65,19 @@ function revealedScore(state: MatchState, unit: Unit, node: { tx: number; ty: nu
   return depositDistance(unit, node)
 }
 
+/** Path length to an expansion. Open ground sorts ahead of a sealed patch. */
+function expansionScore(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const access = haulCost(state, unit, node)
+  if (!Number.isFinite(access)) return 2_000_000_000 + depositDistance(unit, node)
+  return access
+}
+
+function castleMineralsRemain(state: MatchState, owner: PlayerId): boolean {
+  return state.ore.some(
+    (node) => node.amount > 0 && node.base === owner && depositKnown(state, owner, node.tx, node.ty),
+  )
+}
+
 function noteProgress(unit: Unit): void {
   unit.stuckOrderT = 0
   unit.stuckX = unit.x
@@ -95,7 +109,7 @@ function pickMinerTarget(
   state: MatchState,
   miners: Unit[],
   room: (id: number) => boolean,
-  mode: 'revealed' | 'buried',
+  mode: 'base' | 'revealed' | 'buried',
 ): { index: number; node: { id: number; tx: number; ty: number } } | null {
   let bestIndex = -1
   let bestNode: { id: number; tx: number; ty: number } | null = null
@@ -108,9 +122,12 @@ function pickMinerTarget(
       if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
       const known = depositKnown(state, unit.owner, node.tx, node.ty)
       let distance = Infinity
-      if (mode === 'revealed') {
-        if (!known) continue
+      if (mode === 'base') {
+        if (node.base !== unit.owner || !known) continue
         distance = revealedScore(state, unit, node)
+      } else if (mode === 'revealed') {
+        if (!known || node.base === unit.owner) continue
+        distance = expansionScore(state, unit, node)
       } else {
         distance = harvestTime(state, unit, node)
       }
@@ -127,10 +144,11 @@ function pickMinerTarget(
 
 /**
  * Send these miners to ore. A clicked deposit fills first, up to MINERS_PER_DEPOSIT,
- * counting miners already working it. Everyone else takes the nearest revealed
- * deposit they can reach. When no revealed minerals remain, they open the buried
- * patch that takes the least travel and rock-breaking time. Miners with no slot
- * wait (nodeMemory 0) until one opens.
+ * counting miners already working it. Castle-area minerals come next, until that
+ * base is empty. After that, everyone takes the nearest revealed expansion by
+ * path length. When no revealed minerals remain, they open the buried patch that
+ * takes the least travel and rock-breaking time. Miners with no slot wait
+ * (nodeMemory 0) until one opens.
  */
 export function assignMiners(state: MatchState, miners: Unit[], preferredId: number | null): void {
   const crew = miners.filter((unit) => unit.hp > 0 && unit.kind === 'porter')
@@ -166,10 +184,14 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
     }
   }
 
-  const revealedRemain = state.ore.some((node) => node.amount > 0 && depositKnown(state, owner, node.tx, node.ty))
+  const homeLeft = castleMineralsRemain(state, owner)
+  const revealedRemain = state.ore.some(
+    (node) => node.amount > 0 && node.base !== owner && depositKnown(state, owner, node.tx, node.ty),
+  )
   const left = [...pending]
   while (left.length) {
-    const picked = revealedRemain ? pickMinerTarget(state, left, room, 'revealed') : pickMinerTarget(state, left, room, 'buried')
+    const mode = homeLeft ? 'base' : revealedRemain ? 'revealed' : 'buried'
+    const picked = pickMinerTarget(state, left, room, mode)
     if (!picked) break
     const unit = left.splice(picked.index, 1)[0]
     if (!unit) break
@@ -262,8 +284,13 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
     if (id == null) continue
     counts.set(id, (counts.get(id) ?? 0) + 1)
   }
+  const homeLeft = castleMineralsRemain(state, unit.owner)
   const revealedRemain = state.ore.some(
-    (node) => node.amount > 0 && node.id !== excludeId && depositKnown(state, unit.owner, node.tx, node.ty),
+    (node) =>
+      node.amount > 0 &&
+      node.id !== excludeId &&
+      node.base !== unit.owner &&
+      depositKnown(state, unit.owner, node.tx, node.ty),
   )
   let best: { id: number; tx: number; ty: number } | null = null
   let bestD = Infinity
@@ -273,9 +300,18 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
     if ((counts.get(node.id) ?? 0) >= MINERS_PER_DEPOSIT) continue
     if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
     const known = depositKnown(state, unit.owner, node.tx, node.ty)
-    if (revealedRemain) {
-      if (!known) continue
+    if (homeLeft) {
+      if (node.base !== unit.owner || !known) continue
       const distance = revealedScore(state, unit, node)
+      if (distance < bestD) {
+        bestD = distance
+        best = node
+      }
+      continue
+    }
+    if (revealedRemain) {
+      if (!known || node.base === unit.owner) continue
+      const distance = expansionScore(state, unit, node)
       if (distance < bestD) {
         bestD = distance
         best = node
@@ -523,6 +559,7 @@ export function tryPlace(
   const stats = BUILDING_STATS[kind]
   if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} minerals`
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
+  if (!placementAllowed(state, owner, kind, tx, ty)) return 'Towers must stand inside Castle sight'
 
   const porters = state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)
   const preferred = new Set(preferredPorterIds)
@@ -657,7 +694,7 @@ export function coverOpenSites(state: MatchState): void {
   }
 }
 
-export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo', owner: PlayerId = 1): boolean {
+export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower', owner: PlayerId = 1): boolean {
   const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
   const spot = findBuildSpot(state, kind, keep.tx, keep.ty)

@@ -164,6 +164,54 @@ export function getTarget(state: MatchState, id: number, kind: TargetKind): Targ
   return buildingTarget(building)
 }
 
+/** True when a footprint's center lies inside the sight circle of a Castle at this tile. */
+export function footprintInKeepSight(
+  keepTx: number,
+  keepTy: number,
+  tx: number,
+  ty: number,
+  w: number,
+  h: number,
+): boolean {
+  const kx = (keepTx + BUILDING_STATS.keep.w / 2) * TILE
+  const ky = (keepTy + BUILDING_STATS.keep.h / 2) * TILE
+  const x = (tx + w / 2) * TILE
+  const y = (ty + h / 2) * TILE
+  return Math.hypot(x - kx, y - ky) <= BUILDING_STATS.keep.sight + 0.5
+}
+
+/** Terrain check plus the Tower rule: the cell must sit inside that side's Castle sight. */
+export function placementAllowed(
+  state: MatchState,
+  owner: PlayerId,
+  kind: BuildingKind,
+  tx: number,
+  ty: number,
+): boolean {
+  if (!canPlace(state, kind, tx, ty)) return false
+  if (kind !== 'tower') return true
+  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+  if (!keep) return false
+  const stats = BUILDING_STATS.tower
+  return footprintInKeepSight(keep.tx, keep.ty, tx, ty, stats.w, stats.h)
+}
+
+function castlePatchOwner(
+  camps: Array<{ owner: PlayerId; tx: number; ty: number }>,
+  tx: number,
+  ty: number,
+): PlayerId | null {
+  const x = (tx + 0.5) * TILE
+  const y = (ty + 0.5) * TILE
+  const sight = BUILDING_STATS.keep.sight
+  for (const camp of camps) {
+    const cx = (camp.tx + BUILDING_STATS.keep.w / 2) * TILE
+    const cy = (camp.ty + BUILDING_STATS.keep.h / 2) * TILE
+    if (Math.hypot(x - cx, y - cy) <= sight + 0.5) return camp.owner
+  }
+  return null
+}
+
 export function canPlace(state: MatchState, kind: BuildingKind, tx: number, ty: number): boolean {
   const stats = BUILDING_STATS[kind]
   if (tx < 0 || ty < 0 || tx + stats.w > MAP_W || ty + stats.h > MAP_H) return false
@@ -239,6 +287,8 @@ export function makeBuilding(
     rallyY: (ty + stats.h) * TILE + 18,
     hitFlash: 0,
     spawnN: 0,
+    attackCd: 0,
+    alert: 0,
   }
   state.buildings.push(building)
   return building
@@ -296,12 +346,17 @@ export function createMatch(seed: number): MatchState {
     tutorial: true,
   }
 
+  const campsByOwner: Array<{ owner: PlayerId; tx: number; ty: number }> = [
+    { owner: 0, tx: camps.player.tx, ty: camps.player.ty },
+    { owner: 1, tx: camps.enemy.tx, ty: camps.enemy.ty },
+  ]
   for (const spot of field.ore) {
     state.ore.push({
       id: state.nextId++,
       tx: spot.tx,
       ty: spot.ty,
       amount: ORE_NODE_AMOUNT,
+      base: castlePatchOwner(campsByOwner, spot.tx, spot.ty),
     })
   }
 

@@ -368,9 +368,22 @@ function runSide(state: MatchState, owner: PlayerId): void {
   )
   if (!constructing) {
     const supplyRoom = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
-    if (supplyRoom <= 2 && state.oreHeld[side.owner] >= BUILDING_STATS.silo.cost) {
+    const ore = state.oreHeld[side.owner]
+    const yards = state.buildings.filter(
+      (building) => building.owner === side.owner && building.kind === 'yard' && building.hp > 0,
+    ).length
+    const towers = state.buildings.filter(
+      (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
+    ).length
+    if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
       aiPlaceNearKeep(state, 'silo', side.owner)
-    } else if (state.oreHeld[side.owner] >= BUILDING_STATS.yard.cost) {
+    } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
+      aiPlaceNearKeep(state, 'yard', side.owner)
+    } else if (towers < 3 && ore >= BUILDING_STATS.tower.cost) {
+      if (!aiPlaceNearKeep(state, 'tower', side.owner) && ore >= BUILDING_STATS.yard.cost) {
+        aiPlaceNearKeep(state, 'yard', side.owner)
+      }
+    } else if (ore >= BUILDING_STATS.yard.cost) {
       aiPlaceNearKeep(state, 'yard', side.owner)
     }
   }
@@ -395,24 +408,28 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (unit) => unit.owner === side.owner && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0,
   )
   const keepPoint = buildingCenter(keep)
-  const threatened = state.units.some((unit) => {
-    if (unit.owner !== side.foe || unit.kind === 'porter' || unit.kind === 'drone' || unit.hp <= 0) return false
-    if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) >= 340) return false
-    return tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
-  })
+  const homeAlert = castleUnderAttack(state, side, keepPoint)
   const castle = spottedKeep(state, side.owner)
   const spotted = knownEnemyBuilding(state, side)
-  if (threatened || (spotted && (army.length >= 10 || (state.time > 105 && army.length >= 5)))) side.attacking = true
-  if (!threatened && army.length === 0) side.attacking = false
-  if (!side.attacking || (!threatened && !spotted)) {
+  if (spotted && (army.length >= 10 || (state.time > 105 && army.length >= 5))) side.attacking = true
+  if (army.length === 0) side.attacking = false
+  const garrison = garrisonIds(army, keepPoint)
+  if (homeAlert) {
+    recallToCastle(state, army, keepPoint)
     store(state, side)
     return
   }
+  if (!side.attacking || !spotted) {
+    store(state, side)
+    return
+  }
+  holdGarrison(state, army, garrison, keepPoint)
 
-  const dest = castle ?? (threatened || !spotted ? keepPoint : spotted)
-  const blocker = rockBlockingMarch(state, army, dest.x, dest.y)
+  const dest = castle ?? spotted
+  const strikers = army.filter((unit) => !garrison.has(unit.id))
+  const blocker = rockBlockingMarch(state, strikers, dest.x, dest.y)
   if (blocker) assignRockBreakers(state, side.owner, blocker.rock, blocker.trapped)
-  for (const unit of army) {
+  for (const unit of strikers) {
     const order = unit.order
     if (castle && order?.type === 'attack' && order.kind === 'building' && order.targetId !== castle.id) {
       commandMove(state, [unit.id], dest.x, dest.y, true)
@@ -428,6 +445,75 @@ function runSide(state: MatchState, owner: PlayerId): void {
     commandMove(state, [unit.id], dest.x, dest.y, true)
   }
   store(state, side)
+}
+
+/** Combat units already beside the Castle stay there. Two is enough for a standing guard. */
+const HOME_GUARD = 2
+const HOME_NEAR = 220
+
+function garrisonIds(army: Unit[], keepPoint: { x: number; y: number }): Set<number> {
+  const near = army
+    .filter((unit) => Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) <= HOME_NEAR)
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - keepPoint.x, a.y - keepPoint.y) - Math.hypot(b.x - keepPoint.x, b.y - keepPoint.y),
+    )
+    .slice(0, HOME_GUARD)
+  return new Set(near.map((unit) => unit.id))
+}
+
+function holdGarrison(
+  state: MatchState,
+  army: Unit[],
+  garrison: Set<number>,
+  keepPoint: { x: number; y: number },
+): void {
+  for (const unit of army) {
+    if (!garrison.has(unit.id)) continue
+    const order = unit.order
+    if (order?.type === 'attack') continue
+    if (
+      (order?.type === 'attackMove' || order?.type === 'move') &&
+      Math.hypot(order.x - keepPoint.x, order.y - keepPoint.y) < 96
+    ) {
+      continue
+    }
+    commandMove(state, [unit.id], keepPoint.x, keepPoint.y, true)
+  }
+}
+
+function recallToCastle(state: MatchState, army: Unit[], keepPoint: { x: number; y: number }): void {
+  for (const unit of army) {
+    const order = unit.order
+    if (order?.type === 'attack' && order.kind === 'unit') {
+      const foe = state.units.find((other) => other.id === order.targetId && other.hp > 0)
+      if (foe && Math.hypot(foe.x - keepPoint.x, foe.y - keepPoint.y) < 420) continue
+    }
+    if (order?.type === 'attackMove' && Math.hypot(order.x - keepPoint.x, order.y - keepPoint.y) < 96) continue
+    commandMove(state, [unit.id], keepPoint.x, keepPoint.y, true)
+  }
+}
+
+/** The Castle, or a building beside it, is taking damage or has an enemy in sight nearby. */
+function castleUnderAttack(state: MatchState, side: Brain, keepPoint: { x: number; y: number }): boolean {
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.hp <= 0 || building.alert <= 0) continue
+    if (building.kind === 'keep') return true
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) < 420) return true
+  }
+  for (const unit of state.units) {
+    if (unit.owner !== side.foe || unit.hp <= 0 || unit.kind === 'drone') continue
+    if (!tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) < 320) return true
+    for (const building of state.buildings) {
+      if (building.owner !== side.owner || building.hp <= 0) continue
+      const center = buildingCenter(building)
+      if (Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) > 420) continue
+      if (Math.hypot(unit.x - center.x, unit.y - center.y) < 180) return true
+    }
+  }
+  return false
 }
 
 /**

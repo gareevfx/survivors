@@ -502,7 +502,8 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyP' ||
         event.code === 'KeyK' ||
         event.code === 'KeyJ' ||
-        event.code === 'KeyH')
+        event.code === 'KeyH' ||
+        event.code === 'KeyT')
     ) {
       return
     }
@@ -525,6 +526,10 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyL') {
       armPlace('silo')
+      return
+    }
+    if (event.code === 'KeyT') {
+      armPlace('tower')
       return
     }
     if (event.code === 'KeyP') {

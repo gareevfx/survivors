@@ -1,5 +1,5 @@
 import { findPath } from './pathfind'
-import { canPlace, isWalkable, rockAt } from './state'
+import { canPlace, footprintInKeepSight, isWalkable, rockAt } from './state'
 import {
   BUILDING_STATS,
   GATHER_TIME,
@@ -14,6 +14,83 @@ import {
   type Rock,
   type Unit,
 } from './types'
+
+/** True when a circle overlaps a blocked tile, including rocks, trees, minerals, and buildings. */
+export function circleHitsSolid(state: MatchState, x: number, y: number, radius: number): boolean {
+  const minTx = Math.floor((x - radius) / TILE)
+  const maxTx = Math.floor((x + radius) / TILE)
+  const minTy = Math.floor((y - radius) / TILE)
+  const maxTy = Math.floor((y + radius) / TILE)
+  for (let ty = minTy; ty <= maxTy; ty++) {
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      if (isWalkable(state, tx, ty)) continue
+      const left = tx * TILE
+      const top = ty * TILE
+      const cx = Math.max(left, Math.min(x, left + TILE))
+      const cy = Math.max(top, Math.min(y, top + TILE))
+      const dx = x - cx
+      const dy = y - cy
+      if (dx * dx + dy * dy < radius * radius) return true
+    }
+  }
+  return false
+}
+
+/** Step from a blocked point back toward the unit until the body fits on open ground. */
+function pullToClearGround(
+  state: MatchState,
+  x: number,
+  y: number,
+  fromX: number,
+  fromY: number,
+  radius: number,
+): { x: number; y: number } | null {
+  const dx = fromX - x
+  const dy = fromY - y
+  const len = Math.hypot(dx, dy) || 1
+  for (let dist = 2; dist <= 72; dist += 2) {
+    const px = x + (dx / len) * dist
+    const py = y + (dy / len) * dist
+    const tx = Math.floor(px / TILE)
+    const ty = Math.floor(py / TILE)
+    if (!isWalkable(state, tx, ty)) continue
+    if (!circleHitsSolid(state, px, py, radius)) return { x: px, y: py }
+  }
+  return null
+}
+
+/**
+ * True when the straight step would leave the body on a blocked tile or
+ * squeeze the center between two blocked tiles.
+ */
+export function groundMoveBlocked(
+  state: MatchState,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  radius: number,
+): boolean {
+  if (circleHitsSolid(state, x1, y1, radius)) return true
+  const dist = Math.hypot(x1 - x0, y1 - y0)
+  const steps = Math.max(1, Math.ceil(dist / 4))
+  let prevTx = Math.floor(x0 / TILE)
+  let prevTy = Math.floor(y0 / TILE)
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const x = x0 + (x1 - x0) * t
+    const y = y0 + (y1 - y0) * t
+    const tx = Math.floor(x / TILE)
+    const ty = Math.floor(y / TILE)
+    if (tx !== prevTx && ty !== prevTy) {
+      if (!isWalkable(state, tx, prevTy) || !isWalkable(state, prevTx, ty)) return true
+    }
+    if (circleHitsSolid(state, x, y, radius)) return true
+    prevTx = tx
+    prevTy = ty
+  }
+  return false
+}
 
 export function stopMoving(unit: Unit): void {
   unit.path = []
@@ -107,8 +184,14 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
     return false
   }
 
-  const destX = goalOpen ? gx : (goal.tx + 0.5) * TILE
-  const destY = goalOpen ? gy : (goal.ty + 0.5) * TILE
+  let destX = goalOpen ? gx : (goal.tx + 0.5) * TILE
+  let destY = goalOpen ? gy : (goal.ty + 0.5) * TILE
+  const body = UNIT_STATS[unit.kind].radius
+  if (circleHitsSolid(state, destX, destY, body)) {
+    const pulled = pullToClearGround(state, destX, destY, unit.x, unit.y, body)
+    destX = pulled?.x ?? (goal.tx + 0.5) * TILE
+    destY = pulled?.y ?? (goal.ty + 0.5) * TILE
+  }
   unit.goalX = destX
   unit.goalY = destY
 
@@ -174,17 +257,19 @@ export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set
 
 export function findBuildSpot(
   state: MatchState,
-  kind: 'yard' | 'silo',
+  kind: 'yard' | 'silo' | 'tower',
   anchorTx: number,
   anchorTy: number,
 ): { tx: number; ty: number } | null {
   const cx = anchorTx + 1
   const cy = anchorTy + 1
   const lanes = mineralLaneTiles(state, cx, cy)
+  const stats = BUILDING_STATS[kind]
   for (let r = 5; r < MAP_W; r++) {
     for (let y = cy - r; y <= cy + r; y++) {
       for (let x = cx - r; x <= cx + r; x++) {
         if (Math.abs(x - cx) !== r && Math.abs(y - cy) !== r) continue
+        if (kind === 'tower' && !footprintInKeepSight(anchorTx, anchorTy, x, y, stats.w, stats.h)) continue
         if (aiMayBuild(state, kind, x, y, lanes)) return { tx: x, ty: y }
       }
     }
@@ -194,7 +279,7 @@ export function findBuildSpot(
 
 function aiMayBuild(
   state: MatchState,
-  kind: 'yard' | 'silo',
+  kind: 'yard' | 'silo' | 'tower',
   tx: number,
   ty: number,
   lanes: Set<number>,

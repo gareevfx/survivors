@@ -25,7 +25,7 @@ export const STUCK_REDIRECT_SECONDS = 4
 
 export type PlayerId = 0 | 1
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
-export type BuildingKind = 'keep' | 'yard' | 'silo'
+export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
 export type TargetKind = 'unit' | 'building' | 'rock'
 
 export interface UnitStats {
@@ -164,6 +164,17 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     supply: 8,
     sight: 150,
   },
+  tower: {
+    label: 'Tower',
+    blurb: 'One cell. Sees as far as a Drone and shoots like a Bike, including half damage to Drones. Place it inside Castle sight.',
+    w: 1,
+    h: 1,
+    hp: 320,
+    cost: 100,
+    buildTime: 14,
+    supply: 0,
+    sight: UNIT_STATS.drone.sight,
+  },
 }
 
 export const PLAYER_NAME = ['Northmark', 'Dunmarch'] as const
@@ -235,6 +246,9 @@ export interface Building {
   rallyY: number
   hitFlash: number
   spawnN: number
+  attackCd: number
+  /** Seconds this building stays a defense alarm after it takes damage. */
+  alert: number
 }
 
 export interface OreNode {
@@ -242,6 +256,8 @@ export interface OreNode {
   tx: number
   ty: number
   amount: number
+  /** Castle-area patch for this side. Absent on expansion minerals and hand-built nodes. */
+  base?: PlayerId | null
 }
 
 export interface Rock {

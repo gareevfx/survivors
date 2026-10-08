@@ -158,6 +158,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         trainButton(state, building.id, 'porter'),
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
+        placeButton(state, 'tower', actions),
       ]
     }
     if (building.kind === 'yard') {
@@ -215,7 +216,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       },
     ]
     if (porters) {
-      cmds.push(placeButton(state, 'yard', actions), placeButton(state, 'silo', actions))
+      cmds.push(placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
     }
     return cmds
   }
@@ -228,7 +229,7 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
   return {
     id: `place-${kind}`,
     label: stats.label,
-    hotkey: kind === 'yard' ? 'Y' : 'L',
+    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : 'T',
     detail: `${stats.cost} minerals`,
     title: afford ? stats.blurb : `Need ${stats.cost} minerals`,
     disabled: !afford,
@@ -343,7 +344,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Select workers and right-click minerals. Up to 3 workers work each patch; extras spread to the nearest revealed one. Minerals in the black fog stay hidden until you scout them, then they remain on the gray ground. If gray rock or a tree seals a patch, those workers break it, then haul. Build a Factory, train bikes, tanks, and drones, and destroy the red Castle. Bikes and tanks cannot break rock. A Drone flies and does not shoot.</p>
+      <p class="meta">Destroy the enemy Castle. If your Castle falls, the field is lost. Workers mine the minerals beside your Castle first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and minerals block every ground unit. Raise a Tower inside Castle sight to watch and shoot. Bikes and tanks cannot break rock. A Drone flies and does not shoot.</p>
     `
   }
   if (units.length === 1) {

@@ -5,7 +5,7 @@ import { CASTLE_YARD } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { step } from './game/sim'
-import { buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, rebuildBlocked, recomputeSupply, unitById } from './game/state'
+import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
 import {
   aiTileExplored,
@@ -1946,6 +1946,10 @@ wideMapHidesObjectsAndMakesDunmarchScout()
 aiBuildingsLeaveAGapAndAvoidMinerals()
 aiDroneNeverIdles()
 droneFliesFromTheFactory()
+groundUnitsNeverOverlapSolidGround()
+diagonalMovesCannotSqueeze()
+towerFitsInsideCastleSightAndShoots()
+workersMineCastleMineralsThenTheNearestPatch()
 console.log('smoke ok')
 
 function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
@@ -2111,6 +2115,9 @@ function droneFliesFromTheFactory(): void {
   drone.x = 40.5 * TILE
   drone.y = 8.5 * TILE
   drone.order = null
+  drone.path = []
+  drone.goalX = null
+  drone.goalY = null
   updateVision(state)
   assert(tileVisible(state, 40, 8), 'drone did not reveal the tile under it')
   assert(tileVisible(state, 40, 15), 'drone sight is shorter than the castle')
@@ -2146,4 +2153,270 @@ function droneFliesFromTheFactory(): void {
     }
   }
   assert(firstDrop === UNIT_STATS.pike.damage / 2, `bike dealt ${firstDrop} to a drone, not half of ${UNIT_STATS.pike.damage}`)
+}
+
+function terrainOverlap(state: MatchState, x: number, y: number, radius: number): string | null {
+  const minTx = Math.floor((x - radius) / TILE)
+  const maxTx = Math.floor((x + radius) / TILE)
+  const minTy = Math.floor((y - radius) / TILE)
+  const maxTy = Math.floor((y + radius) / TILE)
+  for (let ty = minTy; ty <= maxTy; ty++) {
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
+      const tile = state.tiles[ty * MAP_W + tx] ?? 0
+      const mineral = state.ore.some((node) => node.amount > 0 && node.tx === tx && node.ty === ty)
+      if (tile !== 1 && tile !== 3 && !mineral) continue
+      const left = tx * TILE
+      const top = ty * TILE
+      const nearestX = Math.max(left, Math.min(x, left + TILE))
+      const nearestY = Math.max(top, Math.min(y, top + TILE))
+      if ((x - nearestX) ** 2 + (y - nearestY) ** 2 >= radius * radius) continue
+      if (mineral) return `minerals at ${tx},${ty}`
+      return tile === 3 ? `tree at ${tx},${ty}` : `rock at ${tx},${ty}`
+    }
+  }
+  return null
+}
+
+function groundUnitsNeverOverlapSolidGround(): void {
+  const state = createMatch(11)
+  state.aiControl = true
+  const hits: string[] = []
+  for (let i = 0; i < 240; i++) {
+    step(state, 0.25)
+    for (const unit of state.units) {
+      if (unit.hp <= 0 || unit.kind === 'drone') continue
+      const hit = terrainOverlap(state, unit.x, unit.y, UNIT_STATS[unit.kind].radius)
+      if (!hit) continue
+      hits.push(`${unit.kind} overlapped ${hit} at t=${state.time.toFixed(1)}`)
+      if (hits.length >= 4) break
+    }
+    if (hits.length >= 4 || state.outcome) break
+  }
+  assert(hits.length === 0, hits.join('; '))
+
+  const chore = createMatch(13)
+  const worker = chore.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  const rock = chore.rocks.find((entry) => entry.hp > 0 && isWalkable(chore, entry.tx + 1, entry.ty))
+  assert(worker && rock, 'missing a worker or a rock with an open side')
+  for (const unit of chore.units) {
+    if (unit.id !== worker.id) unit.hp = 0
+  }
+  worker.x = (rock.tx + 1.5) * TILE
+  worker.y = (rock.ty + 0.5) * TILE
+  commandAttack(chore, [worker.id], rock.id, 'rock')
+  for (let i = 0; i < 10 * 60 && rock.hp > 0; i++) {
+    step(chore, 1 / 60)
+    const now = unitById(chore, worker.id)
+    assert(now, 'the worker disappeared while breaking rock')
+    const hit = terrainOverlap(chore, now.x, now.y, UNIT_STATS.porter.radius)
+    assert(hit == null, `worker stepped onto ${hit} before the rock fell`)
+  }
+}
+
+function diagonalMovesCannotSqueeze(): void {
+  const state = createMatch(12)
+  for (const unit of state.units) unit.hp = 0
+  for (const node of state.ore) node.amount = 0
+  const open: Array<[number, number]> = []
+  for (let x = 36; x <= 42; x++) open.push([x, 20])
+  open.push([36, 21], [42, 21], [42, 22], [41, 22], [40, 22], [39, 22], [38, 22], [37, 22])
+  carveGround(state, open)
+  rebuildBlocked(state)
+  const around = findPath(state.blocked, MAP_W, MAP_H, 36, 21, 37, 22)
+  assert(around, 'the long way around the corner disappeared')
+  assert(!(around.length === 1 && around[0]?.tx === 37 && around[0]?.ty === 22), 'the path stepped diagonally through the rocks')
+  let prev = { tx: 36, ty: 21 }
+  for (const stepTile of around) {
+    if (stepTile.tx !== prev.tx && stepTile.ty !== prev.ty) {
+      const sideA = state.blocked[prev.ty * MAP_W + stepTile.tx]
+      const sideB = state.blocked[stepTile.ty * MAP_W + prev.tx]
+      assert(!sideA && !sideB, 'a diagonal path step squeezed a blocked corner')
+    }
+    prev = stepTile
+  }
+  const direct = findPath(state.blocked, MAP_W, MAP_H, 36, 21, 37, 22)
+  assert(direct && direct.length > 1, 'findPath offered the blocked diagonal')
+
+  const bike = makeUnit(state, 0, 'pike', 36.5 * TILE, 21.5 * TILE)
+  commandMove(state, [bike.id], 37.5 * TILE, 22.5 * TILE, false)
+  for (let i = 0; i < 14 * 60; i++) {
+    step(state, 1 / 60)
+    const now = unitById(state, bike.id)
+    assert(now, 'the bike disappeared on the corner')
+    const hit = terrainOverlap(state, now.x, now.y, UNIT_STATS.pike.radius)
+    assert(hit == null, `bike overlapped ${hit} while going around the corner`)
+  }
+  const arrived = unitById(state, bike.id)
+  assert(arrived, 'missing the bike')
+  assert(
+    Math.hypot(arrived.x - 37.5 * TILE, arrived.y - 22.5 * TILE) < 24,
+    'the bike did not walk around the blocked corner',
+  )
+
+  const drone = makeUnit(state, 0, 'drone', 36.5 * TILE, 21.5 * TILE)
+  commandMove(state, [drone.id], 37.5 * TILE, 22.5 * TILE, false)
+  let flew = false
+  for (let i = 0; i < 6 * 60; i++) {
+    step(state, 1 / 60)
+    const now = unitById(state, drone.id)
+    if (now && Math.hypot(now.x - 37.5 * TILE, now.y - 22.5 * TILE) < 8) {
+      flew = true
+      break
+    }
+  }
+  assert(flew, 'the drone could not fly over the blocked corner')
+}
+
+function towerFitsInsideCastleSightAndShoots(): void {
+  const state = createMatch(5)
+  state.oreHeld[0] = 800
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing the Northmark castle')
+  const center = buildingCenter(keep)
+  const sight = BUILDING_STATS.keep.sight
+  let inside: { tx: number; ty: number } | null = null
+  let outside: { tx: number; ty: number } | null = null
+  for (let ty = 1; ty < MAP_H - 1; ty++) {
+    for (let tx = 1; tx < MAP_W - 1; tx++) {
+      if (!canPlace(state, 'tower', tx, ty)) continue
+      const distance = Math.hypot((tx + 0.5) * TILE - center.x, (ty + 0.5) * TILE - center.y)
+      if (!inside && distance <= sight) inside = { tx, ty }
+      if (!outside && distance > sight + TILE) outside = { tx, ty }
+    }
+  }
+  assert(inside, 'no open cell inside Castle sight')
+  assert(outside, 'no open cell outside Castle sight')
+  assert(placementAllowed(state, 0, 'tower', inside.tx, inside.ty), 'a cell inside Castle sight rejected the Tower')
+  assert(!placementAllowed(state, 0, 'tower', outside.tx, outside.ty), 'a cell outside Castle sight accepted the Tower')
+  const refused = tryPlace(state, 0, 'tower', outside.tx, outside.ty, [])
+  assert(refused === 'Towers must stand inside Castle sight', refused ?? 'the outside Tower was built')
+  assert(BUILDING_STATS.tower.w === 1 && BUILDING_STATS.tower.h === 1, 'the Tower is not one cell')
+  assert(BUILDING_STATS.tower.sight === UNIT_STATS.drone.sight, 'Tower sight does not match the Drone')
+  const built = tryPlace(state, 0, 'tower', inside.tx, inside.ty, [])
+  assert(built === null, built ?? 'the Tower inside Castle sight was refused')
+  const placed = state.buildings.find((building) => building.kind === 'tower')
+  assert(placed, 'the Tower was not added')
+
+  const fight = createMatch(7)
+  const home = fight.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing a castle for the firing Tower')
+  const homeCenter = buildingCenter(home)
+  let spot: { tx: number; ty: number } | null = null
+  let towardCenter = Infinity
+  const midX = (MAP_W / 2) * TILE
+  const midY = (MAP_H / 2) * TILE
+  for (let ty = home.ty - 8; ty <= home.ty + 10; ty++) {
+    for (let tx = home.tx - 8; tx <= home.tx + 10; tx++) {
+      if (!canPlace(fight, 'tower', tx, ty)) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      const distance = Math.hypot(x - homeCenter.x, y - homeCenter.y)
+      if (distance > BUILDING_STATS.keep.sight - TILE) continue
+      const inward = Math.hypot(x - midX, y - midY)
+      if (inward < towardCenter) {
+        towardCenter = inward
+        spot = { tx, ty }
+      }
+    }
+  }
+  assert(spot, 'no tile for a firing Tower')
+  const tower = makeBuilding(fight, 0, 'tower', spot.tx, spot.ty, true)
+  rebuildBlocked(fight)
+  const origin = buildingCenter(tower)
+  const foe = makeUnit(fight, 1, 'porter', origin.x + 36, origin.y)
+  let drop = 0
+  for (let i = 0; i < 120; i++) {
+    const before = foe.hp
+    step(fight, 1 / 60)
+    if (foe.hp < before) {
+      drop = before - foe.hp
+      break
+    }
+  }
+  assert(drop === UNIT_STATS.pike.damage, `the Tower dealt ${drop}, not a Bike's ${UNIT_STATS.pike.damage}`)
+  foe.hp = 0
+  const drone = makeUnit(fight, 1, 'drone', origin.x + 28, origin.y + 6)
+  let droneDrop = 0
+  for (let i = 0; i < 120; i++) {
+    const before = drone.hp
+    step(fight, 1 / 60)
+    if (drone.hp < before) {
+      droneDrop = before - drone.hp
+      break
+    }
+  }
+  assert(droneDrop === UNIT_STATS.pike.damage / 2, `the Tower dealt ${droneDrop} to a Drone`)
+  drone.hp = 0
+  const rockTx = spot.tx + 1 < MAP_W ? spot.tx + 1 : spot.tx - 1
+  fight.tiles[spot.ty * MAP_W + rockTx] = 1
+  const rock = { id: fight.nextId++, tx: rockTx, ty: spot.ty, hp: ROCK_HP, hitFlash: 0, kind: 'rock' as const }
+  fight.rocks.push(rock)
+  rebuildBlocked(fight)
+  for (let i = 0; i < 90; i++) step(fight, 1 / 60)
+  assert(rock.hp === ROCK_HP, 'the Tower shot a rock')
+  updateVision(fight)
+  let revealed = false
+  for (let ty = 0; ty < MAP_H && !revealed; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      if (Math.hypot(x - homeCenter.x, y - homeCenter.y) <= BUILDING_STATS.keep.sight) continue
+      if (Math.hypot(x - origin.x, y - origin.y) > UNIT_STATS.drone.sight) continue
+      if (tileVisible(fight, tx, ty)) {
+        revealed = true
+        break
+      }
+    }
+  }
+  assert(revealed, 'the Tower did not reveal ground past the Castle')
+}
+
+function workersMineCastleMineralsThenTheNearestPatch(): void {
+  const state = createMatch(4)
+  const base = state.ore.filter((node) => node.base === 0 && node.amount > 0)
+  const expansion = state.ore.find((node) => node.base == null && node.amount > 0)
+  assert(base.length >= 2, 'the castle area has no minerals')
+  assert(expansion, 'the map has no expansion minerals')
+  state.explored[expansion.ty * MAP_W + expansion.tx] = 1
+  const workers = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  for (const worker of workers) {
+    worker.order = null
+    worker.cargo = 0
+    worker.nodeMemory = 0
+  }
+  assignMiners(state, workers, null)
+  assert(
+    workers.some((worker) => assignedDeposit(worker) != null),
+    'no worker took a castle mineral',
+  )
+  for (const worker of workers) {
+    const id = assignedDeposit(worker)
+    if (id == null) continue
+    const node = state.ore.find((entry) => entry.id === id)
+    assert(node?.base === 0, 'a worker left castle minerals for a revealed expansion')
+  }
+
+  const field = createMatch(9)
+  for (const unit of field.units) unit.hp = 0
+  for (const node of field.ore) node.amount = 0
+  const open: Array<[number, number]> = []
+  for (let x = 10; x <= 18; x++) open.push([x, 10])
+  for (let y = 10; y <= 16; y++) open.push([18, y])
+  carveGround(field, open)
+  const sealed = { id: field.nextId++, tx: 10, ty: 12, amount: 420 }
+  const openPatch = { id: field.nextId++, tx: 18, ty: 16, amount: 420 }
+  const hidden = { id: field.nextId++, tx: 14, ty: 12, amount: 420 }
+  field.ore.push(sealed, openPatch, hidden)
+  field.explored[sealed.ty * MAP_W + sealed.tx] = 1
+  field.explored[openPatch.ty * MAP_W + openPatch.tx] = 1
+  field.aiExplored[sealed.ty * MAP_W + sealed.tx] = 1
+  field.aiExplored[openPatch.ty * MAP_W + openPatch.tx] = 1
+  rebuildBlocked(field)
+  const worker = makeUnit(field, 0, 'porter', 10.5 * TILE, 10.5 * TILE)
+  assignMiners(field, [worker], null)
+  assert(assignedDeposit(worker) === openPatch.id, 'Northmark skipped the nearest revealed patch')
+  const foe = makeUnit(field, 1, 'porter', 10.5 * TILE, 10.5 * TILE)
+  assignMiners(field, [foe], null)
+  assert(assignedDeposit(foe) === openPatch.id, 'Dunmarch skipped the nearest revealed patch')
 }

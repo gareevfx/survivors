@@ -1,6 +1,6 @@
 import { sideKnowsEnemyKeep, spottedPlayerKeep, updateAi } from './ai'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
-import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { updateVision } from './vision'
 import {
@@ -45,8 +45,10 @@ export function step(state: MatchState, dt: number): void {
   updateAi(state, dt)
 
   for (const unit of state.units) refreshUnit(state, unit, dt)
+  releaseFromTerrain(state)
   for (const unit of state.units) moveUnit(state, unit, dt)
   separate(state)
+  releaseFromTerrain(state)
   advanceGather(state, dt)
   advanceConstruct(state, dt)
   advanceProduction(state, dt)
@@ -57,7 +59,11 @@ export function step(state: MatchState, dt: number): void {
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     tryFire(state, unit)
   }
-  for (const building of state.buildings) building.hitFlash = Math.max(0, building.hitFlash - dt)
+  for (const building of state.buildings) {
+    building.hitFlash = Math.max(0, building.hitFlash - dt)
+    building.alert = Math.max(0, building.alert - dt)
+    if (building.kind === 'tower') tryFireTower(state, building, dt)
+  }
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
   cleanup(state)
@@ -154,7 +160,7 @@ function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
     unit.facing = Math.atan2(focus.y - unit.y, focus.x - unit.x)
     return
   }
-  const stand = standPoint(unit, focus)
+  const stand = standPoint(state, unit, focus)
   const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - stand.x, (unit.goalY ?? 0) - stand.y) > 24
   if (far && unit.repathIn <= 0) {
     setUnitDestination(state, unit, stand.x, stand.y)
@@ -162,8 +168,27 @@ function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
   }
 }
 
-function standPoint(unit: Unit, focus: Target): { x: number; y: number } {
+function standPoint(state: MatchState, unit: Unit, focus: Target): { x: number; y: number } {
   const stats = UNIT_STATS[unit.kind]
+  if (focus.targetKind === 'rock') {
+    const tx = Math.floor(focus.x / TILE)
+    const ty = Math.floor(focus.y / TILE)
+    let best: { x: number; y: number; d: number } | null = null
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        if (!isWalkable(state, tx + dx, ty + dy)) continue
+        const x = (tx + dx + 0.5) * TILE
+        const y = (ty + dy + 0.5) * TILE
+        if (circleHitsSolid(state, x, y, stats.radius)) continue
+        if (Math.hypot(x - focus.x, y - focus.y) > stats.range + focus.radius * 0.85) continue
+        if (!shotClear(state, x, y, focus.x, focus.y)) continue
+        const d = (x - unit.x) ** 2 + (y - unit.y) ** 2
+        if (!best || d < best.d) best = { x, y, d }
+      }
+    }
+    if (best) return best
+  }
   const dx = unit.x - focus.x
   const dy = unit.y - focus.y
   const d = Math.hypot(dx, dy) || 1
@@ -345,8 +370,11 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
         unit.path.shift()
         continue
       }
-      unit.x = tx
-      unit.y = ty
+      const radius = UNIT_STATS[unit.kind].radius
+      if (unit.kind === 'drone' || !groundMoveBlocked(state, unit.x, unit.y, tx, ty, radius)) {
+        unit.x = tx
+        unit.y = ty
+      }
       unit.goalX = null
       unit.goalY = null
       unit.repathIn = 0
@@ -406,33 +434,51 @@ function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
     unit.y = Math.max(margin, Math.min(MAP_PX_H - margin, unit.y + dy))
     return
   }
-  const radius = UNIT_STATS[unit.kind].radius * 0.45
-  if (!circleBlocked(state, unit.x + dx, unit.y + dy, radius)) {
-    unit.x += dx
-    unit.y += dy
+  const radius = UNIT_STATS[unit.kind].radius
+  const nx = unit.x + dx
+  const ny = unit.y + dy
+  if (!groundMoveBlocked(state, unit.x, unit.y, nx, ny, radius)) {
+    unit.x = nx
+    unit.y = ny
     return
   }
-  if (!circleBlocked(state, unit.x + dx, unit.y, radius)) {
-    unit.x += dx
+  if (!groundMoveBlocked(state, unit.x, unit.y, nx, unit.y, radius)) {
+    unit.x = nx
     return
   }
-  if (!circleBlocked(state, unit.x, unit.y + dy, radius)) unit.y += dy
+  if (!groundMoveBlocked(state, unit.x, unit.y, unit.x, ny, radius)) unit.y = ny
 }
 
-function circleBlocked(state: MatchState, x: number, y: number, radius: number): boolean {
-  const samples: Array<[number, number]> = [
-    [0, 0],
-    [radius, 0],
-    [-radius, 0],
-    [0, radius],
-    [0, -radius],
-  ]
-  for (const [ox, oy] of samples) {
-    const tx = Math.floor((x + ox) / TILE)
-    const ty = Math.floor((y + oy) / TILE)
-    if (!isWalkable(state, tx, ty)) return true
+/** A ground unit inside a blocked tile, or clipping one, is moved to the nearest free cell. */
+function releaseFromTerrain(state: MatchState): void {
+  for (const unit of state.units) {
+    if (unit.hp <= 0 || unit.kind === 'drone') continue
+    const radius = UNIT_STATS[unit.kind].radius
+    if (!circleHitsSolid(state, unit.x, unit.y, radius)) continue
+    const originTx = Math.floor(unit.x / TILE)
+    const originTy = Math.floor(unit.y / TILE)
+    let bestX = unit.x
+    let bestY = unit.y
+    let bestD = Infinity
+    for (let ty = originTy - 8; ty <= originTy + 8; ty++) {
+      for (let tx = originTx - 8; tx <= originTx + 8; tx++) {
+        if (!isWalkable(state, tx, ty)) continue
+        const x = (tx + 0.5) * TILE
+        const y = (ty + 0.5) * TILE
+        if (circleHitsSolid(state, x, y, radius)) continue
+        const distance = Math.hypot(x - unit.x, y - unit.y)
+        if (distance < bestD) {
+          bestD = distance
+          bestX = x
+          bestY = y
+        }
+      }
+    }
+    if (bestD < Infinity) {
+      unit.x = bestX
+      unit.y = bestY
+    }
   }
-  return false
 }
 
 /** Slide the step off units ahead. Ground ignores drones, and drones ignore the ground. */
@@ -621,10 +667,12 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
       Math.hypot(a.x - building.rallyX, a.y - building.rallyY) -
       Math.hypot(b.x - building.rallyX, b.y - building.rallyY),
   )
-  const spot = spots[building.spawnN++ % Math.max(1, spots.length)] ?? {
+  const ring = spots.length ? spots[building.spawnN++ % spots.length] : undefined
+  const fallback = nearestWalkable(state, building.rallyX, building.rallyY)
+  const spot = ring ?? (fallback ? { x: (fallback.tx + 0.5) * TILE, y: (fallback.ty + 0.5) * TILE } : {
     x: building.rallyX,
     y: building.rallyY,
-  }
+  })
   const unit: Unit = {
     id: state.nextId++,
     owner: building.owner,
@@ -692,6 +740,63 @@ function tryFire(state: MatchState, unit: Unit): void {
     max: 0.12,
     r: 3,
     color: unit.owner === 0 ? '#e7f6ff' : '#ffe1d6',
+  })
+  state.events.push({ type: 'attack' })
+}
+
+/** A finished Tower uses the Bike's damage, range, and rate, and will not shoot rocks or trees. */
+function tryFireTower(state: MatchState, building: Building, dt: number): void {
+  building.attackCd = Math.max(0, building.attackCd - dt)
+  if (!building.complete || building.hp <= 0 || building.attackCd > 0) return
+  const pike = UNIT_STATS.pike
+  const origin = buildingCenter(building)
+  let best: Target | null = null
+  let bestD = Infinity
+  for (const unit of state.units) {
+    if (unit.owner === building.owner || unit.hp <= 0) continue
+    const target = unitTarget(unit)
+    const reach = pike.range + target.radius * 0.85
+    const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
+    if (distance > reach || distance >= bestD) continue
+    best = target
+    bestD = distance
+  }
+  if (!best) {
+    for (const other of state.buildings) {
+      if (other.owner === building.owner || other.hp <= 0) continue
+      const target = buildingTarget(other)
+      const reach = pike.range + target.radius * 0.85
+      const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
+      if (distance > reach || distance >= bestD) continue
+      best = target
+      bestD = distance
+    }
+  }
+  if (!best || !shotClear(state, origin.x, origin.y, best.x, best.y)) return
+  building.attackCd = pike.cooldown
+  const aim = Math.atan2(best.y - origin.y, best.x - origin.x)
+  state.projectiles.push({
+    id: state.nextId++,
+    owner: building.owner,
+    sourceId: building.id,
+    x: origin.x + Math.cos(aim) * 14,
+    y: origin.y + Math.sin(aim) * 14,
+    targetId: best.id,
+    targetKind: best.targetKind,
+    damage: pike.damage,
+    speed: pike.projectileSpeed,
+    radius: pike.projectileRadius,
+    life: 2.6,
+  })
+  state.particles.push({
+    x: origin.x + Math.cos(aim) * 16,
+    y: origin.y + Math.sin(aim) * 16,
+    vx: Math.cos(aim) * 20,
+    vy: Math.sin(aim) * 20,
+    life: 0.12,
+    max: 0.12,
+    r: 3,
+    color: building.owner === 0 ? '#e7f6ff' : '#ffe1d6',
   })
   state.events.push({ type: 'attack' })
 }
@@ -792,8 +897,10 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     const unit = unitById(state, target.id)
     if (!unit || unit.hp <= 0) return
     const source = unitById(state, sourceId)
+    const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'drone' && source?.kind === 'howler') return
-    const dealt = unit.kind === 'drone' && source?.kind === 'pike' ? damage / 2 : damage
+    const bikeShot = source?.kind === 'pike' || sourceBuilding?.kind === 'tower'
+    const dealt = unit.kind === 'drone' && bikeShot ? damage / 2 : damage
     unit.hp -= dealt
     unit.hitFlash = 0.16
     unit.hurtTimer = 3.2
@@ -812,6 +919,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   if (!building || building.hp <= 0) return
   building.hp -= damage
   building.hitFlash = 0.18
+  building.alert = 8
   if (building.owner === 0 && state.underAttackCd <= 0) {
     state.underAttackCd = 8
     const label = building.kind === 'keep' ? 'The Castle is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`

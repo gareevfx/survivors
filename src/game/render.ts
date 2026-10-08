@@ -1,6 +1,6 @@
 import type { Camera } from './camera'
 import { hash2 } from './rng'
-import { buildingCenter, buildingRect, playerKeep } from './state'
+import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -225,6 +225,7 @@ export function renderWorld(
     const stats = BUILDING_STATS[state.placement]
     const tx = Math.floor(overlay.pointer.x / TILE)
     const ty = Math.floor(overlay.pointer.y / TILE)
+    if (state.placement === 'tower') drawKeepSight(ctx, state)
     drawPlacement(ctx, state, state.placement, tx, ty, stats.w, stats.h)
   }
 
@@ -368,6 +369,22 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   ctx.restore()
 }
 
+function drawKeepSight(ctx: CanvasRenderingContext2D, state: MatchState): void {
+  const keep = playerKeep(state)
+  if (!keep) return
+  const center = buildingCenter(keep)
+  ctx.save()
+  ctx.strokeStyle = 'rgba(94, 200, 255, 0.7)'
+  ctx.fillStyle = 'rgba(94, 200, 255, 0.06)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([8, 6])
+  ctx.beginPath()
+  ctx.arc(center.x, center.y, BUILDING_STATS.keep.sight, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
+}
+
 function drawPlacement(
   ctx: CanvasRenderingContext2D,
   state: MatchState,
@@ -377,17 +394,7 @@ function drawPlacement(
   w: number,
   h: number,
 ): void {
-  let open = tx >= 0 && ty >= 0 && tx + w <= MAP_W && ty + h <= MAP_H
-  if (open) {
-    for (let y = 0; y < h && open; y++) {
-      for (let x = 0; x < w; x++) {
-        if (state.blocked[(ty + y) * MAP_W + (tx + x)]) {
-          open = false
-          break
-        }
-      }
-    }
-  }
+  const open = placementAllowed(state, 0, kind, tx, ty)
   ctx.save()
   ctx.globalAlpha = 0.85
   ctx.fillStyle = open ? 'rgba(120, 180, 90, 0.35)' : 'rgba(180, 64, 48, 0.35)'
@@ -419,6 +426,8 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
 
   if (building.kind === 'keep') drawKeep(ctx, x, y, w, h, color)
   else if (building.kind === 'yard') drawYard(ctx, x, y, w, h, color, state.time)
+  else if (building.kind === 'tower')
+    drawTower(ctx, x, y, w, h, color, building.attackCd > UNIT_STATS.pike.cooldown - 0.18)
   else drawSilo(ctx, x, y, w, h, color)
 
   if (building.hp < stats.hp) {
@@ -516,6 +525,47 @@ function drawYard(
   const puff = (time * 10) % 14
   ctx.beginPath()
   ctx.arc(x + w - 18, y + 4 - puff, 3 + puff * 0.15, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function drawTower(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: string,
+  firing: boolean,
+): void {
+  ctx.fillStyle = '#4e4a43'
+  ctx.beginPath()
+  ctx.moveTo(x + 5, y + h - 4)
+  ctx.lineTo(x + w - 5, y + h - 4)
+  ctx.lineTo(x + w - 8, y + 14)
+  ctx.lineTo(x + 8, y + 14)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#7a756c'
+  ctx.beginPath()
+  ctx.moveTo(x + 3, y + 16)
+  ctx.lineTo(x + w / 2, y + 3)
+  ctx.lineTo(x + w - 3, y + 16)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#2a2723'
+  ctx.fillRect(x + w / 2 - 1, y + 11, 12, 3)
+  if (firing) {
+    ctx.fillStyle = '#ffe7a0'
+    ctx.beginPath()
+    ctx.arc(x + w / 2 + 12, y + 12, 3.2, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.fillStyle = color
+  ctx.fillRect(x + w / 2 - 1, y + 1, 2, 8)
+  ctx.beginPath()
+  ctx.moveTo(x + w / 2 + 1, y + 1)
+  ctx.lineTo(x + w / 2 + 11, y + 4)
+  ctx.lineTo(x + w / 2 + 1, y + 7)
   ctx.fill()
 }
 
