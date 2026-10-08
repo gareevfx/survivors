@@ -24,7 +24,7 @@ No account, server, or network connection is required after install.
 
 ## How to play
 
-You start with a Castle, four workers, and a small store of minerals — not enough for a Factory. Each match places the two Castles in opposite corners, as far apart as that map allows. The red Dunmarch base will gather, build, and march on you.
+You start with a Castle, four workers, and a small store of minerals — not enough for a Factory. Each match places the two Castles in opposite corners, as far apart as that map allows. The nearest minerals sit on the edge of each Castle's sight: inside the starting view, not beside the walls. The red Dunmarch base will gather, build, and march on you.
 
 1. Select the workers (click or drag a box) and right-click a gold minerals patch. Up to three workers work that patch. Any extras walk to the nearest revealed patch that still has room. They do not set out for minerals still under the fog. If gray rock seals a patch, those workers break it, then haul.
 2. They gather, walk the minerals back to your Castle, and repeat. The count is in the top bar.

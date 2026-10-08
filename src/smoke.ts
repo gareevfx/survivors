@@ -1386,6 +1386,54 @@ function wideMapHidesObjectsAndMakesDunmarchScout(): void {
   assert(!state.aiSpotted.some((spot) => spot.id === keep.id), 'Dunmarch recorded the Castle without seeing it')
 }
 
+function mineralsSitOnTheVisionEdge(): void {
+  const sight = BUILDING_STATS.keep.sight
+  const inner = sight - TILE
+  for (let seed = 1; seed <= 24; seed++) {
+    const state = createMatch(seed)
+    for (const owner of [0, 1] as const) {
+      const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep')
+      assert(keep, 'missing a castle')
+      const cx = (keep.tx + BUILDING_STATS.keep.w / 2) * TILE
+      const cy = (keep.ty + BUILDING_STATS.keep.h / 2) * TILE
+      let nearest = Infinity
+      let node: { tx: number; ty: number } | null = null
+      for (const ore of state.ore) {
+        const dist = Math.hypot((ore.tx + 0.5) * TILE - cx, (ore.ty + 0.5) * TILE - cy)
+        if (dist < nearest) {
+          nearest = dist
+          node = ore
+        }
+      }
+      assert(node, `seed ${seed} side ${owner} has no minerals`)
+      assert(
+        nearest >= inner - 0.01 && nearest <= sight + 0.01,
+        `seed ${seed} side ${owner} nearest minerals are ${nearest.toFixed(1)}px from the castle, sight is ${sight}`,
+      )
+      const visible = owner === 0 ? tileVisible(state, node.tx, node.ty) : aiTileVisible(state, node.tx, node.ty)
+      assert(visible, `seed ${seed} side ${owner} cannot see its starting minerals`)
+      const worker = state.units.find((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)
+      assert(worker, `seed ${seed} side ${owner} has no worker`)
+      const start = { tx: Math.floor(worker.x / TILE), ty: Math.floor(worker.y / TILE) }
+      let goal: { tx: number; ty: number } | null = null
+      for (let oy = -1; oy <= 1 && !goal; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          if (ox === 0 && oy === 0) continue
+          const tx = node.tx + ox
+          const ty = node.ty + oy
+          if (isWalkable(state, tx, ty)) {
+            goal = { tx, ty }
+            break
+          }
+        }
+      }
+      assert(goal, `seed ${seed} side ${owner} starting minerals have no open side`)
+      const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+      assert(path, `seed ${seed} side ${owner} cannot walk to its starting minerals`)
+    }
+  }
+}
+
 function castlesSpawnFarApart(): void {
   const camps = new Set<string>()
   let closest = Infinity
@@ -1446,6 +1494,7 @@ function buriedMineralsPreferTheFasterRock(): void {
 pathAroundWall()
 routeExists()
 castlesSpawnFarApart()
+mineralsSitOnTheVisionEdge()
 buriedMineralsPreferTheFasterRock()
 gatherWorks()
 buildAndTrain()
