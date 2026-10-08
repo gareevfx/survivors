@@ -531,6 +531,28 @@ export function cancelTrain(state: MatchState, buildingId: number): void {
   if (building.owner === 0) pushToast(state, `Cancelled ${UNIT_STATS[job.kind].label}.`)
 }
 
+/** Drop the newest Stalker in the Silo queue and refund its full cost. Construction sites are left alone. */
+export function cancelLastStalker(state: MatchState, buildingId: number): void {
+  if (state.outcome || state.paused) return
+  const building = buildingById(state, buildingId)
+  if (!building || building.owner !== 0 || building.kind !== 'keep') return
+  let index = -1
+  for (let i = building.queue.length - 1; i >= 0; i--) {
+    if (building.queue[i]?.kind === 'porter') {
+      index = i
+      break
+    }
+  }
+  if (index < 0) return
+  const job = building.queue[index]
+  if (!job) return
+  building.queue.splice(index, 1)
+  const refund = UNIT_STATS[job.kind].cost
+  state.oreHeld[building.owner] += refund
+  recomputeSupply(state)
+  pushToast(state, `Stalker order cancelled (+${refund} dumps)`)
+}
+
 function ejectFrom(state: MatchState, building: ReturnType<typeof makeBuilding>): void {
   const rect = buildingRect(building)
   const stats = BUILDING_STATS[building.kind]

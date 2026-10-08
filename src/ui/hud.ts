@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelLastStalker, cancelTrain, commandStop, tryTrain } from '../game/commands'
 import { toggleScanner } from '../game/scanner'
 import { buildingById, unitById } from '../game/state'
 import {
@@ -155,8 +155,17 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       ]
     }
     if (building.kind === 'keep') {
+      const stalkerQueued = building.queue.some((job) => job.kind === 'porter')
       return [
         trainButton(state, building.id, 'porter'),
+        {
+          id: 'cancel-stalker',
+          label: 'Cancel (last order)',
+          hotkey: 'Z',
+          title: stalkerQueued ? 'Refund the latest Stalker and its cells' : 'No Stalker is queued',
+          disabled: !stalkerQueued,
+          run: () => cancelLastStalker(state, building.id),
+        },
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),

@@ -1,6 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea } from './game/ai'
 import { runCommand } from './game/console'
-import { aiPlaceNearKeep, assignMiners, commandAttack, commandConstruct, commandGather, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelLastStalker, commandAttack, commandConstruct, commandGather, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -1954,6 +1954,7 @@ aiDroneNeverIdles()
 droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
+cancelLastStalkerRefundsTheQueue()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
@@ -2088,6 +2089,42 @@ function exploredTiles(state: MatchState): number {
   let count = 0
   for (let i = 0; i < state.explored.length; i++) count += state.explored[i] ?? 0
   return count
+}
+
+function cancelLastStalkerRefundsTheQueue(): void {
+  const state = createMatch(41)
+  const silo = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'missing the Silo')
+  const ore = state.oreHeld[0]
+  const cells = state.supplyUsed[0]
+  assert(tryTrain(state, silo.id, 'porter') === null, 'the Silo rejected a Stalker')
+  const firstQueued = silo.queue.length
+  assert(firstQueued === 1, 'the Stalker was not queued')
+  assert(state.oreHeld[0] === ore - UNIT_STATS.porter.cost, 'the Stalker was not charged')
+  assert(state.supplyUsed[0] === cells + UNIT_STATS.porter.supply, 'the Stalker did not reserve a cell')
+  const current = silo.queue[0]
+  assert(current, 'the queued Stalker is missing')
+  current.remaining = 3
+  assert(tryTrain(state, silo.id, 'porter') === null, 'the Silo rejected a second Stalker')
+  const secondQueued = silo.queue.length
+  assert(secondQueued === 2, 'the second Stalker was not queued')
+  cancelLastStalker(state, silo.id)
+  const afterCancel = silo.queue.length
+  assert(afterCancel === 1, 'cancel did not drop the last Stalker')
+  assert(silo.queue[0]?.remaining === 3, 'cancel reset the Stalker already in production')
+  assert(state.oreHeld[0] === ore - UNIT_STATS.porter.cost, 'cancel did not refund the last Stalker')
+  assert(state.supplyUsed[0] === cells + UNIT_STATS.porter.supply, 'cancel did not free the last Stalker cell')
+  assert(
+    state.toasts.some((toast) => toast.text === `Stalker order cancelled (+${UNIT_STATS.porter.cost} dumps)`),
+    'cancel toast missing',
+  )
+  cancelLastStalker(state, silo.id)
+  const emptied = silo.queue.length
+  assert(emptied === 0, 'cancel left the Stalker in production')
+  assert(state.oreHeld[0] === ore, 'cancel did not refund the Stalker in production')
+  assert(state.supplyUsed[0] === cells, 'cancel did not free the cell for the Stalker in production')
+  cancelLastStalker(state, silo.id)
+  assert(state.oreHeld[0] === ore, 'an empty queue refunded dumps')
 }
 
 function scanningHoverRevealsBlackFog(): void {

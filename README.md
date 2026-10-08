@@ -27,7 +27,7 @@ No account, server, or network connection is required after install.
 You start with a Silo, four stalkers, and a small store of dumps — not enough for a Factory. Each match places the two Silos in opposite corners, as far apart as that map allows. The nearest dumps sit on the edge of each Silo's sight: inside the starting view, not beside the walls. The red Silo_02 base will gather, build, and march on you.
 
 1. Select the stalkers (click or drag a box) and right-click a gold dumps patch. Up to three stalkers work that patch. They mine the Silo-area dumps first, from a neighboring tile. After those run out, extras walk to the nearest revealed patch by path length. They do not set out for dumps still under the fog. If gray rock or a tree seals a patch, those stalkers break it, then haul. Rocks, trees, and dumps patches block stalkers, flashers, and gorillas until the rock or tree is destroyed or the patch is mined out.
-2. They gather, walk the dumps back to your Silo, and repeat. The count is in the top bar.
+2. They gather, walk the dumps back to your Silo, and repeat. The count is in the top bar. Select the Silo and press **P** to train another Stalker. **Z** or **Cancel (last order)** refunds the newest one and frees its cell. Factory, Storage, and Pillar sites are not in that queue.
 3. Select a stalker (or the Silo) and place a **Factory**. Ordering it from the Silo sends the nearest idle Stalker, or the nearest miner if every Stalker is already hauling. The site rises only while a stalker stands on it. If that stalker dies or is sent away, the next free Stalker takes over. With nobody left to send, the label switches to **Paused** and the dumps stay spent until you cancel. A second stalker on the site speeds the work.
 4. Place a **Storage** when the cells bar is full. Each Storage adds room for 8 more.
 5. Select the Factory and train **flashers** (short reach, 50 dumps), **gorillas** (long reach, 100 dumps), and **hovers** (75 dumps, no cells, 11 seconds). A Hover flies over rock, trees, and dumps, carries no weapon, and sees as far as a Silo. Gorillas cannot attack it. Flashers and Pillars can, and deal half their usual damage. Select one or more Hovers and press **C** or **Scanner** to explore. They fly to the nearest black fog, then to the tiles seen longest ago, and they split up. Scanner again, a move order, or Stop turns it off.
@@ -49,6 +49,7 @@ You start with a Silo, four stalkers, and a small store of dumps — not enough 
 | Stop | `X` |
 | Factory / Storage / Pillar | `Y` / `L` / `T`, then left-click the map. A Pillar must sit inside Silo sight |
 | Train stalker | Select the Silo, `P` |
+| Cancel last Stalker | Select the Silo, `Z` or Cancel (last order). Refunds the full dumps cost and frees the cells. Grey when no Stalker is queued. |
 | Train flasher / gorilla / hover | Select the Factory, `K` / `J` / `H` |
 | Scanner | Select one or more Hovers, then `C` or the Scanner button. They fly to the nearest black fog, then to the tiles seen longest ago. Another press, a move order, or Stop turns it off. |
 | Rally point | Select a building, right-click the ground |
