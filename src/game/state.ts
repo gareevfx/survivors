@@ -273,6 +273,7 @@ export function createMatch(seed: number): MatchState {
     supplyUsed: [0, 0],
     supplyCap: [0, 0],
     time: 0,
+    paused: false,
     outcome: null,
     selectedUnits: [],
     selectedBuilding: null,

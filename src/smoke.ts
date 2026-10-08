@@ -25,6 +25,33 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+function pauseFreezesTheSimulation(): void {
+  const state = createMatch(5)
+  assert(!state.paused, 'a new match starts paused')
+  const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(worker, 'missing worker')
+  const startX = worker.x
+  const startY = worker.y
+  commandMove(state, [worker.id], startX + 480, startY, false)
+  assert(worker.order?.type === 'move', 'worker was not ordered to move')
+  const goalX = worker.goalX
+  for (let i = 0; i < 30 && worker.x === startX; i++) step(state, 1 / 60)
+  assert(worker.x !== startX, 'worker did not move before the pause')
+  const frozenX = worker.x
+  const frozenY = worker.y
+  const frozenTime = state.time
+  state.paused = true
+  commandMove(state, [worker.id], startX, startY - 400, false)
+  assert(worker.goalX === goalX, 'a move order took effect while paused')
+  for (let i = 0; i < 180; i++) step(state, 1 / 60)
+  assert(state.time === frozenTime, 'the clock advanced while paused')
+  assert(worker.x === frozenX && worker.y === frozenY, 'a unit moved while paused')
+  state.paused = false
+  step(state, 1 / 60)
+  assert(Math.abs(state.time - (frozenTime + 1 / 60)) < 1e-6, 'resume did not continue the clock by one step')
+  assert(worker.x !== frozenX || worker.y !== frozenY, 'the move did not continue after resume')
+}
+
 function pathAroundWall(): void {
   const w = 12
   const h = 12
@@ -1495,6 +1522,7 @@ pathAroundWall()
 routeExists()
 castlesSpawnFarApart()
 mineralsSitOnTheVisionEdge()
+pauseFreezesTheSimulation()
 buriedMineralsPreferTheFasterRock()
 gatherWorks()
 buildAndTrain()

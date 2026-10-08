@@ -300,7 +300,7 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
 }
 
 export function commandStop(state: MatchState, ids: number[]): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   for (const unit of living(state, ids)) {
     noteProgress(unit)
     unit.order = null
@@ -311,7 +311,7 @@ export function commandStop(state: MatchState, ids: number[]): void {
 }
 
 export function commandMove(state: MatchState, ids: number[], x: number, y: number, attackMove: boolean): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const units = living(state, ids)
   if (!units.length) return
   const cols = Math.ceil(Math.sqrt(units.length))
@@ -355,7 +355,7 @@ export function commandAttack(
   targetId: number,
   kind: TargetKind,
 ): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   let owner: PlayerId | null = null
   let x = 0
   let y = 0
@@ -405,7 +405,7 @@ export function commandAttack(
 }
 
 export function commandGather(state: MatchState, ids: number[], nodeId: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const node = state.ore.find((entry) => entry.id === nodeId && entry.amount > 0)
   if (!node) return
   const units = living(state, ids)
@@ -435,7 +435,7 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
 
 /** Send workers back to an unfinished building. Progress already on the site is kept. */
 export function commandConstruct(state: MatchState, ids: number[], buildingId: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0 || building.complete) return
   const crew = living(state, ids).filter((unit) => unit.kind === 'porter' && unit.owner === building.owner)
@@ -451,7 +451,7 @@ export function commandConstruct(state: MatchState, ids: number[], buildingId: n
 }
 
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.owner !== 0 || building.hp <= 0) return
   building.rallyX = x
@@ -461,6 +461,7 @@ export function commandRally(state: MatchState, buildingId: number, x: number, y
 }
 
 export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind): string | null {
+  if (state.paused) return null
   if (state.outcome) return 'The battle is over'
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0) return 'That structure is gone'
@@ -482,7 +483,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
 }
 
 export function cancelTrain(state: MatchState, buildingId: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.queue.length === 0) return
   const job = building.queue.pop()
@@ -516,6 +517,7 @@ export function tryPlace(
   ty: number,
   preferredPorterIds: number[],
 ): string | null {
+  if (state.paused) return null
   if (state.outcome) return 'The battle is over'
   if (kind === 'keep') return 'The Castle is already standing'
   const stats = BUILDING_STATS[kind]
@@ -568,7 +570,7 @@ export function tryPlace(
 }
 
 export function cancelBuilding(state: MatchState, buildingId: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.complete || building.kind === 'keep') return
   const refund = Math.floor(BUILDING_STATS[building.kind].cost * 0.75)

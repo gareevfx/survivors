@@ -336,6 +336,8 @@ export interface MatchState {
   supplyUsed: [number, number]
   supplyCap: [number, number]
   time: number
+  /** While set, the match clock and every simulation system stay where they are. */
+  paused: boolean
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
   selectedBuilding: number | null

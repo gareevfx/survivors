@@ -131,6 +131,9 @@ hintClose?.addEventListener('click', () => {
   match.tutorial = false
 })
 helpButton?.addEventListener('click', () => helpPanel.classList.toggle('hidden'))
+document.querySelector('#pause')?.addEventListener('click', () => {
+  match.paused = !match.paused
+})
 document.querySelector('#help-close')?.addEventListener('click', () => helpPanel.classList.add('hidden'))
 again?.addEventListener('click', () => boot())
 idle?.addEventListener('click', () => {
@@ -173,11 +176,13 @@ const STEP = 1 / 60
 function loop(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000)
   last = now
-  acc += dt
-  let guard = 0
-  while (acc >= STEP && guard++ < 6) {
-    step(match, STEP)
-    acc -= STEP
+  if (!match.paused) {
+    acc += dt
+    let guard = 0
+    while (acc >= STEP && guard++ < 6) {
+      step(match, STEP)
+      acc -= STEP
+    }
   }
   input.pan(dt)
   const drawn = renderWorld(stage, match, terrain, camera, {
@@ -187,16 +192,19 @@ function loop(now: number): void {
   renderMinimap(mini, match, camera, drawn.viewW, drawn.viewH)
   syncHud(match, sfx.muted, {
     armPlace: (kind) => {
+      if (match.paused) return
       match.placement = match.placement === kind ? null : kind
       match.attackMoveArmed = false
       match.moveArmed = false
     },
     armMove: () => {
+      if (match.paused) return
       match.moveArmed = !match.moveArmed
       match.attackMoveArmed = false
       match.placement = null
     },
     armAttack: () => {
+      if (match.paused) return
       match.attackMoveArmed = !match.attackMoveArmed
       match.moveArmed = false
       match.placement = null

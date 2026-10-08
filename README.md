@@ -59,6 +59,7 @@ You start with a Castle, four workers, and a small store of minerals — not eno
 | Idle workers | `F` or the Idle button |
 | Control groups | `Ctrl+1`–`9` to save, `1`–`9` to recall. Tap the number again to center. |
 | Command line | `Enter`. The box says “write here”. `Off Fog of War` reveals the map, and `Fog of War` hides it again except what you can see. `God Mode` makes your units and buildings invulnerable, and `Off God Mode` turns that off. `Show Enemy Cam` draws only what Dunmarch can see, and `Off Enemy Cam` returns to your own sight. Escape cancels. |
+| Pause | Pause button (beside Controls), or the Pause key. The match clock stops. Resume continues from that moment. |
 | Mute | `M` |
 | Controls overlay | `?` or `F1` |
 

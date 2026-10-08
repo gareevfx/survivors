@@ -87,7 +87,7 @@ export function attachInput(opts: {
 
   function armPlace(kind: BuildingKind): void {
     const state = opts.getState()
-    if (state.outcome) return
+    if (state.outcome || state.paused) return
     const keep = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
     const keepOk = keep?.owner === 0 && keep.kind === 'keep'
@@ -137,6 +137,8 @@ function clearSelection(state: MatchState): void {
     if (state.outcome) return
     const world = worldAt(sx, sy)
     opts.onActivity()
+
+    if (state.paused && (state.placement || state.attackMoveArmed || state.moveArmed)) return
 
     if (state.placement) {
       const tx = Math.floor(world.x / TILE)
@@ -243,6 +245,7 @@ function clearSelection(state: MatchState): void {
       state.moveArmed = false
       return
     }
+    if (state.paused) return
     const world = worldAt(sx, sy)
     if (state.selectedBuilding != null && state.selectedUnits.length === 0) {
       commandRally(state, state.selectedBuilding, world.x, world.y)
@@ -460,6 +463,11 @@ function clearSelection(state: MatchState): void {
       if (!opts.helpOpen()) opts.openCommand()
       return
     }
+    if (event.code === 'Pause') {
+      event.preventDefault()
+      state.paused = !state.paused
+      return
+    }
     if (event.code === 'Escape') {
       if (opts.commandOpen()) {
         opts.closeCommand()
@@ -481,6 +489,7 @@ function clearSelection(state: MatchState): void {
     }
     if (state.outcome) return
     if (event.code === 'KeyQ' && state.selectedUnits.length) {
+      if (state.paused) return
       state.attackMoveArmed = !state.attackMoveArmed
       state.moveArmed = false
       state.placement = null

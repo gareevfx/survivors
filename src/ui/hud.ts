@@ -41,6 +41,8 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   const mute = document.querySelector('#mute')
   const hint = document.querySelector('#hint')
   const mode = document.querySelector('#modeflag')
+  const pause = document.querySelector<HTMLButtonElement>('#pause')
+  const pausedBanner = document.querySelector('#paused')
   const inspect = document.querySelector('#inspect')
   const toasts = document.querySelector('#toasts')
   const overlay = document.querySelector('#overlay')
@@ -62,6 +64,12 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   if (mute) mute.textContent = muted ? 'Sound off' : 'Sound'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
+  if (pause) {
+    pause.textContent = state.paused ? 'Resume' : 'Pause'
+    pause.title = state.paused ? 'Resume the match (Pause)' : 'Pause the match (Pause)'
+    pause.setAttribute('aria-pressed', state.paused ? 'true' : 'false')
+  }
+  if (pausedBanner) pausedBanner.classList.toggle('hidden', !state.paused)
 
   if (mode) {
     if (state.placement) {

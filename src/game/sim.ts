@@ -40,7 +40,7 @@ import {
 } from './types'
 
 export function step(state: MatchState, dt: number): void {
-  if (state.outcome) return
+  if (state.outcome || state.paused) return
   state.time += dt
   updateAi(state, dt)
 
