@@ -3,6 +3,7 @@ import { toggleScanner } from '../game/scanner'
 import { buildingById, unitById } from '../game/state'
 import {
   BUILDING_STATS,
+  PLAYER_COLOR,
   PLAYER_NAME,
   UNIT_STATS,
   type BuildingKind,
@@ -53,6 +54,8 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   const endTitle = document.querySelector('#end-title')
   const endCopy = document.querySelector('#end-copy')
   const endSeed = document.querySelector('#end-seed')
+  const brand = document.querySelector('#brand-line')
+  const sides = document.querySelector('#sides')
 
   if (ore) ore.textContent = String(state.oreHeld[0])
   const supplyText = `${state.supplyUsed[0]} / ${state.supplyCap[0]}`
@@ -97,16 +100,35 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     toasts.innerHTML = state.toasts.map((toast) => `<div class="toast">${escapeHtml(toast.text)}</div>`).join('')
   }
 
+  if (brand) {
+    brand.textContent = state.mode === 'ffa' ? 'Free for all · four Silos' : 'Silo_01 against Silo_02'
+  }
+  if (sides) {
+    sides.innerHTML = Array.from({ length: state.playerCount }, (_, owner) => {
+      const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
+      const color = PLAYER_COLOR[owner] ?? '#ffffff'
+      const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+      return `<span class="${gone && owner !== 0 ? 'out' : ''}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
+    }).join('')
+  }
+
   if (overlay && endKicker && endTitle && endCopy && endSeed) {
     overlay.classList.toggle('hidden', state.outcome == null)
+    const others = PLAYER_NAME.slice(1, state.playerCount).join(', ')
     if (state.outcome === 'win') {
-      endKicker.textContent = PLAYER_NAME[0]
+      endKicker.textContent = PLAYER_NAME[0] ?? 'Silo_01'
       endTitle.textContent = 'New Ground is yours'
-      endCopy.textContent = `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
+      endCopy.textContent =
+        state.playerCount > 2
+          ? 'Every enemy Silo is rubble. Your banners stay on the field.'
+          : `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
     } else if (state.outcome === 'lose') {
-      endKicker.textContent = PLAYER_NAME[1]
+      endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[1] ?? 'Silo_02')
       endTitle.textContent = 'The silo has fallen'
-      endCopy.textContent = `Your Silo is gone. ${PLAYER_NAME[1]} takes New Ground.`
+      endCopy.textContent =
+        state.playerCount > 2
+          ? `Your Silo is gone. ${others} fight on without you.`
+          : `Your Silo is gone. ${PLAYER_NAME[1]} takes New Ground.`
     }
     endSeed.textContent = `Field ${state.seed}`
   }
@@ -373,7 +395,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
       <h2>New Ground</h2>
-      <p class="meta">Destroy the enemy Silo. If your Silo falls, the field is lost. Stalkers mine the dumps beside your Silo first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and dumps block every ground unit. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
+      <p class="meta">${state.playerCount > 2 ? 'Destroy every enemy Silo.' : 'Destroy the enemy Silo.'} If your Silo falls, the field is lost. Stalkers mine the dumps beside your Silo first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and dumps block every ground unit. Trees have half the life of rock. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
     `
   }
   if (units.length === 1) {

@@ -3,11 +3,6 @@ import { canPlace, footprintInKeepSight, isWalkable, rockAt } from './state'
 import {
   BUILDING_STATS,
   GATHER_TIME,
-  MAP_H,
-  MAP_PX_H,
-  MAP_PX_W,
-  MAP_W,
-  ROCK_HP,
   TILE,
   UNIT_STATS,
   type MatchState,
@@ -167,8 +162,8 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
   if (unit.kind === 'drone') {
     const margin = 8
     unit.path = []
-    unit.goalX = Math.max(margin, Math.min(MAP_PX_W - margin, gx))
-    unit.goalY = Math.max(margin, Math.min(MAP_PX_H - margin, gy))
+    unit.goalX = Math.max(margin, Math.min(state.mapW * TILE - margin, gx))
+    unit.goalY = Math.max(margin, Math.min(state.mapH * TILE - margin, gy))
     unit.stuckT = 0
     return true
   }
@@ -202,8 +197,8 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
 
   const path = findPath(
     state.blocked,
-    MAP_W,
-    MAP_H,
+    state.mapW,
+    state.mapH,
     start.tx,
     start.ty,
     goal.tx,
@@ -248,8 +243,8 @@ export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set
     const dy = node.ty - cy
     if (dx * dx + dy * dy > reach) continue
     for (const [tx, ty] of lineTiles(cx, cy, node.tx, node.ty)) {
-      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
-      lanes.add(ty * MAP_W + tx)
+      if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) continue
+      lanes.add(ty * state.mapW + tx)
     }
   }
   return lanes
@@ -265,7 +260,7 @@ export function findBuildSpot(
   const cy = anchorTy + 1
   const lanes = mineralLaneTiles(state, cx, cy)
   const stats = BUILDING_STATS[kind]
-  for (let r = 5; r < MAP_W; r++) {
+  for (let r = 5; r < state.mapW; r++) {
     for (let y = cy - r; y <= cy + r; y++) {
       for (let x = cx - r; x <= cx + r; x++) {
         if (Math.abs(x - cx) !== r && Math.abs(y - cy) !== r) continue
@@ -299,7 +294,7 @@ function aiMayBuild(
   }
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {
-      if (lanes.has((ty + y) * MAP_W + (tx + x))) return false
+      if (lanes.has((ty + y) * state.mapW + (tx + x))) return false
     }
   }
   return true
@@ -354,15 +349,15 @@ const APPROACH: ReadonlyArray<readonly [number, number]> = [
 export function haulCost(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return Number.POSITIVE_INFINITY
-  const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
+  const openGoal = adjacentOpen(state, state.blocked, node.tx, node.ty)
   if (openGoal) {
-    const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)
+    const open = findPath(state.blocked, state.mapW, state.mapH, start.tx, start.ty, openGoal.tx, openGoal.ty)
     if (open) return routeLength(start, open)
   }
   const cleared = clearedOfRocks(state)
-  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+  const shortGoal = adjacentOpen(state, cleared, node.tx, node.ty)
   if (!shortGoal) return Number.POSITIVE_INFINITY
-  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+  const shortcut = findPath(cleared, state.mapW, state.mapH, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
   if (!shortcut) return Number.POSITIVE_INFINITY
   return 1_000_000 + routeLength(start, shortcut)
 }
@@ -375,14 +370,16 @@ export function harvestTime(state: MatchState, unit: Unit, node: { tx: number; t
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return Number.POSITIVE_INFINITY
   const cleared = clearedOfRocks(state)
-  const goal = adjacentOpen(cleared, node.tx, node.ty)
+  const goal = adjacentOpen(state, cleared, node.tx, node.ty)
   if (!goal) return Number.POSITIVE_INFINITY
-  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  const shortcut = findPath(cleared, state.mapW, state.mapH, start.tx, start.ty, goal.tx, goal.ty)
   if (!shortcut) return Number.POSITIVE_INFINITY
   const stats = UNIT_STATS.porter
-  const shots = Math.ceil(ROCK_HP / Math.max(1, stats.damage))
   const travel = (routeLength(start, shortcut) * TILE) / stats.speed
-  const breaking = rocksAlong(state, start, shortcut).length * shots * stats.cooldown
+  const breaking = rocksAlong(state, start, shortcut).reduce((sum, rock) => {
+    const shots = Math.ceil(rock.hp / Math.max(1, stats.damage))
+    return sum + shots * stats.cooldown
+  }, 0)
   return travel + breaking + GATHER_TIME
 }
 
@@ -400,14 +397,14 @@ export function gatherBlockRock(
   if (unit.kind !== 'porter') return null
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return null
-  const openGoal = adjacentOpen(state.blocked, node.tx, node.ty)
-  if (openGoal && findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, openGoal.tx, openGoal.ty)) {
+  const openGoal = adjacentOpen(state, state.blocked, node.tx, node.ty)
+  if (openGoal && findPath(state.blocked, state.mapW, state.mapH, start.tx, start.ty, openGoal.tx, openGoal.ty)) {
     return null
   }
   const cleared = clearedOfRocks(state)
-  const shortGoal = adjacentOpen(cleared, node.tx, node.ty)
+  const shortGoal = adjacentOpen(state, cleared, node.tx, node.ty)
   if (!shortGoal) return null
-  const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
+  const shortcut = findPath(cleared, state.mapW, state.mapH, start.tx, start.ty, shortGoal.tx, shortGoal.ty)
   if (!shortcut) return null
   const rocks = rocksAlong(state, start, shortcut)
   if (!rocks.length) return null
@@ -418,15 +415,15 @@ export function gatherBlockRock(
 
 /** Extra path cost on tiles where another unit of the same layer is standing. */
 function occupancyPenalty(state: MatchState, unit: Unit): Uint8Array {
-  const penalty = new Uint8Array(MAP_W * MAP_H)
+  const penalty = new Uint8Array(state.mapW * state.mapH)
   const flying = unit.kind === 'drone'
   for (const other of state.units) {
     if (other.id === unit.id || other.hp <= 0) continue
     if ((other.kind === 'drone') !== flying) continue
     const tx = Math.floor(other.x / TILE)
     const ty = Math.floor(other.y / TILE)
-    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
-    const index = ty * MAP_W + tx
+    if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) continue
+    const index = ty * state.mapW + tx
     penalty[index] = Math.min(255, (penalty[index] ?? 0) + 8)
   }
   return penalty
@@ -436,7 +433,7 @@ function clearedOfRocks(state: MatchState): Uint8Array {
   const cleared = new Uint8Array(state.blocked)
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
-    cleared[rock.ty * MAP_W + rock.tx] = 0
+    cleared[rock.ty * state.mapW + rock.tx] = 0
   }
   return cleared
 }
@@ -451,7 +448,7 @@ function reachableRock(state: MatchState, start: { tx: number; ty: number }, roc
     const ty = rock.ty + dy
     if (!isWalkable(state, tx, ty)) continue
     if (tx === start.tx && ty === start.ty) return true
-    if (findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, tx, ty)) return true
+    if (findPath(state.blocked, state.mapW, state.mapH, start.tx, start.ty, tx, ty)) return true
   }
   return false
 }
@@ -478,7 +475,7 @@ export function builderTravel(
   }
   if (!goal) return Number.POSITIVE_INFINITY
   if (goal.tx === start.tx && goal.ty === start.ty) return 0
-  const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  const path = findPath(state.blocked, state.mapW, state.mapH, start.tx, start.ty, goal.tx, goal.ty)
   if (!path) return Number.POSITIVE_INFINITY
   return routeLength(start, path)
 }
@@ -493,12 +490,12 @@ function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number
   return length
 }
 
-function adjacentOpen(blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
+function adjacentOpen(state: MatchState, blocked: Uint8Array, tx: number, ty: number): { tx: number; ty: number } | null {
   for (const [dx, dy] of APPROACH) {
     const x = tx + dx
     const y = ty + dy
-    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
-    if (blocked[y * MAP_W + x] === 0) return { tx: x, ty: y }
+    if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+    if (blocked[y * state.mapW + x] === 0) return { tx: x, ty: y }
   }
   return null
 }

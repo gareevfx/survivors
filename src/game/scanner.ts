@@ -1,6 +1,6 @@
 import { setUnitDestination, stopMoving } from './nav'
 import { unitById } from './state'
-import { MAP_H, MAP_W, TILE, type MatchState, type Unit } from './types'
+import { TILE, type MatchState, type Unit } from './types'
 import { tileExplored } from './vision'
 
 /** Keep a flight until the Hover is this close, matching the AI Drone scout. */
@@ -88,9 +88,9 @@ function scanGoal(
 ): { x: number; y: number } {
   let nearest: { x: number; y: number; d: number } | null = null
   let oldest: { x: number; y: number; score: number } | null = null
-  for (let ty = 0; ty < MAP_H; ty += 2) {
-    for (let tx = 0; tx < MAP_W; tx += 2) {
-      const index = ty * MAP_W + tx
+  for (let ty = 0; ty < state.mapH; ty += 2) {
+    for (let tx = 0; tx < state.mapW; tx += 2) {
+      const index = ty * state.mapW + tx
       const x = (tx + 0.5) * TILE
       const y = (ty + 0.5) * TILE
       const from = Math.hypot(x - fromX, y - fromY)
@@ -110,9 +110,9 @@ function scanGoal(
   if (oldest) return { x: oldest.x, y: oldest.y }
   const corners = [
     { x: 4.5 * TILE, y: 4.5 * TILE },
-    { x: (MAP_W - 4.5) * TILE, y: 4.5 * TILE },
-    { x: 4.5 * TILE, y: (MAP_H - 4.5) * TILE },
-    { x: (MAP_W - 4.5) * TILE, y: (MAP_H - 4.5) * TILE },
+    { x: (state.mapW - 4.5) * TILE, y: 4.5 * TILE },
+    { x: 4.5 * TILE, y: (state.mapH - 4.5) * TILE },
+    { x: (state.mapW - 4.5) * TILE, y: (state.mapH - 4.5) * TILE },
   ]
   let best = corners[0] ?? { x: fromX, y: fromY }
   let bestD = -1

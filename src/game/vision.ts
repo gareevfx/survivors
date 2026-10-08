@@ -1,18 +1,22 @@
-import { BUILDING_STATS, MAP_H, MAP_W, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './types'
+import { BUILDING_STATS, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './types'
 
-/** Refresh both armies' sight. Off Fog of War reveals the map for Northmark only. */
+/** Refresh every side's sight. Off Fog of War reveals the map for Silo_01 only. */
 export function updateVision(state: MatchState): void {
-  if (state.fogCleared) {
-    state.explored.fill(1)
-    state.visible.fill(1)
-  } else {
-    const visible = new Uint8Array(MAP_W * MAP_H)
-    paintSight(state, 0, visible, state.explored)
-    state.visible = visible
+  const cells = state.mapW * state.mapH
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    const explored = exploredGrid(state, owner)
+    if (owner === 0 && state.fogCleared) {
+      explored.fill(1)
+      state.visible.fill(1)
+      state.sideVisible[0] = state.visible
+      continue
+    }
+    const visible = new Uint8Array(cells)
+    paintSight(state, owner, visible, explored)
+    if (owner === 0) state.visible = visible
+    else if (owner === 1) state.aiVisible = visible
+    state.sideVisible[owner] = visible
   }
-  const aiVisible = new Uint8Array(MAP_W * MAP_H)
-  paintSight(state, 1, aiVisible, state.aiExplored)
-  state.aiVisible = aiVisible
   const now = state.time
   for (let i = 0; i < state.visible.length; i++) {
     if (state.visible[i] === 1) state.seenAt[i] = now
@@ -22,6 +26,18 @@ export function updateVision(state: MatchState): void {
     const node = state.ore.find((entry) => entry.id === state.selectedOre)
     if (!node || node.amount <= 0 || !tileExplored(state, node.tx, node.ty)) state.selectedOre = null
   }
+}
+
+function exploredGrid(state: MatchState, owner: PlayerId): Uint8Array {
+  if (owner === 0) return state.explored
+  if (owner === 1) return state.aiExplored
+  return state.sideExplored[owner] ?? state.aiExplored
+}
+
+function visibleGrid(state: MatchState, owner: PlayerId): Uint8Array {
+  if (owner === 0) return state.visible
+  if (owner === 1) return state.aiVisible
+  return state.sideVisible[owner] ?? state.aiVisible
 }
 
 /** Reveal every tile for the player until Fog of War is turned back on. A new match starts under fog. */
@@ -39,24 +55,38 @@ export function restoreFog(state: MatchState): void {
   updateVision(state)
 }
 
+function onMap(state: MatchState, tx: number, ty: number): boolean {
+  return tx >= 0 && ty >= 0 && tx < state.mapW && ty < state.mapH
+}
+
 export function tileVisible(state: MatchState, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return state.visible[ty * MAP_W + tx] === 1
+  if (!onMap(state, tx, ty)) return false
+  return state.visible[ty * state.mapW + tx] === 1
 }
 
 export function tileExplored(state: MatchState, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return state.explored[ty * MAP_W + tx] === 1
+  if (!onMap(state, tx, ty)) return false
+  return state.explored[ty * state.mapW + tx] === 1
 }
 
 export function aiTileExplored(state: MatchState, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return state.aiExplored[ty * MAP_W + tx] === 1
+  if (!onMap(state, tx, ty)) return false
+  return state.aiExplored[ty * state.mapW + tx] === 1
 }
 
 export function aiTileVisible(state: MatchState, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return state.aiVisible[ty * MAP_W + tx] === 1
+  if (!onMap(state, tx, ty)) return false
+  return state.aiVisible[ty * state.mapW + tx] === 1
+}
+
+export function sideTileVisible(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
+  if (!onMap(state, tx, ty)) return false
+  return visibleGrid(state, owner)[ty * state.mapW + tx] === 1
+}
+
+export function sideTileExplored(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
+  if (!onMap(state, tx, ty)) return false
+  return exploredGrid(state, owner)[ty * state.mapW + tx] === 1
 }
 
 /** Rocks and minerals stay drawn on explored ground, including the gray shroud. Black ground hides them. */
@@ -64,15 +94,23 @@ export function groundShown(state: MatchState, tx: number, ty: number): boolean 
   return tileExplored(state, tx, ty)
 }
 
-/** Sight used for drawing. Both cam merges the two fogs. Enemy cam shows only Dunmarch. */
+/** Sight used for drawing. Both cam merges every side. Enemy cam shows every side but Silo_01. */
 export function viewTileVisible(state: MatchState, tx: number, ty: number): boolean {
-  if (state.bothCam) return tileVisible(state, tx, ty) || aiTileVisible(state, tx, ty)
-  return state.enemyCam ? aiTileVisible(state, tx, ty) : tileVisible(state, tx, ty)
+  if (state.bothCam) return anySideBit(state, tx, ty, false, true)
+  return state.enemyCam ? anySideBit(state, tx, ty, true, true) : tileVisible(state, tx, ty)
 }
 
 export function viewTileExplored(state: MatchState, tx: number, ty: number): boolean {
-  if (state.bothCam) return tileExplored(state, tx, ty) || aiTileExplored(state, tx, ty)
-  return state.enemyCam ? aiTileExplored(state, tx, ty) : tileExplored(state, tx, ty)
+  if (state.bothCam) return anySideBit(state, tx, ty, false, false)
+  return state.enemyCam ? anySideBit(state, tx, ty, true, false) : tileExplored(state, tx, ty)
+}
+
+function anySideBit(state: MatchState, tx: number, ty: number, enemiesOnly: boolean, current: boolean): boolean {
+  const first = enemiesOnly ? 1 : 0
+  for (let owner = first; owner < state.playerCount; owner++) {
+    if (current ? sideTileVisible(state, owner, tx, ty) : sideTileExplored(state, owner, tx, ty)) return true
+  }
+  return false
 }
 
 export function viewGroundShown(state: MatchState, tx: number, ty: number): boolean {
@@ -80,12 +118,14 @@ export function viewGroundShown(state: MatchState, tx: number, ty: number): bool
 }
 
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
-  if (!state.bothCam && unit.owner === (state.enemyCam ? 1 : 0)) return true
+  if (!state.bothCam && !state.enemyCam && unit.owner === 0) return true
+  if (!state.bothCam && state.enemyCam && unit.owner !== 0) return true
   return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
 
 export function viewBuildingSeen(state: MatchState, building: Building): boolean {
-  if (!state.bothCam && building.owner === (state.enemyCam ? 1 : 0)) return true
+  if (!state.bothCam && !state.enemyCam && building.owner === 0) return true
+  if (!state.bothCam && state.enemyCam && building.owner !== 0) return true
   const stats = BUILDING_STATS[building.kind]
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {
@@ -97,8 +137,7 @@ export function viewBuildingSeen(state: MatchState, building: Building): boolean
 
 /** A deposit automatic gathering may use. Explored ground counts even under the shroud. */
 export function depositKnown(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
-  if (owner === 0) return tileExplored(state, tx, ty)
-  return aiTileExplored(state, tx, ty)
+  return sideTileExplored(state, owner, tx, ty)
 }
 
 export function unitSeen(state: MatchState, unit: Unit): boolean {
@@ -120,27 +159,27 @@ export function buildingSeen(state: MatchState, building: Building): boolean {
 function paintSight(state: MatchState, owner: PlayerId, visible: Uint8Array, explored: Uint8Array): void {
   for (const unit of state.units) {
     if (unit.owner !== owner || unit.hp <= 0) continue
-    reveal(visible, explored, unit.x, unit.y, UNIT_STATS[unit.kind].sight)
+    reveal(state, visible, explored, unit.x, unit.y, UNIT_STATS[unit.kind].sight)
   }
   for (const building of state.buildings) {
     if (building.owner !== owner || building.hp <= 0) continue
     const stats = BUILDING_STATS[building.kind]
-    reveal(visible, explored, (building.tx + stats.w / 2) * TILE, (building.ty + stats.h / 2) * TILE, stats.sight)
+    reveal(state, visible, explored, (building.tx + stats.w / 2) * TILE, (building.ty + stats.h / 2) * TILE, stats.sight)
   }
 }
 
-function reveal(visible: Uint8Array, explored: Uint8Array, x: number, y: number, radius: number): void {
+function reveal(state: MatchState, visible: Uint8Array, explored: Uint8Array, x: number, y: number, radius: number): void {
   const minX = Math.max(0, Math.floor((x - radius) / TILE))
-  const maxX = Math.min(MAP_W - 1, Math.floor((x + radius) / TILE))
+  const maxX = Math.min(state.mapW - 1, Math.floor((x + radius) / TILE))
   const minY = Math.max(0, Math.floor((y - radius) / TILE))
-  const maxY = Math.min(MAP_H - 1, Math.floor((y + radius) / TILE))
+  const maxY = Math.min(state.mapH - 1, Math.floor((y + radius) / TILE))
   const reach = radius * radius
   for (let ty = minY; ty <= maxY; ty++) {
     for (let tx = minX; tx <= maxX; tx++) {
       const cx = (tx + 0.5) * TILE
       const cy = (ty + 0.5) * TILE
       if ((cx - x) ** 2 + (cy - y) ** 2 > reach) continue
-      const index = ty * MAP_W + tx
+      const index = ty * state.mapW + tx
       visible[index] = 1
       explored[index] = 1
     }
@@ -148,49 +187,37 @@ function reveal(visible: Uint8Array, explored: Uint8Array, x: number, y: number,
 }
 
 function rememberSightings(state: MatchState): void {
-  for (const building of state.buildings) {
-    if (building.owner !== 0 || building.hp <= 0) continue
-    if (!aiSeesBuilding(state, building)) continue
-    const stats = BUILDING_STATS[building.kind]
-    const x = (building.tx + stats.w / 2) * TILE
-    const y = (building.ty + stats.h / 2) * TILE
-    const known = state.aiSpotted.find((spot) => spot.id === building.id)
-    if (known) {
-      known.x = x
-      known.y = y
-    } else {
-      state.aiSpotted.push({ id: building.id, x, y })
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    const spots = owner === 0 ? state.playerSpotted : owner === 1 ? state.aiSpotted : state.sideSpotted[owner]
+    if (!spots) continue
+    for (const building of state.buildings) {
+      if (building.owner === owner || building.hp <= 0) continue
+      if (!ownerSeesBuilding(state, owner, building)) continue
+      const stats = BUILDING_STATS[building.kind]
+      const x = (building.tx + stats.w / 2) * TILE
+      const y = (building.ty + stats.h / 2) * TILE
+      const known = spots.find((spot) => spot.id === building.id)
+      if (known) {
+        known.x = x
+        known.y = y
+      } else {
+        spots.push({ id: building.id, x, y })
+      }
+    }
+    for (let i = spots.length - 1; i >= 0; i--) {
+      const spot = spots[i]
+      if (!spot) continue
+      const building = state.buildings.find((entry) => entry.id === spot.id)
+      if (!building || building.hp <= 0 || building.owner === owner) spots.splice(i, 1)
     }
   }
-  state.aiSpotted = state.aiSpotted.filter((spot) => {
-    const building = state.buildings.find((entry) => entry.id === spot.id)
-    return !!building && building.hp > 0 && building.owner === 0
-  })
-  for (const building of state.buildings) {
-    if (building.owner !== 1 || building.hp <= 0) continue
-    if (!buildingSeen(state, building)) continue
-    const stats = BUILDING_STATS[building.kind]
-    const x = (building.tx + stats.w / 2) * TILE
-    const y = (building.ty + stats.h / 2) * TILE
-    const known = state.playerSpotted.find((spot) => spot.id === building.id)
-    if (known) {
-      known.x = x
-      known.y = y
-    } else {
-      state.playerSpotted.push({ id: building.id, x, y })
-    }
-  }
-  state.playerSpotted = state.playerSpotted.filter((spot) => {
-    const building = state.buildings.find((entry) => entry.id === spot.id)
-    return !!building && building.hp > 0 && building.owner === 1
-  })
 }
 
-function aiSeesBuilding(state: MatchState, building: Building): boolean {
+function ownerSeesBuilding(state: MatchState, owner: PlayerId, building: Building): boolean {
   const stats = BUILDING_STATS[building.kind]
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {
-      if (aiTileVisible(state, building.tx + x, building.ty + y)) return true
+      if (sideTileVisible(state, owner, building.tx + x, building.ty + y)) return true
     }
   }
   return false

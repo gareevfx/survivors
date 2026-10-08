@@ -2,14 +2,13 @@ import { aiPlaceNearKeep, assignMiners, commandAttack, commandMove, tryTrain } f
 import { nearestWalkable } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, rockAt } from './state'
-import { BUILDING_STATS, MAP_H, MAP_W, TILE, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { BUILDING_STATS, TILE, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 
 /** Extra tiles of walking that justify stopping to break a rock for the army. */
 const ROCK_DETOUR = 12
 
 interface Brain {
   owner: PlayerId
-  foe: PlayerId
   explored: Uint8Array
   visible: Uint8Array
   spotted: Array<{ id: number; x: number; y: number }>
@@ -22,7 +21,6 @@ function brain(state: MatchState, owner: PlayerId): Brain {
   if (owner === 0) {
     return {
       owner,
-      foe: 1,
       explored: state.explored,
       visible: state.visible,
       spotted: state.playerSpotted,
@@ -31,15 +29,25 @@ function brain(state: MatchState, owner: PlayerId): Brain {
       next: state.playerAiNext,
     }
   }
+  if (owner === 1) {
+    return {
+      owner,
+      explored: state.aiExplored,
+      visible: state.aiVisible,
+      spotted: state.aiSpotted,
+      scout: state.aiScout,
+      attacking: state.aiAttacking,
+      next: state.aiNext,
+    }
+  }
   return {
     owner,
-    foe: 0,
-    explored: state.aiExplored,
-    visible: state.aiVisible,
-    spotted: state.aiSpotted,
-    scout: state.aiScout,
-    attacking: state.aiAttacking,
-    next: state.aiNext,
+    explored: state.sideExplored[owner] ?? state.aiExplored,
+    visible: state.sideVisible[owner] ?? state.aiVisible,
+    spotted: state.sideSpotted[owner] ?? [],
+    scout: state.sideScout[owner] ?? 0,
+    attacking: state.sideAttacking[owner] ?? false,
+    next: state.sideNext[owner] ?? 'pike',
   }
 }
 
@@ -50,14 +58,20 @@ function store(state: MatchState, side: Brain): void {
     state.playerAiNext = side.next
     return
   }
-  state.aiScout = side.scout
-  state.aiAttacking = side.attacking
-  state.aiNext = side.next
+  if (side.owner === 1) {
+    state.aiScout = side.scout
+    state.aiAttacking = side.attacking
+    state.aiNext = side.next
+    return
+  }
+  state.sideScout[side.owner] = side.scout
+  state.sideAttacking[side.owner] = side.attacking
+  state.sideNext[side.owner] = side.next
 }
 
-function tileBit(grid: Uint8Array, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return grid[ty * MAP_W + tx] === 1
+function tileBit(state: MatchState, grid: Uint8Array, tx: number, ty: number): boolean {
+  if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) return false
+  return grid[ty * state.mapW + tx] === 1
 }
 
 function idlePorter(unit: Unit, owner: PlayerId): boolean {
@@ -84,13 +98,13 @@ function scoutFor(state: MatchState, side: Brain, fromX: number, fromY: number):
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
   const home = keep ? buildingCenter(keep) : { x: fromX, y: fromY }
   const castleKnown = spottedKeep(state, side.owner) != null
-  const far = { x: MAP_W * TILE - home.x, y: MAP_H * TILE - home.y }
+  const far = { x: state.mapW * TILE - home.x, y: state.mapH * TILE - home.y }
   let mineral: { x: number; y: number; d: number } | null = null
   let hunt: { x: number; y: number; score: number } | null = null
   let shroud: { x: number; y: number; score: number } | null = null
-  for (let ty = 0; ty < MAP_H; ty += 2) {
-    for (let tx = 0; tx < MAP_W; tx += 2) {
-      const index = ty * MAP_W + tx
+  for (let ty = 0; ty < state.mapH; ty += 2) {
+    for (let tx = 0; tx < state.mapW; tx += 2) {
+      const index = ty * state.mapW + tx
       const explored = side.explored[index] === 1
       const visible = side.visible[index] === 1
       if (visible) continue
@@ -119,8 +133,8 @@ function scoutFor(state: MatchState, side: Brain, fromX: number, fromY: number):
 function seenEnemyBikes(state: MatchState, side: Brain): Array<{ x: number; y: number }> {
   const bikes: Array<{ x: number; y: number }> = []
   for (const unit of state.units) {
-    if (unit.owner !== side.foe || unit.kind !== 'pike' || unit.hp <= 0) continue
-    if (!tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (unit.owner === side.owner || unit.kind !== 'pike' || unit.hp <= 0) continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
     bikes.push({ x: unit.x, y: unit.y })
   }
   return bikes
@@ -146,21 +160,21 @@ function droneGoal(
   const castle = spottedKeep(state, side.owner)
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
   const home = keep ? buildingCenter(keep) : { x: fromX, y: fromY }
-  const far = { x: MAP_W * TILE - home.x, y: MAP_H * TILE - home.y }
+  const far = { x: state.mapW * TILE - home.x, y: state.mapH * TILE - home.y }
   const foes = state.units.filter(
     (unit) =>
-      unit.owner === side.foe &&
+      unit.owner !== side.owner &&
       unit.hp > 0 &&
       unit.kind !== 'pike' &&
-      tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE)),
+      tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE)),
   )
   const crowded = (x: number, y: number) => reserved.some((spot) => Math.hypot(spot.x - x, spot.y - y) < 8 * TILE)
   let local: { x: number; y: number; d: number } | null = null
   let hunt: { x: number; y: number; score: number } | null = null
   let shroud: { x: number; y: number; score: number } | null = null
-  for (let ty = 0; ty < MAP_H; ty += 2) {
-    for (let tx = 0; tx < MAP_W; tx += 2) {
-      const index = ty * MAP_W + tx
+  for (let ty = 0; ty < state.mapH; ty += 2) {
+    for (let tx = 0; tx < state.mapW; tx += 2) {
+      const index = ty * state.mapW + tx
       const explored = side.explored[index] === 1
       const visible = side.visible[index] === 1
       if (explored && visible) continue
@@ -191,9 +205,9 @@ function droneGoal(
   if (shroud) return { x: shroud.x, y: shroud.y }
   const patrol = [
     { x: 4.5 * TILE, y: 4.5 * TILE },
-    { x: (MAP_W - 4.5) * TILE, y: 4.5 * TILE },
-    { x: 4.5 * TILE, y: (MAP_H - 4.5) * TILE },
-    { x: (MAP_W - 4.5) * TILE, y: (MAP_H - 4.5) * TILE },
+    { x: (state.mapW - 4.5) * TILE, y: 4.5 * TILE },
+    { x: 4.5 * TILE, y: (state.mapH - 4.5) * TILE },
+    { x: (state.mapW - 4.5) * TILE, y: (state.mapH - 4.5) * TILE },
     { x: far.x, y: far.y },
   ]
   let best = patrol[0] ?? { x: fromX + TILE * 4, y: fromY }
@@ -274,12 +288,16 @@ function sendScout(state: MatchState, side: Brain, scout: Unit | null): void {
 
 function spottedKeep(state: MatchState, owner: PlayerId): { id: number; x: number; y: number } | null {
   const side = brain(state, owner)
+  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+  const home = keep ? buildingCenter(keep) : { x: 0, y: 0 }
+  let best: { id: number; x: number; y: number; distance: number } | null = null
   for (const spot of side.spotted) {
-    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner === side.foe)
+    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner !== owner)
     if (building?.kind !== 'keep') continue
-    return { id: building.id, x: spot.x, y: spot.y }
+    const distance = Math.hypot(spot.x - home.x, spot.y - home.y)
+    if (!best || distance < best.distance) best = { id: building.id, x: spot.x, y: spot.y, distance }
   }
-  return null
+  return best ? { id: best.id, x: best.x, y: best.y } : null
 }
 
 /** The player Castle, once a Dunmarch unit has seen it. Destroying it is the attack objective. */
@@ -297,11 +315,15 @@ function knownEnemyBuilding(state: MatchState, side: Brain): { x: number; y: num
   if (castle) return { x: castle.x, y: castle.y }
   let fallback: { x: number; y: number } | null = null
   for (const spot of side.spotted) {
-    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner === side.foe)
+    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner !== side.owner)
     if (!building) continue
     fallback = { x: spot.x, y: spot.y }
   }
   return fallback
+}
+
+function keepStands(state: MatchState, owner: PlayerId): boolean {
+  return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
 export function updateAi(state: MatchState, dt: number): void {
@@ -309,7 +331,13 @@ export function updateAi(state: MatchState, dt: number): void {
   state.aiAcc += dt
   if (state.aiAcc >= 0.5) {
     state.aiAcc = 0
-    runSide(state, 1)
+    if (!state.eliminated[1] && keepStands(state, 1)) runSide(state, 1)
+  }
+  for (let owner = 2; owner < state.playerCount; owner++) {
+    state.sideAcc[owner] = (state.sideAcc[owner] ?? 0) + dt
+    if ((state.sideAcc[owner] ?? 0) < 0.5) continue
+    state.sideAcc[owner] = 0
+    if (!state.eliminated[owner] && keepStands(state, owner)) runSide(state, owner)
   }
   if (!state.aiControl) return
   state.playerAiAcc += dt
@@ -503,8 +531,8 @@ function castleUnderAttack(state: MatchState, side: Brain, keepPoint: { x: numbe
     if (Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) < 420) return true
   }
   for (const unit of state.units) {
-    if (unit.owner !== side.foe || unit.hp <= 0 || unit.kind === 'drone') continue
-    if (!tileBit(side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
     if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) < 320) return true
     for (const building of state.buildings) {
       if (building.owner !== side.owner || building.hp <= 0) continue
@@ -534,8 +562,8 @@ function rockBlockingMarch(
   for (const unit of army) {
     const start = nearestWalkable(state, unit.x, unit.y)
     if (!start) continue
-    const open = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
-    const shortcut = findPath(cleared, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+    const open = findPath(state.blocked, state.mapW, state.mapH, start.tx, start.ty, goal.tx, goal.ty)
+    const shortcut = findPath(cleared, state.mapW, state.mapH, start.tx, start.ty, goal.tx, goal.ty)
     if (!shortcut) continue
     if (!open) {
       const rock = rockAlong(state, start, shortcut)
@@ -553,7 +581,7 @@ function withoutRocks(state: MatchState): Uint8Array {
   const cleared = new Uint8Array(state.blocked)
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
-    cleared[rock.ty * MAP_W + rock.tx] = 0
+    cleared[rock.ty * state.mapW + rock.tx] = 0
   }
   return cleared
 }

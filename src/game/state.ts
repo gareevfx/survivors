@@ -1,7 +1,9 @@
-import { generateBattlefield, pickKeepSites, workerCamp } from './map'
+import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { updateVision } from './vision'
 import {
   BUILDING_STATS,
+  FFA_MAP_H,
+  FFA_MAP_W,
   MAP_H,
   MAP_W,
   ORE_NODE_AMOUNT,
@@ -9,9 +11,11 @@ import {
   STARTING_ORE,
   SUPPLY_MAX,
   TILE,
+  TREE_HP,
   UNIT_STATS,
   type Building,
   type BuildingKind,
+  type MatchMode,
   type MatchState,
   type PlayerId,
   type Rock,
@@ -21,45 +25,45 @@ import {
   type UnitKind,
 } from './types'
 
-export function tileIndex(tx: number, ty: number): number {
-  return ty * MAP_W + tx
+export function tileIndex(tx: number, ty: number, mapW = MAP_W): number {
+  return ty * mapW + tx
 }
 
 export function isWalkable(state: MatchState, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false
-  return state.blocked[tileIndex(tx, ty)] === 0
+  if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) return false
+  return state.blocked[tileIndex(tx, ty, state.mapW)] === 0
 }
 
 export function rebuildBlocked(state: MatchState): void {
   state.blocked.set(state.tiles)
   for (const node of state.ore) {
-    if (node.amount > 0) state.blocked[tileIndex(node.tx, node.ty)] = 1
+    if (node.amount > 0) state.blocked[tileIndex(node.tx, node.ty, state.mapW)] = 1
   }
   for (const building of state.buildings) {
     if (building.hp <= 0) continue
     const stats = BUILDING_STATS[building.kind]
     for (let y = 0; y < stats.h; y++) {
       for (let x = 0; x < stats.w; x++) {
-        state.blocked[tileIndex(building.tx + x, building.ty + y)] = 1
+        state.blocked[tileIndex(building.tx + x, building.ty + y, state.mapW)] = 1
       }
     }
   }
 }
 
 export function recomputeSupply(state: MatchState): void {
-  const used: [number, number] = [0, 0]
-  const cap: [number, number] = [0, 0]
+  const used = Array.from({ length: state.playerCount }, () => 0)
+  const cap = Array.from({ length: state.playerCount }, () => 0)
   for (const unit of state.units) {
     if (unit.hp <= 0) continue
-    used[unit.owner] += UNIT_STATS[unit.kind].supply
+    used[unit.owner] = (used[unit.owner] ?? 0) + UNIT_STATS[unit.kind].supply
   }
   for (const building of state.buildings) {
     if (building.hp <= 0) continue
-    if (building.complete) cap[building.owner] += BUILDING_STATS[building.kind].supply
-    for (const job of building.queue) used[building.owner] += UNIT_STATS[job.kind].supply
+    if (building.complete) cap[building.owner] = (cap[building.owner] ?? 0) + BUILDING_STATS[building.kind].supply
+    for (const job of building.queue) used[building.owner] = (used[building.owner] ?? 0) + UNIT_STATS[job.kind].supply
   }
   state.supplyUsed = used
-  state.supplyCap = [Math.min(SUPPLY_MAX, cap[0]), Math.min(SUPPLY_MAX, cap[1])]
+  state.supplyCap = cap.map((value) => Math.min(SUPPLY_MAX, value))
 }
 
 export function pushToast(state: MatchState, text: string): void {
@@ -214,10 +218,10 @@ function castlePatchOwner(
 
 export function canPlace(state: MatchState, kind: BuildingKind, tx: number, ty: number): boolean {
   const stats = BUILDING_STATS[kind]
-  if (tx < 0 || ty < 0 || tx + stats.w > MAP_W || ty + stats.h > MAP_H) return false
+  if (tx < 0 || ty < 0 || tx + stats.w > state.mapW || ty + stats.h > state.mapH) return false
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {
-      if (state.blocked[tileIndex(tx + x, ty + y)]) return false
+      if (state.blocked[tileIndex(tx + x, ty + y, state.mapW)]) return false
     }
   }
   return true
@@ -297,20 +301,48 @@ export function makeBuilding(
   return building
 }
 
-export function createMatch(seed: number): MatchState {
-  const camps = pickKeepSites(seed)
-  const field = generateBattlefield(seed, camps.player, camps.enemy)
+export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState {
+  const duel = mode !== 'ffa'
+  const mapW = duel ? MAP_W : FFA_MAP_W
+  const mapH = duel ? MAP_H : FFA_MAP_H
+  const playerCount = duel ? 2 : 4
+  const placed = duel ? pickKeepSites(seed) : null
+  const sites = placed ? [placed.player, placed.enemy] : pickFfaSites(seed)
+  const field = generateBattlefield(seed, sites, mapW, mapH)
+  const cells = mapW * mapH
+  const explored = new Uint8Array(cells)
+  const visible = new Uint8Array(cells)
+  const aiExplored = new Uint8Array(cells)
+  const aiVisible = new Uint8Array(cells)
+  const playerSpotted: Array<{ id: number; x: number; y: number }> = []
+  const aiSpotted: Array<{ id: number; x: number; y: number }> = []
+  const sideExplored = [explored, aiExplored]
+  const sideVisible = [visible, aiVisible]
+  const sideSpotted = [playerSpotted, aiSpotted]
+  for (let owner = 2; owner < playerCount; owner++) {
+    sideExplored.push(new Uint8Array(cells))
+    sideVisible.push(new Uint8Array(cells))
+    sideSpotted.push([])
+  }
   const state: MatchState = {
     seed,
+    mode: duel ? 'duel' : 'ffa',
+    playerCount,
+    mapW,
+    mapH,
+    eliminated: Array.from({ length: playerCount }, () => false),
     tiles: field.tiles,
-    blocked: new Uint8Array(MAP_W * MAP_H),
-    explored: new Uint8Array(MAP_W * MAP_H),
-    visible: new Uint8Array(MAP_W * MAP_H),
-    seenAt: new Float32Array(MAP_W * MAP_H),
-    aiExplored: new Uint8Array(MAP_W * MAP_H),
-    aiVisible: new Uint8Array(MAP_W * MAP_H),
-    aiSpotted: [],
-    playerSpotted: [],
+    blocked: new Uint8Array(cells),
+    explored,
+    visible,
+    seenAt: new Float32Array(cells),
+    aiExplored,
+    aiVisible,
+    sideExplored,
+    sideVisible,
+    sideSpotted,
+    aiSpotted,
+    playerSpotted,
     aiScout: 0,
     playerAiScout: 0,
     fogCleared: false,
@@ -327,9 +359,9 @@ export function createMatch(seed: number): MatchState {
     pings: [],
     toasts: [],
     nextId: 1,
-    oreHeld: [STARTING_ORE, STARTING_ORE],
-    supplyUsed: [0, 0],
-    supplyCap: [0, 0],
+    oreHeld: Array.from({ length: playerCount }, () => STARTING_ORE),
+    supplyUsed: Array.from({ length: playerCount }, () => 0),
+    supplyCap: Array.from({ length: playerCount }, () => 0),
     time: 0,
     paused: false,
     outcome: null,
@@ -342,6 +374,10 @@ export function createMatch(seed: number): MatchState {
     aiAcc: 0,
     aiAttacking: false,
     aiNext: 'pike',
+    sideAcc: Array.from({ length: playerCount }, () => 0),
+    sideAttacking: Array.from({ length: playerCount }, () => false),
+    sideNext: Array.from({ length: playerCount }, () => 'pike' as const),
+    sideScout: Array.from({ length: playerCount }, () => 0),
     playerAiAcc: 0,
     playerAiAttacking: false,
     playerAiNext: 'pike',
@@ -350,10 +386,11 @@ export function createMatch(seed: number): MatchState {
     tutorial: true,
   }
 
-  const campsByOwner: Array<{ owner: PlayerId; tx: number; ty: number }> = [
-    { owner: 0, tx: camps.player.tx, ty: camps.player.ty },
-    { owner: 1, tx: camps.enemy.tx, ty: camps.enemy.ty },
-  ]
+  const campsByOwner: Array<{ owner: PlayerId; tx: number; ty: number }> = sites.map((site, owner) => ({
+    owner,
+    tx: site.tx,
+    ty: site.ty,
+  }))
   for (const spot of field.ore) {
     state.ore.push({
       id: state.nextId++,
@@ -364,37 +401,54 @@ export function createMatch(seed: number): MatchState {
     })
   }
 
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      const tile = field.tiles[tileIndex(tx, ty)]
+  for (let ty = 0; ty < mapH; ty++) {
+    for (let tx = 0; tx < mapW; tx++) {
+      const tile = field.tiles[tileIndex(tx, ty, mapW)]
       if (tile !== 1 && tile !== 3) continue
       state.rocks.push({
         id: state.nextId++,
         tx,
         ty,
-        hp: ROCK_HP,
+        hp: tile === 3 ? TREE_HP : ROCK_HP,
         hitFlash: 0,
         kind: tile === 3 ? 'tree' : 'rock',
       })
     }
   }
 
-  const homeKeep = makeBuilding(state, 0, 'keep', camps.player.tx, camps.player.ty, true)
-  const enemyKeep = makeBuilding(state, 1, 'keep', camps.enemy.tx, camps.enemy.ty, true)
-  aimRally(homeKeep, camps.enemy)
-  aimRally(enemyKeep, camps.player)
-
-  for (const [tx, ty] of workerCamp(camps.player, camps.enemy, field.ore)) {
-    makeUnit(state, 0, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
-  }
-  for (const [tx, ty] of workerCamp(camps.enemy, camps.player, field.ore)) {
-    makeUnit(state, 1, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
+  const keeps = sites.map((site, owner) => makeBuilding(state, owner, 'keep', site.tx, site.ty, true))
+  for (let owner = 0; owner < sites.length; owner++) {
+    const site = sites[owner]
+    const keep = keeps[owner]
+    if (!site || !keep) continue
+    const aim = aimSite(site, sites)
+    aimRally(keep, aim)
+    for (const [tx, ty] of workerCamp(site, aim, field.ore, mapW, mapH)) {
+      const unit = makeUnit(state, owner, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
+      const dx = (aim.tx + 1.5) * TILE - unit.x
+      const dy = (aim.ty + 1.5) * TILE - unit.y
+      unit.facing = Math.atan2(dy, dx)
+    }
   }
 
   rebuildBlocked(state)
   recomputeSupply(state)
   updateVision(state)
   return state
+}
+
+function aimSite(site: { tx: number; ty: number }, sites: Array<{ tx: number; ty: number }>): { tx: number; ty: number } {
+  let x = 0
+  let y = 0
+  let n = 0
+  for (const other of sites) {
+    if (other.tx === site.tx && other.ty === site.ty) continue
+    x += other.tx
+    y += other.ty
+    n += 1
+  }
+  if (n === 0) return { tx: site.tx + 1, ty: site.ty - 1 }
+  return { tx: x / n, ty: y / n }
 }
 
 function aimRally(building: Building, toward: { tx: number; ty: number }): void {

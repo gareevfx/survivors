@@ -5,12 +5,11 @@ import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, v
 import {
   BUILDING_STATS,
   MAP_H,
-  MAP_PX_H,
-  MAP_PX_W,
   MAP_W,
   PLAYER_COLOR,
   ROCK_HP,
   TILE,
+  TREE_HP,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -25,15 +24,31 @@ export interface WorldOverlay {
 
 const GRASS = ['#66754c', '#6e7d52', '#5e6c46', '#758856', '#617048', '#6a784e']
 
-export function buildTerrain(seed: number): HTMLCanvasElement {
+function teamColor(owner: number, first: string, second: string, third: string, fourth: string): string {
+  if (owner === 0) return first
+  if (owner === 1) return second
+  if (owner === 2) return third
+  return fourth
+}
+
+function teamRgba(owner: number, alpha: number): string {
+  const hex = PLAYER_COLOR[owner] ?? '#ffffff'
+  const value = Number.parseInt(hex.slice(1), 16)
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  canvas.width = MAP_PX_W
-  canvas.height = MAP_PX_H
+  canvas.width = mapW * TILE
+  canvas.height = mapH * TILE
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
 
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
+  for (let ty = 0; ty < mapH; ty++) {
+    for (let tx = 0; tx < mapW; tx++) {
       const n = hash2(tx, ty, seed)
       const x = tx * TILE
       const y = ty * TILE
@@ -53,7 +68,7 @@ export function buildTerrain(seed: number): HTMLCanvasElement {
 
   ctx.strokeStyle = 'rgba(20, 24, 14, 0.45)'
   ctx.lineWidth = 4
-  ctx.strokeRect(2, 2, MAP_PX_W - 4, MAP_PX_H - 4)
+  ctx.strokeRect(2, 2, mapW * TILE - 4, mapH * TILE - 4)
   return canvas
 }
 
@@ -154,8 +169,9 @@ export function renderWorld(
       ctx.arc(x, y - 1, 10, 0, Math.PI * 2)
       ctx.fill()
     }
-    if (rock.hp < ROCK_HP) {
-      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, rock.hp / ROCK_HP, hpColor(rock.hp / ROCK_HP))
+    const full = rock.kind === 'tree' ? TREE_HP : ROCK_HP
+    if (rock.hp < full) {
+      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, rock.hp / full, hpColor(rock.hp / full))
     }
   }
 
@@ -191,7 +207,7 @@ export function renderWorld(
   const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
     if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
-    ctx.fillStyle = shot.owner === 0 ? '#e9f7ff' : '#ffd2c8'
+    ctx.fillStyle = teamColor(shot.owner, '#e9f7ff', '#ffd2c8', '#e5ffe2', '#f0e6ff')
     ctx.beginPath()
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
     ctx.fill()
@@ -264,7 +280,7 @@ function drawBothSight(
   ctx.save()
   ctx.lineWidth = 1.25
   ctx.setLineDash([5, 7])
-  const sources: Array<{ x: number; y: number; radius: number; owner: 0 | 1 }> = []
+  const sources: Array<{ x: number; y: number; radius: number; owner: number }> = []
   for (const unit of state.units) {
     if (unit.hp <= 0) continue
     sources.push({ x: unit.x, y: unit.y, radius: UNIT_STATS[unit.kind].sight, owner: unit.owner })
@@ -279,8 +295,8 @@ function drawBothSight(
       owner: building.owner,
     })
   }
-  for (const owner of [0, 1] as const) {
-    ctx.strokeStyle = owner === 0 ? 'rgba(94, 200, 255, 0.28)' : 'rgba(255, 93, 78, 0.28)'
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    ctx.strokeStyle = teamRgba(owner, 0.28)
     for (const source of sources) {
       if (source.owner !== owner) continue
       if (source.x + source.radius < view.l || source.x - source.radius > view.r) continue
@@ -300,8 +316,8 @@ function drawFog(
 ): void {
   const x0 = Math.max(0, Math.floor(view.l / TILE))
   const y0 = Math.max(0, Math.floor(view.t / TILE))
-  const x1 = Math.min(MAP_W - 1, Math.floor(view.r / TILE))
-  const y1 = Math.min(MAP_H - 1, Math.floor(view.b / TILE))
+  const x1 = Math.min(state.mapW - 1, Math.floor(view.r / TILE))
+  const y1 = Math.min(state.mapH - 1, Math.floor(view.b / TILE))
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
       if (viewTileVisible(state, tx, ty)) continue
@@ -415,7 +431,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const y = building.ty * TILE
   const w = stats.w * TILE
   const h = stats.h * TILE
-  const color = PLAYER_COLOR[building.owner]
+  const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
   ctx.fillStyle = 'rgba(0,0,0,0.22)'
@@ -596,8 +612,8 @@ function drawSilo(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
 
 function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, selected: boolean): void {
   const stats = UNIT_STATS[unit.kind]
-  const body = unit.owner === 0 ? '#6ecfff' : '#ff6d5e'
-  const ink = unit.owner === 0 ? '#14384c' : '#4c1814'
+  const body = teamColor(unit.owner, '#6ecfff', '#ff6d5e', '#8ee87a', '#d2b0ff')
+  const ink = teamColor(unit.owner, '#14384c', '#4c1814', '#173318', '#2a1844')
   const bob = unit.goalX != null ? Math.sin(unit.anim) * 1.1 : 0
 
   if (selected || (state.tutorial && unit.owner === 0 && unit.kind === 'porter')) {
@@ -777,8 +793,13 @@ function roundRect(
 }
 
 /** Fit the 16:9 map inside the minimap element without stretching it. */
-export function minimapFrame(cssW: number, cssH: number): { x: number; y: number; w: number; h: number } {
-  const aspect = MAP_W / MAP_H
+export function minimapFrame(
+  cssW: number,
+  cssH: number,
+  mapW = MAP_W,
+  mapH = MAP_H,
+): { x: number; y: number; w: number; h: number } {
+  const aspect = mapW / mapH
   const box = cssW / Math.max(1, cssH)
   if (box > aspect) {
     const w = cssH * aspect
@@ -810,22 +831,22 @@ export function renderMinimap(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = '#070806'
   ctx.fillRect(0, 0, cssW, cssH)
-  const frame = minimapFrame(cssW, cssH)
-  const sx = frame.w / MAP_W
-  const sy = frame.h / MAP_H
+  const frame = minimapFrame(cssW, cssH, state.mapW, state.mapH)
+  const sx = frame.w / state.mapW
+  const sy = frame.h / state.mapH
   const ox = frame.x
   const oy = frame.y
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
       if (!viewTileExplored(state, tx, ty)) continue
       ctx.fillStyle = viewTileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
       if (!viewTileExplored(state, tx, ty)) continue
-      const tile = state.tiles[ty * MAP_W + tx]
+      const tile = state.tiles[ty * state.mapW + tx]
       if (tile !== 1 && tile !== 3) continue
       ctx.fillStyle = tile === 3 ? '#3d9a45' : '#3a3832'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
@@ -839,21 +860,21 @@ export function renderMinimap(
   for (const building of state.buildings) {
     if (!viewBuildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
-    ctx.fillStyle = building.owner === 0 ? '#7ecfff' : '#ff7d70'
+    ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
     ctx.globalAlpha = building.complete ? 1 : 0.55
     ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {
     if (!viewUnitSeen(state, unit)) continue
-    ctx.fillStyle = unit.owner === 0 ? '#d8f4ff' : '#ffd0c8'
+    ctx.fillStyle = teamColor(unit.owner, '#d8f4ff', '#ffd0c8', '#e7ffe4', '#f0e4ff')
     const px = ox + (unit.x / TILE) * sx
     const py = oy + (unit.y / TILE) * sy
     ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
   }
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
       if (!viewTileExplored(state, tx, ty) || viewTileVisible(state, tx, ty)) continue
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }

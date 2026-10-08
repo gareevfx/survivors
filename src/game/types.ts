@@ -4,6 +4,11 @@ export const MAP_W = 80
 export const MAP_H = 45
 export const MAP_PX_W = TILE * MAP_W
 export const MAP_PX_H = TILE * MAP_H
+/** Free-for-all uses a square field. 1v1 stays on the 80×45 map above. */
+export const FFA_MAP_W = 80
+export const FFA_MAP_H = 80
+
+export type MatchMode = 'duel' | 'ffa'
 
 export const PLAYER_KEEP_TX = 6
 export const PLAYER_KEEP_TY = 34
@@ -15,6 +20,8 @@ export const ORE_NODE_AMOUNT = 420
 export const MINERS_PER_DEPOSIT = 3
 /** Workers chip gray rock when ordered. Bikes and tanks cannot damage it. */
 export const ROCK_HP = 56
+/** Trees block like rock and take half as many hits. */
+export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
 export const SUPPLY_MAX = 60
 export const INTERACT = 42
@@ -23,7 +30,7 @@ export const CHASE_BREAK = 300
 /** A worker that has not moved on an order for this long is sent to the next job. */
 export const STUCK_REDIRECT_SECONDS = 4
 
-export type PlayerId = 0 | 1
+export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
 export type TargetKind = 'unit' | 'building' | 'rock'
@@ -180,8 +187,8 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
 }
 
-export const PLAYER_NAME = ['Silo_01', 'Silo_02'] as const
-export const PLAYER_COLOR = ['#5ec8ff', '#ff5d4e'] as const
+export const PLAYER_NAME: readonly string[] = ['Silo_01', 'Silo_02', 'Silo_03', 'Silo_04']
+export const PLAYER_COLOR: readonly string[] = ['#5ec8ff', '#ff5d4e', '#7dff6a', '#c58bff']
 
 export type Order =
   | { type: 'move'; x: number; y: number }
@@ -329,21 +336,33 @@ export type GameEvent =
 
 export interface MatchState {
   seed: number
+  mode: MatchMode
+  playerCount: number
+  mapW: number
+  mapH: number
+  /** A side whose Silo is gone. Its units and buildings have been removed. */
+  eliminated: boolean[]
   tiles: Uint8Array
   blocked: Uint8Array
-  /** Tiles Northmark has ever seen. Stays revealed after units leave. */
+  /** Tiles Silo_01 has ever seen. Stays revealed after units leave. */
   explored: Uint8Array
-  /** Tiles currently inside Northmark sight. Rebuilt each step. */
+  /** Tiles currently inside Silo_01 sight. Rebuilt each step. */
   visible: Uint8Array
-  /** Match time when Northmark last saw each tile. Zero until that tile is seen. */
+  /** Match time when Silo_01 last saw each tile. Zero until that tile is seen. */
   seenAt: Float32Array
-  /** Tiles Dunmarch has scouted. Minerals and enemies outside this are unknown. */
+  /** Tiles Silo_02 has scouted. Same array as sideExplored[1]. */
   aiExplored: Uint8Array
-  /** Tiles currently inside Dunmarch sight. Rebuilt each step. */
+  /** Tiles currently inside Silo_02 sight. Same array as sideVisible[1]. */
   aiVisible: Uint8Array
-  /** Player buildings Dunmarch has seen. The last position is kept until that building is gone. */
+  /** Explored ground for every side, indexed by owner. */
+  sideExplored: Uint8Array[]
+  /** Current sight for every side, indexed by owner. */
+  sideVisible: Uint8Array[]
+  /** Enemy buildings each side has seen. */
+  sideSpotted: Array<Array<{ id: number; x: number; y: number }>>
+  /** Player buildings Silo_02 has seen. Same array as sideSpotted[1]. */
   aiSpotted: Array<{ id: number; x: number; y: number }>
-  /** Dunmarch buildings Northmark has seen. Used only while AI control is playing this side. */
+  /** Enemy buildings Silo_01 has seen. Same array as sideSpotted[0]. */
   playerSpotted: Array<{ id: number; x: number; y: number }>
   /** Drone, bike, or spare worker currently scouting fog for minerals and the enemy. */
   aiScout: number
@@ -368,9 +387,9 @@ export interface MatchState {
   pings: Ping[]
   toasts: Toast[]
   nextId: number
-  oreHeld: [number, number]
-  supplyUsed: [number, number]
-  supplyCap: [number, number]
+  oreHeld: number[]
+  supplyUsed: number[]
+  supplyCap: number[]
   time: number
   /** While set, the match clock and every simulation system stay where they are. */
   paused: boolean
@@ -384,6 +403,11 @@ export interface MatchState {
   aiAcc: number
   aiAttacking: boolean
   aiNext: 'pike' | 'howler'
+  /** Think timers for sides other than Silo_02, which still uses aiAcc. */
+  sideAcc: number[]
+  sideAttacking: boolean[]
+  sideNext: Array<'pike' | 'howler'>
+  sideScout: number[]
   playerAiAcc: number
   playerAiAttacking: boolean
   playerAiNext: 'pike' | 'howler'

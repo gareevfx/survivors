@@ -1,4 +1,4 @@
-import { DRONE_BIKE_AVOID, scoutArea } from './game/ai'
+import { DRONE_BIKE_AVOID, scoutArea, updateAi } from './game/ai'
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD } from './game/map'
@@ -6,7 +6,7 @@ import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
-import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
+import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -19,6 +19,7 @@ import {
   viewBuildingSeen,
   viewGroundShown,
   viewTileVisible,
+  sideTileVisible,
   viewUnitSeen,
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
@@ -299,6 +300,7 @@ function treesGrowInGrovesAndBlockLikeRocks(): void {
     for (const rock of state.rocks) {
       if (rock.hp <= 0) continue
       if (rock.kind === 'tree') {
+        assert(rock.hp === TREE_HP, `a tree started at ${rock.hp}, not ${TREE_HP}`)
         trees += 1
         let neighbor = false
         for (let dy = -1; dy <= 1 && !neighbor; dy++) {
@@ -311,6 +313,7 @@ function treesGrowInGrovesAndBlockLikeRocks(): void {
         assert(state.tiles[rock.ty * MAP_W + rock.tx] === 3, 'a tree tile is not marked as a tree')
         assert(!isWalkable(state, rock.tx, rock.ty), 'a tree does not block movement')
       } else {
+        assert(rock.hp === ROCK_HP, `a rock started at ${rock.hp}, not ${ROCK_HP}`)
         stones += 1
         assert(state.tiles[rock.ty * MAP_W + rock.tx] === 1, 'a rock tile is not marked as stone')
       }
@@ -1955,12 +1958,148 @@ droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
+freeForAllUsesASquareMap()
+aisAttackEachOther()
+eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 console.log('smoke ok')
+
+function freeForAllUsesASquareMap(): void {
+  const duel = createMatch(4)
+  assert(duel.mode === 'duel' && duel.mapW === MAP_W && duel.mapH === MAP_H, '1 vs 1 left the 80×45 field')
+  assert(duel.playerCount === 2, '1 vs 1 seated extra sides')
+  const corners = new Map<number, Set<string>>()
+  const sight = BUILDING_STATS.keep.sight
+  const inner = sight - TILE
+  for (let seed = 1; seed <= 12; seed++) {
+    const state = createMatch(seed, 'ffa')
+    assert(state.mapW === 80 && state.mapH === 80, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
+    assert(state.tiles.length === 80 * 80, 'the square map did not fill 80×80 cells')
+    const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
+    assert(keeps.length === 4, 'free for all is missing a Silo')
+    const owners = new Set(keeps.map((keep) => keep.owner))
+    assert(owners.size === 4, 'two Silos share a side')
+    const quads = new Set(keeps.map((keep) => `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`))
+    assert(quads.size === 4, `Silos are not in four corners (${[...quads].join(', ')})`)
+    for (const keep of keeps) {
+      const quad = `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`
+      const seen = corners.get(keep.owner) ?? new Set<string>()
+      seen.add(quad)
+      corners.set(keep.owner, seen)
+      const workers = state.units.filter((unit) => unit.owner === keep.owner && unit.kind === 'porter' && unit.hp > 0)
+      assert(workers.length === 4, `side ${keep.owner} did not start with four stalkers`)
+      assert(state.oreHeld[keep.owner] === STARTING_ORE, `side ${keep.owner} did not start with the usual dumps`)
+      for (let ty = keep.ty - 9; ty <= keep.ty + 2 + 9; ty++) {
+        for (let tx = keep.tx - 9; tx <= keep.tx + 2 + 9; tx++) {
+          if (tx >= keep.tx && tx < keep.tx + 3 && ty >= keep.ty && ty < keep.ty + 3) continue
+          if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) continue
+          const blocker = state.rocks.find((rock) => rock.tx === tx && rock.ty === ty && rock.hp > 0)
+          assert(!blocker, `seed ${seed} side ${keep.owner} has a blocker in the Silo yard`)
+        }
+      }
+      const cx = (keep.tx + 1.5) * TILE
+      const cy = (keep.ty + 1.5) * TILE
+      let nearest = Infinity
+      let node: { tx: number; ty: number } | null = null
+      for (const ore of state.ore) {
+        const dist = Math.hypot((ore.tx + 0.5) * TILE - cx, (ore.ty + 0.5) * TILE - cy)
+        if (dist < nearest) {
+          nearest = dist
+          node = ore
+        }
+      }
+      assert(node, `seed ${seed} side ${keep.owner} has no dumps`)
+      assert(
+        nearest >= inner - 0.01 && nearest <= sight + 0.01,
+        `seed ${seed} side ${keep.owner} nearest dumps are ${nearest.toFixed(1)}px from the Silo`,
+      )
+      assert(sideTileVisible(state, keep.owner, node.tx, node.ty), `seed ${seed} side ${keep.owner} cannot see its starting dumps`)
+      if (keep.owner !== 0) {
+        assert(!tileVisible(state, keep.tx + 1, keep.ty + 1), 'Silo_01 can see another Silo at the start')
+      }
+    }
+    const tree = state.rocks.find((rock) => rock.kind === 'tree')
+    const stone = state.rocks.find((rock) => rock.kind !== 'tree')
+    assert(tree && tree.hp === TREE_HP, 'a free-for-all tree does not have half life')
+    assert(stone && stone.hp === ROCK_HP, 'a free-for-all rock changed life')
+  }
+  for (const [owner, quads] of corners) {
+    assert(quads.size > 1, `side ${owner} always starts in ${[...quads].join(', ')}`)
+  }
+}
+
+function aisAttackEachOther(): void {
+  const state = createMatch(3, 'ffa')
+  const keep2 = state.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  const keep3 = state.buildings.find((building) => building.owner === 3 && building.kind === 'keep')
+  assert(keep2 && keep3, 'missing two computer Silos')
+  const home2 = buildingCenter(keep2)
+  const home3 = buildingCenter(keep3)
+  state.sideSpotted[2]?.push({ id: keep3.id, x: home3.x, y: home3.y })
+  state.sideSpotted[3]?.push({ id: keep2.id, x: home2.x, y: home2.y })
+  state.sideAttacking[2] = true
+  state.sideAttacking[3] = true
+  for (let n = 0; n < 3; n++) {
+    makeUnit(state, 2, 'pike', home2.x + 30 + n * 18, home2.y + 36)
+    makeUnit(state, 3, 'pike', home3.x + 30 + n * 18, home3.y + 36)
+  }
+  updateAi(state, 0.5)
+  const mover = state.units.find((unit) => {
+    if (unit.owner !== 2 || unit.kind !== 'pike' || !unit.order) return false
+    const order = unit.order
+    if (order.type === 'attack') return order.kind === 'building' && order.targetId === keep3.id
+    if (order.type === 'move' || order.type === 'attackMove') return Math.hypot(order.x - home3.x, order.y - home3.y) < 80
+    return false
+  })
+  assert(mover, 'Silo_03 did not march on Silo_04')
+  const tower = makeBuilding(state, 2, 'tower', keep2.tx + 4, keep2.ty, true)
+  const foe = makeUnit(state, 3, 'pike', (tower.tx + 0.5) * TILE + 36, (tower.ty + 0.5) * TILE)
+  foe.order = null
+  state.aiAcc = -10
+  state.playerAiAcc = -10
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -10
+  const before = foe.hp
+  for (let i = 0; i < 120; i++) {
+    step(state, 1 / 60)
+    if (foe.hp < before) break
+  }
+  assert(foe.hp < before, 'a Pillar ignored an enemy from another computer side')
+}
+
+function eliminatingASideRemovesIt(): void {
+  const state = createMatch(5, 'ffa')
+  const victim = state.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  const other = state.buildings.find((building) => building.owner === 3 && building.kind === 'keep')
+  const second = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(victim && other && second, 'missing Silos to eliminate')
+  victim.hp = 0
+  step(state, 1 / 60)
+  assert(state.outcome == null, 'one fallen Silo ended the free-for-all')
+  assert(state.eliminated[2], 'Silo_03 was not marked eliminated')
+  assert(!state.units.some((unit) => unit.owner === 2), 'eliminated units remained')
+  assert(!state.buildings.some((building) => building.owner === 2), 'eliminated buildings remained')
+  assert(
+    state.toasts.some((toast) => toast.text.includes('Silo_03') && toast.text.includes('eliminated')),
+    'no elimination toast',
+  )
+  assert(state.buildings.some((building) => building.id === other.id && building.hp > 0), 'another side was removed')
+  other.hp = 0
+  second.hp = 0
+  step(state, 1 / 60)
+  assert(state.outcome === 'win', `destroying every enemy Silo did not win (${state.outcome})`)
+
+  const loss = createMatch(5, 'ffa')
+  const home = loss.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing the player Silo')
+  home.hp = 0
+  step(loss, 1 / 60)
+  assert(loss.outcome === 'lose', `a fallen player Silo did not lose (${loss.outcome})`)
+}
 
 function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
   const dx = ox < tx ? tx - ox : ox > tx + w - 1 ? ox - (tx + w - 1) : 0

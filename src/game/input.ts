@@ -61,6 +61,7 @@ export function attachInput(opts: {
   onActivity: () => void
   selectIdle: () => void
   focusPoint: (x: number, y: number) => void
+  active?: () => boolean
 }): InputController {
   const keyAt = new Map<string, number>()
   const groups = new Map<number, number[]>()
@@ -165,14 +166,14 @@ function clearSelection(state: MatchState): void {
       const touchHit = touch ? pick(state, world.x, world.y) : null
       if (touch && state.selectedUnits.length && touchHit?.type === 'unit') {
         const unit = unitById(state, touchHit.id)
-        if (unit && unit.owner === 1) {
+        if (unit && unit.owner !== 0) {
           commandAttack(state, state.selectedUnits, touchHit.id, 'unit')
           return
         }
       }
       if (touch && state.selectedUnits.length && touchHit?.type === 'building') {
         const building = buildingById(state, touchHit.id)
-        if (building && building.owner === 1) {
+        if (building && building.owner !== 0) {
           commandAttack(state, state.selectedUnits, touchHit.id, 'building')
           return
         }
@@ -261,7 +262,7 @@ function clearSelection(state: MatchState): void {
     const hit = pick(state, world.x, world.y)
     if (hit?.type === 'unit') {
       const unit = unitById(state, hit.id)
-      if (unit && unit.owner === 1) {
+      if (unit && unit.owner !== 0) {
         commandAttack(state, state.selectedUnits, hit.id, 'unit')
         return
       }
@@ -275,7 +276,7 @@ function clearSelection(state: MatchState): void {
           return
         }
       }
-      if (building && building.owner === 1) {
+      if (building && building.owner !== 0) {
         commandAttack(state, state.selectedUnits, hit.id, 'building')
         return
       }
@@ -390,7 +391,8 @@ function clearSelection(state: MatchState): void {
       cam.x -= dx / cam.zoom
       cam.y -= dy / cam.zoom
       const box = view()
-      clampCamera(cam, box.w, box.h)
+      const state = opts.getState()
+      clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
       drag.panning = true
     }
   })
@@ -433,12 +435,14 @@ function clearSelection(state: MatchState): void {
       cam.x = before.x - pos.x / cam.zoom
       cam.y = before.y - pos.y / cam.zoom
       const box = view()
-      clampCamera(cam, box.w, box.h)
+      const state = opts.getState()
+      clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
     },
     { passive: false },
   )
 
   window.addEventListener('keydown', (event) => {
+    if (opts.active && !opts.active()) return
     const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
     if (typing) {
       if (event.code === 'Escape') {
@@ -656,7 +660,8 @@ function clearSelection(state: MatchState): void {
       const len = Math.hypot(dx, dy) || 1
       cam.x += (dx / len) * speed * dt
       cam.y += (dy / len) * speed * dt
-      clampCamera(cam, box.w, box.h)
+      const state = opts.getState()
+      clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
     },
     dragRect() {
       if (!drag || drag.panning || drag.kind === 'touch' || !drag.moved || drag.button !== 0) return null

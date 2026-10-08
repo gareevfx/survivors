@@ -1,9 +1,9 @@
-import { sideKnowsEnemyKeep, spottedPlayerKeep, updateAi } from './ai'
+import { sideKnowsEnemyKeep, updateAi } from './ai'
 import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
-import { aiTileVisible, tileVisible, updateVision } from './vision'
+import { updateVision } from './vision'
 import {
   buildingById,
   isWalkable,
@@ -26,10 +26,7 @@ import {
   GATHER_AMOUNT,
   GATHER_TIME,
   INTERACT,
-  MAP_H,
-  MAP_PX_H,
-  MAP_PX_W,
-  MAP_W,
+  PLAYER_NAME,
   STUCK_REDIRECT_SECONDS,
   TILE,
   UNIT_STATS,
@@ -207,8 +204,8 @@ function inWeaponRange(unit: Unit, focus: Target): boolean {
 function shotClear(state: MatchState, x0: number, y0: number, x1: number, y1: number): boolean {
   return rockShotClear(
     state.tiles,
-    MAP_W,
-    MAP_H,
+    state.mapW,
+    state.mapH,
     { tx: Math.floor(x0 / TILE), ty: Math.floor(y0 / TILE) },
     { tx: Math.floor(x1 / TILE), ty: Math.floor(y1 / TILE) },
   )
@@ -338,7 +335,7 @@ function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
   stopMoving(unit)
 }
 
-function nearestCompleteKeep(state: MatchState, owner: 0 | 1, x: number, y: number): Building | null {
+function nearestCompleteKeep(state: MatchState, owner: number, x: number, y: number): Building | null {
   let best: Building | null = null
   let bestD = Infinity
   for (const building of state.buildings) {
@@ -432,8 +429,8 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
 function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
   if (unit.kind === 'drone') {
     const margin = 6
-    unit.x = Math.max(margin, Math.min(MAP_PX_W - margin, unit.x + dx))
-    unit.y = Math.max(margin, Math.min(MAP_PX_H - margin, unit.y + dy))
+    unit.x = Math.max(margin, Math.min(state.mapW * TILE - margin, unit.x + dx))
+    unit.y = Math.max(margin, Math.min(state.mapH * TILE - margin, unit.y + dy))
     return
   }
   const radius = UNIT_STATS[unit.kind].radius
@@ -659,8 +656,8 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     for (let x = building.tx - 1; x <= building.tx + stats.w; x++) {
       const inside = x >= building.tx && x < building.tx + stats.w && y >= building.ty && y < building.ty + stats.h
       if (inside) continue
-      if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
-      if (state.blocked[y * MAP_W + x]) continue
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      if (state.blocked[y * state.mapW + x]) continue
       spots.push({ x: (x + 0.5) * TILE, y: (y + 0.5) * TILE })
     }
   }
@@ -742,7 +739,7 @@ function tryFire(state: MatchState, unit: Unit): void {
     life: 0.12,
     max: 0.12,
     r: 3,
-    color: unit.owner === 0 ? '#e7f6ff' : '#ffe1d6',
+    color: sideTone(unit.owner, '#e7f6ff', '#ffe1d6', '#e7ffe4', '#f3e8ff'),
   })
   state.events.push({ type: 'attack' })
 }
@@ -797,7 +794,7 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     life: 0.12,
     max: 0.12,
     r: 3,
-    color: building.owner === 0 ? '#e7f6ff' : '#ffe1d6',
+    color: sideTone(building.owner, '#e7f6ff', '#ffe1d6', '#e7ffe4', '#f3e8ff'),
   })
   state.events.push({ type: 'attack' })
 }
@@ -873,8 +870,11 @@ function tileInTowerCircle(origin: { x: number; y: number }, tx: number, ty: num
   return Math.hypot(cx - origin.x, cy - origin.y) <= BUILDING_STATS.tower.sight
 }
 
-function sideSeesTile(state: MatchState, owner: 0 | 1, tx: number, ty: number): boolean {
-  return owner === 0 ? tileVisible(state, tx, ty) : aiTileVisible(state, tx, ty)
+function sideSeesTile(state: MatchState, owner: number, tx: number, ty: number): boolean {
+  if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) return false
+  const grid = owner === 0 ? state.visible : owner === 1 ? state.aiVisible : state.sideVisible[owner]
+  if (!grid) return false
+  return grid[ty * state.mapW + tx] === 1
 }
 
 function isAttackable(unit: Unit, focus: Target): boolean {
@@ -920,7 +920,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   }
   if (!best && buildingsToo) {
     const castleFirst =
-      (unit.owner === 1 && spottedPlayerKeep(state) != null) ||
+      (unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
       (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0))
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
@@ -947,7 +947,7 @@ function updateProjectiles(state: MatchState, dt: number): void {
     const distance = Math.hypot(dx, dy)
     if (distance <= shot.radius + 8) {
       applyHit(state, target, shot.damage, shot.sourceId)
-      burst(state, target.x, target.y, shot.owner === 0 ? '#d7f1ff' : '#ffd0c6', 4)
+      burst(state, target.x, target.y, sideTone(shot.owner, '#d7f1ff', '#ffd0c6', '#d9f8d4', '#eadcff'), 4)
       continue
     }
     const stepLen = Math.min(distance, shot.speed * dt)
@@ -1009,7 +1009,7 @@ function cleanup(state: MatchState): void {
   if (deadUnits.length) {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
-      burst(state, unit.x, unit.y, unit.owner === 0 ? '#b9e4f8' : '#ffb2a8', 8)
+      burst(state, unit.x, unit.y, sideTone(unit.owner, '#b9e4f8', '#ffb2a8', '#c8f5c0', '#e2d0ff'), 8)
       state.events.push({ type: 'death' })
     }
     state.units = state.units.filter((unit) => unit.hp > 0)
@@ -1020,7 +1020,7 @@ function cleanup(state: MatchState): void {
   if (!deadBuildings.length) return
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
-    burst(state, center.x, center.y, building.owner === 0 ? '#9ec8de' : '#e7a197', 16)
+    burst(state, center.x, center.y, sideTone(building.owner, '#9ec8de', '#e7a197', '#b7e0b4', '#d4c0ea'), 16)
     for (const job of building.queue) state.oreHeld[building.owner] += UNIT_STATS[job.kind].cost
     if (!building.complete) {
       state.oreHeld[building.owner] += Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
@@ -1039,9 +1039,17 @@ function cleanup(state: MatchState): void {
     state.events.push({ type: 'death' })
   }
   state.buildings = state.buildings.filter((building) => building.hp > 0)
+  let removedSide = false
+  for (let owner = 1; owner < state.playerCount; owner++) {
+    const standing = state.buildings.some((building) => building.owner === owner && building.kind === 'keep')
+    if (standing || state.eliminated[owner]) continue
+    eliminateSide(state, owner)
+    removedSide = true
+  }
+  if (removedSide) recomputeSupply(state)
   rebuildBlocked(state)
   const playerAlive = state.buildings.some((building) => building.owner === 0 && building.kind === 'keep')
-  const enemyAlive = state.buildings.some((building) => building.owner === 1 && building.kind === 'keep')
+  const enemyAlive = state.buildings.some((building) => building.owner !== 0 && building.kind === 'keep')
   if (!playerAlive) {
     state.outcome = 'lose'
     state.events.push({ type: 'lose' })
@@ -1051,12 +1059,46 @@ function cleanup(state: MatchState): void {
   }
 }
 
+function sideTone(owner: number, first: string, second: string, third: string, fourth: string): string {
+  if (owner === 0) return first
+  if (owner === 1) return second
+  if (owner === 2) return third
+  return fourth
+}
+
+function eliminateSide(state: MatchState, owner: number): void {
+  if (state.eliminated[owner]) return
+  state.eliminated[owner] = true
+  const buildingIds = new Set(state.buildings.filter((building) => building.owner === owner).map((building) => building.id))
+  const unitIds = new Set(state.units.filter((unit) => unit.owner === owner).map((unit) => unit.id))
+  state.buildings = state.buildings.filter((building) => building.owner !== owner)
+  state.units = state.units.filter((unit) => unit.owner !== owner)
+  state.selectedUnits = state.selectedUnits.filter((id) => !unitIds.has(id))
+  if (state.selectedBuilding != null && buildingIds.has(state.selectedBuilding)) state.selectedBuilding = null
+  for (const unit of state.units) {
+    const order = unit.order
+    if (order?.type === 'attack') {
+      const hit =
+        (order.kind === 'unit' && unitIds.has(order.targetId)) ||
+        (order.kind === 'building' && buildingIds.has(order.targetId))
+      if (hit) {
+        unit.order = null
+        stopMoving(unit)
+      }
+    } else if (order?.type === 'construct' && buildingIds.has(order.buildingId)) {
+      unit.order = null
+      stopMoving(unit)
+    }
+  }
+  pushToast(state, `${PLAYER_NAME[owner] ?? 'A side'} is eliminated.`)
+}
+
 function clearBrokenRocks(state: MatchState): void {
   const dead = state.rocks.filter((rock) => rock.hp <= 0)
   if (!dead.length) return
   const deadIds = new Set(dead.map((rock) => rock.id))
   for (const rock of dead) {
-    state.tiles[rock.ty * MAP_W + rock.tx] = 0
+    state.tiles[rock.ty * state.mapW + rock.tx] = 0
     burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, rock.kind === 'tree' ? '#6ea84a' : '#b7b1a6', 7)
   }
   state.rocks = state.rocks.filter((rock) => rock.hp > 0)

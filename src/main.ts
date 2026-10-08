@@ -1,12 +1,12 @@
 import './style.css'
 import { Sfx } from './game/audio'
-import { centerCamera, clampCamera, type Camera } from './game/camera'
+import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
-import type { MatchState } from './game/types'
+import type { MatchMode, MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
@@ -35,9 +35,13 @@ const commandField = commandInput
 
 const sfx = new Sfx()
 let commandArmedAt = 0
-let match: MatchState = createMatch((Math.random() * 1_000_000_000) | 0)
-let terrain = buildTerrain(match.seed)
+let match: MatchState | null = null
+let terrain: HTMLCanvasElement | null = null
+let menuOpen = true
 const camera: Camera = { x: 0, y: 0, zoom: 1.35 }
+const menu = document.querySelector<HTMLElement>('#menu')
+const menuResume = document.querySelector<HTMLButtonElement>('#menu-resume')
+const hintCopy = document.querySelector<HTMLElement>('#hint p')
 
 function frameSize(): { w: number; h: number } {
   const rect = stage.getBoundingClientRect()
@@ -45,8 +49,9 @@ function frameSize(): { w: number; h: number } {
 }
 
 function focus(x: number, y: number): void {
+  if (!match) return
   const size = frameSize()
-  centerCamera(camera, x, y, size.w, size.h)
+  centerCamera(camera, x, y, size.w, size.h, match.mapW * 32, match.mapH * 32)
 }
 
 function openCommand(): void {
@@ -63,20 +68,40 @@ function closeCommand(): void {
 }
 
 function lookAtHome(): void {
+  if (!match) return
   const keep = playerKeep(match)
   if (!keep) return
   const center = buildingCenter(keep)
   focus(center.x, center.y)
 }
 
-function boot(seed?: number): void {
+function showMenu(): void {
+  menuOpen = true
+  menu?.classList.remove('hidden')
+  if (menuResume) menuResume.classList.toggle('hidden', !match || match.outcome != null)
+  if (match && !match.outcome) match.paused = true
+}
+
+function startMatch(mode: MatchMode, seed?: number): void {
   closeCommand()
-  match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0))
-  terrain = buildTerrain(match.seed)
-  camera.zoom = 1.35
+  menuOpen = false
+  menu?.classList.add('hidden')
+  match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
+  terrain = buildTerrain(match.seed, match.mapW, match.mapH)
+  camera.zoom = mode === 'ffa' ? 0.85 : 1.35
+  if (hintCopy) {
+    hintCopy.textContent =
+      mode === 'ffa'
+        ? 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the gold dumps beside the Silo.'
+        : 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the gold dumps beside the Silo.'
+  }
   input.clearGroups()
   resetHudCache()
   lookAtHome()
+}
+
+function boot(seed?: number): void {
+  startMatch(match?.mode ?? 'duel', seed)
 }
 
 commandForm.addEventListener('submit', (event) => {
@@ -87,6 +112,7 @@ commandForm.addEventListener('submit', (event) => {
     closeCommand()
     return
   }
+  if (!match) return
   const known = runCommand(match, text)
   if (known) closeCommand()
   else commandField.select()
@@ -94,7 +120,11 @@ commandForm.addEventListener('submit', (event) => {
 
 const input = attachInput({
   canvas: stage,
-  getState: () => match,
+  getState: () => {
+    if (!match) throw new Error('Ridgekeep has no match yet.')
+    return match
+  },
+  active: () => match != null && !menuOpen,
   getCamera: () => camera,
   onMute: () => {
     sfx.unlock()
@@ -112,6 +142,7 @@ const input = attachInput({
 })
 
 function selectIdlePorters(): void {
+  if (!match) return
   const ids = match.units
     .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
     .map((unit) => unit.id)
@@ -128,12 +159,23 @@ function selectIdlePorters(): void {
 }
 
 hintClose?.addEventListener('click', () => {
-  match.tutorial = false
+  if (match) match.tutorial = false
 })
 helpButton?.addEventListener('click', () => helpPanel.classList.toggle('hidden'))
 document.querySelector('#pause')?.addEventListener('click', () => {
+  if (!match || menuOpen) return
   match.paused = !match.paused
 })
+document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
+document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
+document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
+menuResume?.addEventListener('click', () => {
+  if (!match || match.outcome) return
+  menuOpen = false
+  menu?.classList.add('hidden')
+  match.paused = false
+})
+document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
 document.querySelector('#help-close')?.addEventListener('click', () => helpPanel.classList.add('hidden'))
 again?.addEventListener('click', () => boot())
 idle?.addEventListener('click', () => {
@@ -148,7 +190,8 @@ muteButton?.addEventListener('click', () => {
 let miniDrag = false
 const jumpMinimap = (event: PointerEvent) => {
   const rect = mini.getBoundingClientRect()
-  const frame = minimapFrame(rect.width, rect.height)
+  if (!match || !terrain) return
+  const frame = minimapFrame(rect.width, rect.height, match.mapW, match.mapH)
   const x = ((event.clientX - rect.left - frame.x) / frame.w) * terrain.width
   const y = ((event.clientY - rect.top - frame.y) / frame.h) * terrain.height
   focus(x, y)
@@ -165,9 +208,7 @@ mini.addEventListener('pointerup', () => {
   miniDrag = false
 })
 
-lookAtHome()
-const size = frameSize()
-clampCamera(camera, size.w, size.h)
+showMenu()
 
 let last = performance.now()
 let acc = 0
@@ -176,51 +217,55 @@ const STEP = 1 / 60
 function loop(now: number): void {
   const dt = Math.min(0.1, (now - last) / 1000)
   last = now
-  if (!match.paused) {
-    acc += dt
-    let guard = 0
-    while (acc >= STEP && guard++ < 6) {
-      step(match, STEP)
-      acc -= STEP
+  if (match && terrain && !menuOpen) {
+    const live = match
+    const ground = terrain
+    if (!live.paused) {
+      acc += dt
+      let guard = 0
+      while (acc >= STEP && guard++ < 6) {
+        step(live, STEP)
+        acc -= STEP
+      }
     }
+    input.pan(dt)
+    const drawn = renderWorld(stage, live, ground, camera, {
+      drag: input.dragRect(),
+      pointer: input.pointerWorld(),
+    })
+    renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
+    syncHud(live, sfx.muted, {
+      armPlace: (kind) => {
+        if (live.paused || live.aiControl) return
+        live.placement = live.placement === kind ? null : kind
+        live.attackMoveArmed = false
+        live.moveArmed = false
+      },
+      armMove: () => {
+        if (live.paused || live.aiControl) return
+        live.moveArmed = !live.moveArmed
+        live.attackMoveArmed = false
+        live.placement = null
+      },
+      armAttack: () => {
+        if (live.paused || live.aiControl) return
+        live.attackMoveArmed = !live.attackMoveArmed
+        live.moveArmed = false
+        live.placement = null
+      },
+      dismissHint: () => {
+        live.tutorial = false
+      },
+      selectIdle: () => selectIdlePorters(),
+      toggleHelp: () => helpPanel.classList.toggle('hidden'),
+      toggleMute: () => sfx.toggle(),
+      restart: () => boot(),
+    })
+    const events = live.events.splice(0, live.events.length)
+    sfx.consume(events)
+    const cursor = live.placement ? 'cell' : live.attackMoveArmed ? 'crosshair' : live.moveArmed ? 'copy' : 'crosshair'
+    if (stage.style.cursor !== cursor) stage.style.cursor = cursor
   }
-  input.pan(dt)
-  const drawn = renderWorld(stage, match, terrain, camera, {
-    drag: input.dragRect(),
-    pointer: input.pointerWorld(),
-  })
-  renderMinimap(mini, match, camera, drawn.viewW, drawn.viewH)
-  syncHud(match, sfx.muted, {
-    armPlace: (kind) => {
-      if (match.paused || match.aiControl) return
-      match.placement = match.placement === kind ? null : kind
-      match.attackMoveArmed = false
-      match.moveArmed = false
-    },
-    armMove: () => {
-      if (match.paused || match.aiControl) return
-      match.moveArmed = !match.moveArmed
-      match.attackMoveArmed = false
-      match.placement = null
-    },
-    armAttack: () => {
-      if (match.paused || match.aiControl) return
-      match.attackMoveArmed = !match.attackMoveArmed
-      match.moveArmed = false
-      match.placement = null
-    },
-    dismissHint: () => {
-      match.tutorial = false
-    },
-    selectIdle: () => selectIdlePorters(),
-    toggleHelp: () => helpPanel.classList.toggle('hidden'),
-    toggleMute: () => sfx.toggle(),
-    restart: () => boot(),
-  })
-  const events = match.events.splice(0, match.events.length)
-  sfx.consume(events)
-  const cursor = match.placement ? 'cell' : match.attackMoveArmed ? 'crosshair' : match.moveArmed ? 'copy' : 'crosshair'
-  if (stage.style.cursor !== cursor) stage.style.cursor = cursor
   requestAnimationFrame(loop)
 }
 

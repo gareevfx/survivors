@@ -118,10 +118,24 @@ button, canvas { font: inherit; }
 
 .top-actions { display: flex; gap: 6px; }
 
+.sides {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sides span { display: inline-flex; align-items: center; gap: 4px; }
+.sides i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.sides .out { opacity: 0.4; text-decoration: line-through; }
+
 .top-actions button,
 #hint button,
 #again,
-#help-close {
+#to-menu,
+#help-close,
+.menu-card button {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -133,7 +147,9 @@ button, canvas { font: inherit; }
 .top-actions button:hover,
 #hint button:hover,
 #again:hover,
+#to-menu:hover,
 #help-close:hover,
+.menu-card button:hover,
 .cmd:hover:not(:disabled) {
   border-color: #6d8158;
   background: #2c3624;
@@ -416,7 +432,30 @@ button, canvas { font: inherit; }
   line-height: 1.05;
 }
 
-#again, #help-close { margin-top: 14px; }
+#again, #to-menu, #help-close { margin-top: 14px; }
+#to-menu { margin-left: 8px; }
+
+#menu {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #10150e;
+  padding: 20px;
+}
+
+.menu-card { width: min(520px, 100%); }
+.menu-card button {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 18px;
+}
+.menu-card .meta { margin: 6px 0 0; }
 
 .seed {
   margin: 12px 0 0;

@@ -13,7 +13,7 @@
           <span class="mark" aria-hidden="true"></span>
           <div>
             <strong>Ridgekeep</strong>
-            <em>Silo_01 against Silo_02</em>
+            <em id="brand-line">Choose a match</em>
           </div>
         </div>
         <div class="readout" title="Dumps in the Silo">
@@ -27,11 +27,13 @@
           <b id="supply">0 / 0</b>
         </div>
         <div id="clock">0:00</div>
+        <div id="sides" class="sides"></div>
         <div class="top-actions">
           <button id="idle" type="button" title="Select idle stalkers (F)">Idle</button>
           <button id="mute" type="button">Sound</button>
           <button id="help-btn" type="button">Controls</button>
           <button id="pause" type="button" aria-pressed="false" title="Pause the match (Pause)">Pause</button>
+          <button id="menu-btn" type="button" title="Pause and return to the menu">Menu</button>
         </div>
       </header>
 
@@ -65,7 +67,21 @@
           <h2 id="end-title"></h2>
           <p id="end-copy"></p>
           <button id="again" type="button">Fight again</button>
+          <button id="to-menu" type="button">Main menu</button>
           <p class="seed" id="end-seed"></p>
+        </div>
+      </div>
+
+      <div id="menu">
+        <div class="card menu-card">
+          <p class="eyebrow">Ridgekeep</p>
+          <h2>New Ground</h2>
+          <p>The field waits. Pick who stands on it. The match starts when you choose.</p>
+          <button id="menu-duel" type="button">1 vs 1</button>
+          <p class="meta">Silo_01 against Silo_02 on the wide 80×45 field.</p>
+          <button id="menu-ffa" type="button">Free for all (4 players)</button>
+          <p class="meta">Silo_01, Silo_02, Silo_03, and Silo_04, each against the others, on an 80×80 field.</p>
+          <button id="menu-resume" type="button" class="hidden">Resume</button>
         </div>
       </div>
 
@@ -74,13 +90,14 @@
           <p class="eyebrow">Field notes</p>
           <h2>How to hold New Ground</h2>
           <ul>
+            <li>The match starts from the menu. <b>1 vs 1</b> is Silo_01 against Silo_02 on the wide 80×45 field. <b>Free for all (4 players)</b> puts Silo_01, Silo_02, Silo_03, and Silo_04 on an 80×80 field, each against all the others, in a random corner. A side whose Silo falls is eliminated and leaves the field. You win when every enemy Silo is gone, and you lose if yours falls. <b>Main menu</b> on the end screen, or <b>Menu</b> beside Pause, returns here. Menu also pauses.</li>
             <li><b>Left-click</b> a friendly unit or building. Drag a box to select several. Shift adds.</li>
             <li><b>Double-click</b> a unit to grab every visible one of that type.</li>
             <li><b>Right-click</b> ground to move, an enemy to attack, dumps to gather, or gray rock or a tree with stalkers to break it. Flashers and gorillas cannot break rock or trees, and shots cannot pass through either. Up to 3 stalkers work each dumps patch; extras take the nearest revealed patch they can reach. When those patches are mined out, stalkers break the rocks that open the next dumps soonest. Stalkers break rock or trees that seal their patch, then haul. Each match places the two Silos in opposite corners, with the nearest dumps on the edge of that Silo's sight. Units steer around each other. A stalker who is boxed in for 4 seconds goes to the next revealed patch or building site. Silo_02’s army tries to destroy your Silo once it has seen it.</li>
             <li>Unexplored ground is black and hides everything. Ground you have seen stays dark gray: rocks, trees, and dumps stay on that ground, and enemies stay hidden until a unit or building is watching that tile. Stalkers only walk themselves to dumps you have already found. Silo_02 has the same units and the same fog. Its Hovers keep scouting the black for dumps and the far map for your Silo, then the gray ground, and they stay clear of Flashers.</li>
-            <li><b>Enter</b> opens the command line. <b>Off FOW</b> reveals the map, and <b>FOW</b> hides it again. <b>God Mode</b> stops damage to your units and buildings, and <b>Off God Mode</b> lets them take damage again. <b>Show Enemy Cam</b> draws only what Silo_02 can see, and <b>Off Enemy Cam</b> returns to your sight. <b>Both Cam</b> draws both sides at once, and <b>Off Both Cam</b> returns to your sight. <b>AI Control</b> lets the computer play Silo_01 from your own sight, and <b>Off AI Control</b> gives those orders back. Escape closes the line.</li>
+            <li><b>Enter</b> opens the command line. <b>Off FOW</b> reveals the map, and <b>FOW</b> hides it again. <b>God Mode</b> stops damage to your units and buildings, and <b>Off God Mode</b> lets them take damage again. <b>Show Enemy Cam</b> draws what every other side can see, and <b>Off Enemy Cam</b> returns to your sight. <b>Both Cam</b> draws every side at once, and <b>Off Both Cam</b> returns to your sight. <b>AI Control</b> lets the computer play Silo_01 from your own sight, and <b>Off AI Control</b> gives those orders back. Escape closes the line.</li>
             <li><b>Q</b>, then left-click, orders an attack-move. <b>X</b> stops.</li>
-            <li>The match is won by destroying the enemy Silo and lost if your own Silo falls. Silo_02 keeps a few fighters and Pillars at home, and pulls the army back when that Silo or a building beside it is under attack.</li>
+            <li>A 1 vs 1 match is won by destroying the enemy Silo and lost if your own Silo falls. In a free-for-all you win when every other Silo is gone. Each computer side keeps a few fighters and Pillars at home, and pulls its army back when that Silo or a building beside it is under attack. Trees have half the life of gray rock.</li>
             <li><b>Y</b> places a Factory, <b>L</b> a Storage, and <b>T</b> a Pillar. A Pillar is one cell and sees as far as a Hover. It automatically shoots the closest enemy in that sight for 8/3 damage, at a Flasher's rate. Hovers take half of that. It keeps that target until they leave sight or die. Rocks and trees block the shot. The placement ring is Silo sight: green ground inside it will take a Pillar, red ground will not. From the Silo, the nearest idle Stalker walks to the site. If every Stalker is hauling, the nearest miner goes instead. A building rises only while a Stalker is on the site. If that Stalker dies or is sent away, the next free Stalker takes the job.</li>
             <li><b>P</b> trains a Stalker from the Silo. <b>K</b> trains a Flasher, <b>J</b> a Gorilla, and <b>H</b> a Hover, when a Factory is selected. While a Silo or Factory queue has something in it, <b>Cancel</b> (last order) drops the newest job, refunds its full dumps cost, and frees its cells. The button is hidden when the queue is empty, and it has no hotkey. A Hover costs 75 dumps and no cells. It flies over the ground, does not shoot, and sees as far as a Silo. Gorillas cannot attack it. Flashers and Pillars can, for half damage.</li>
             <li><b>C</b> or the <b>Scanner</b> button, with one or more Hovers selected, sends them through the black fog. Each flies to the nearest unexplored ground, and once the map is explored they revisit the tiles seen longest ago. Several Hovers split up. The button stays lit, and the panel says Scanning. Press Scanner again, give a move order, or press <b>X</b> to stop scanning.</li>

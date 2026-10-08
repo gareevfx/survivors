@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
 import { mulberry32 } from './rng'
-import { BUILDING_STATS, MAP_H, MAP_W, TILE } from './types'
+import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, TILE } from './types'
 
 export interface OreSpawn {
   tx: number
@@ -56,6 +56,40 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
   return { player: pick.player, enemy: pick.enemy }
 }
 
+/**
+ * One Silo in each corner of the square field, then shuffled so any side can
+ * start in any corner. Each site sits as far into its corner as the window allows.
+ */
+export function pickFfaSites(seed: number): KeepSite[] {
+  const rng = mulberry32(seed + 0x51ed)
+  const margin = 2
+  const south = FFA_MAP_H - margin - KEEP_H
+  const east = FFA_MAP_W - margin - KEEP_W
+  const corners = [
+    pickCorner(rng, window(margin, south - 8, margin + 10, south), (site) => site.ty * 100 - site.tx),
+    pickCorner(rng, window(east - 10, south - 8, east, south), (site) => site.ty * 100 + site.tx),
+    pickCorner(rng, window(margin, margin, margin + 10, margin + 8), (site) => -site.ty * 100 - site.tx),
+    pickCorner(rng, window(east - 10, margin, east, margin + 8), (site) => -site.ty * 100 + site.tx),
+  ]
+  for (let i = corners.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    const swap = corners[i]
+    corners[i] = corners[j] ?? corners[i]
+    corners[j] = swap ?? corners[j]
+  }
+  return corners
+}
+
+function pickCorner(rng: () => number, sites: KeepSite[], score: (site: KeepSite) => number): KeepSite {
+  let best = -Infinity
+  for (const site of sites) {
+    const value = score(site)
+    if (value > best) best = value
+  }
+  const far = sites.filter((site) => score(site) >= best - 6)
+  return far[Math.floor(rng() * far.length)] ?? sites[0] ?? { tx: 2, ty: 2 }
+}
+
 function window(x0: number, y0: number, x1: number, y1: number): KeepSite[] {
   const sites: KeepSite[] = []
   for (let ty = y0; ty <= y1; ty++) {
@@ -79,6 +113,8 @@ function carve(
   y0: number,
   x1: number,
   y1: number,
+  mapW: number,
+  mapH: number,
 ): void {
   let x = x0
   let y = y0
@@ -93,10 +129,10 @@ function carve(
       for (let ox = -1; ox <= 1; ox++) {
         const tx = x + ox
         const ty = y + oy
-        if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
+        if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) continue
         if (guarded(tx, ty)) continue
-        tiles[ty * MAP_W + tx] = 0
-        blocked[ty * MAP_W + tx] = 0
+        tiles[ty * mapW + tx] = 0
+        blocked[ty * mapW + tx] = 0
         const idx = ore.findIndex((spot) => spot.tx === tx && spot.ty === ty)
         if (idx >= 0) ore.splice(idx, 1)
       }
@@ -116,17 +152,19 @@ function carve(
 
 export function generateBattlefield(
   seed: number,
-  player: KeepSite,
-  enemy: KeepSite,
+  sites: KeepSite[],
+  mapW = MAP_W,
+  mapH = MAP_H,
 ): { tiles: Uint8Array; ore: OreSpawn[] } {
   const rng = mulberry32(seed)
-  const tiles = new Uint8Array(MAP_W * MAP_H)
-  const camps = [player, enemy]
-  const guarded = (tx: number, ty: number) => camps.some((site) => inCamp(site, tx, ty))
+  const tiles = new Uint8Array(mapW * mapH)
+  const guarded = (tx: number, ty: number) => sites.some((site) => inCamp(site, tx, ty))
+  const at = (tx: number, ty: number) => ty * mapW + tx
+  const blobs = mapW === MAP_W && mapH === MAP_H ? 96 : Math.round((96 * mapW * mapH) / (MAP_W * MAP_H))
 
-  for (let i = 0; i < 96; i++) {
-    const cx = 2 + Math.floor(rng() * (MAP_W - 4))
-    const cy = 2 + Math.floor(rng() * (MAP_H - 4))
+  for (let i = 0; i < blobs; i++) {
+    const cx = 2 + Math.floor(rng() * (mapW - 4))
+    const cy = 2 + Math.floor(rng() * (mapH - 4))
     const rad = 1.15 + rng() * 2.3
     const grove = rng() < 0.42 ? 3 : 1
     for (let y = -4; y <= 4; y++) {
@@ -134,26 +172,26 @@ export function generateBattlefield(
         if (x * x + y * y > rad * rad) continue
         const tx = cx + x
         const ty = cy + y
-        if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue
+        if (tx < 1 || ty < 1 || tx >= mapW - 1 || ty >= mapH - 1) continue
         if (guarded(tx, ty)) continue
-        const index = ty * MAP_W + tx
+        const index = at(tx, ty)
         if (tiles[index] !== 0) continue
         tiles[index] = grove
       }
     }
   }
 
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      if (guarded(tx, ty)) tiles[ty * MAP_W + tx] = 0
+  for (let ty = 0; ty < mapH; ty++) {
+    for (let tx = 0; tx < mapW; tx++) {
+      if (guarded(tx, ty)) tiles[at(tx, ty)] = 0
     }
   }
 
   const ore: OreSpawn[] = []
   const add = (tx: number, ty: number) => {
-    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) return
-    if (camps.some((site) => coversFootprint(site, tx, ty))) return
-    tiles[ty * MAP_W + tx] = 0
+    if (tx < 1 || ty < 1 || tx >= mapW - 1 || ty >= mapH - 1) return
+    if (sites.some((site) => coversFootprint(site, tx, ty))) return
+    tiles[at(tx, ty)] = 0
     if (!ore.some((spot) => spot.tx === tx && spot.ty === ty)) ore.push({ tx, ty })
   }
   const addBlock = (tx: number, ty: number, w: number, h: number) => {
@@ -162,49 +200,85 @@ export function generateBattlefield(
     }
   }
 
-  const playerRim = rimPatch(player, enemy)
-  const enemyRim = rimPatch(enemy, player)
-  for (const [tx, ty] of playerRim) add(tx, ty)
-  for (const [tx, ty] of enemyRim) add(tx, ty)
+  const rims = sites.map((site) => rimPatch(site, aimOf(site, sites), mapW, mapH))
+  for (const rim of rims) {
+    for (const [tx, ty] of rim) add(tx, ty)
+  }
 
-  const expansions: Array<[number, number]> = [
-    [24, 10],
-    [36, 8],
-    [48, 11],
-    [22, 20],
-    [34, 18],
-    [46, 21],
-    [28, 30],
-    [40, 27],
-    [52, 31],
-    [18, 16],
-    [58, 16],
-  ]
-  for (const [tx, ty] of expansions) {
-    if (nearCamp(player, tx, ty) || nearCamp(enemy, tx, ty)) continue
+  for (const [tx, ty] of expansionPatches(mapW, mapH)) {
+    if (sites.some((site) => nearCamp(site, tx, ty))) continue
     addBlock(tx, ty, 3, 2)
   }
 
   const rimGuard = new Set<number>()
-  for (const [tx, ty] of playerRim) rimGuard.add(ty * MAP_W + tx)
-  for (const [tx, ty] of enemyRim) rimGuard.add(ty * MAP_W + tx)
-  const keepOre = (tx: number, ty: number) => guarded(tx, ty) || rimGuard.has(ty * MAP_W + tx)
-  openMineralRoute(tiles, player, enemy, playerRim)
-  openMineralRoute(tiles, enemy, player, enemyRim)
+  for (const rim of rims) {
+    for (const [tx, ty] of rim) rimGuard.add(at(tx, ty))
+  }
+  const keepOre = (tx: number, ty: number) => guarded(tx, ty) || rimGuard.has(at(tx, ty))
+  for (let i = 0; i < sites.length; i++) {
+    const site = sites[i]
+    const rim = rims[i]
+    if (!site || !rim) continue
+    openMineralRoute(tiles, site, aimOf(site, sites), rim, mapW, mapH)
+  }
 
-  const start = campAnchor(player)
-  const goal = campAnchor(enemy)
-  tiles[start.ty * MAP_W + start.tx] = 0
-  tiles[goal.ty * MAP_W + goal.tx] = 0
+  const anchors = sites.map((site) => campAnchor(site, mapW, mapH))
   const blocked = new Uint8Array(tiles)
-  for (const node of ore) blocked[node.ty * MAP_W + node.tx] = 1
-  blocked[start.ty * MAP_W + start.tx] = 0
-  blocked[goal.ty * MAP_W + goal.tx] = 0
-  if (!findPath(blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)) {
-    carve(tiles, blocked, ore, keepOre, start.tx, start.ty, goal.tx, goal.ty)
+  for (const node of ore) blocked[at(node.tx, node.ty)] = 1
+  for (const anchor of anchors) {
+    tiles[at(anchor.tx, anchor.ty)] = 0
+    blocked[at(anchor.tx, anchor.ty)] = 0
+  }
+  for (let i = 0; i < anchors.length; i++) {
+    for (let j = i + 1; j < anchors.length; j++) {
+      const start = anchors[i]
+      const goal = anchors[j]
+      if (!start || !goal) continue
+      if (!findPath(blocked, mapW, mapH, start.tx, start.ty, goal.tx, goal.ty)) {
+        carve(tiles, blocked, ore, keepOre, start.tx, start.ty, goal.tx, goal.ty, mapW, mapH)
+      }
+    }
   }
 
   return { tiles, ore }
+}
+
+/** Duel keeps its original patch list. The square map spreads the same patches over the extra ground. */
+function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
+  if (mapW === MAP_W && mapH === MAP_H) {
+    return [
+      [24, 10],
+      [36, 8],
+      [48, 11],
+      [22, 20],
+      [34, 18],
+      [46, 21],
+      [28, 30],
+      [40, 27],
+      [52, 31],
+      [18, 16],
+      [58, 16],
+    ]
+  }
+  const patches: Array<[number, number]> = []
+  for (const ty of [16, 28, 40, 52, 64]) {
+    for (const tx of [18, 30, 42, 54]) patches.push([tx, ty])
+  }
+  return patches
+}
+
+function aimOf(site: KeepSite, sites: KeepSite[]): KeepSite {
+  let x = 0
+  let y = 0
+  let n = 0
+  for (const other of sites) {
+    if (other.tx === site.tx && other.ty === site.ty) continue
+    x += other.tx
+    y += other.ty
+    n += 1
+  }
+  if (n === 0) return { tx: site.tx + 1, ty: Math.max(0, site.ty - 1) }
+  return { tx: x / n, ty: y / n }
 }
 
 function inCamp(site: KeepSite, tx: number, ty: number): boolean {
@@ -232,15 +306,22 @@ function nearCamp(site: KeepSite, tx: number, ty: number): boolean {
  * sight circle and within one tile of it are used. The same rule is applied to
  * both camps, aimed at the other Castle.
  */
-function rimPatch(site: KeepSite, other: KeepSite): Array<[number, number]> {
+function rimPatch(site: KeepSite, other: KeepSite, mapW: number, mapH: number): Array<[number, number]> {
   const dirX = other.tx - site.tx || 1
   const dirY = other.ty - site.ty || -1
-  const chosen = growRim(site, dirX, dirY, RIM_MIN_R2)
+  const chosen = growRim(site, dirX, dirY, RIM_MIN_R2, mapW, mapH)
   if (chosen.length >= 4) return chosen
-  return growRim(site, dirX, dirY, RIM_MIN_R2 - 2)
+  return growRim(site, dirX, dirY, RIM_MIN_R2 - 2, mapW, mapH)
 }
 
-function growRim(site: KeepSite, dirX: number, dirY: number, minR2: number): Array<[number, number]> {
+function growRim(
+  site: KeepSite,
+  dirX: number,
+  dirY: number,
+  minR2: number,
+  mapW: number,
+  mapH: number,
+): Array<[number, number]> {
   const maxR2 = RIM_MAX_R2
   const spots: Array<{ tx: number; ty: number; ix: number; iy: number; score: number }> = []
   for (let iy = -8; iy <= 8; iy++) {
@@ -249,7 +330,7 @@ function growRim(site: KeepSite, dirX: number, dirY: number, minR2: number): Arr
       if (r2 < minR2 || r2 > maxR2) continue
       const tx = site.tx + 1 + ix
       const ty = site.ty + 1 + iy
-      if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue
+      if (tx < 1 || ty < 1 || tx >= mapW - 1 || ty >= mapH - 1) continue
       if (coversFootprint(site, tx, ty)) continue
       spots.push({ tx, ty, ix, iy, score: ix * dirX + iy * dirY })
     }
@@ -258,11 +339,11 @@ function growRim(site: KeepSite, dirX: number, dirY: number, minR2: number): Arr
   const seed = spots[0]
   if (!seed) return []
   const chosen = [seed]
-  const used = new Set<number>([seed.ty * MAP_W + seed.tx])
+  const used = new Set<number>([seed.ty * mapW + seed.tx])
   while (chosen.length < 5) {
     let best: (typeof spots)[number] | null = null
     for (const spot of spots) {
-      const key = spot.ty * MAP_W + spot.tx
+      const key = spot.ty * mapW + spot.tx
       if (used.has(key)) continue
       const touch = chosen.some(
         (have) => Math.abs(have.ix - spot.ix) <= 1 && Math.abs(have.iy - spot.iy) <= 1,
@@ -272,7 +353,7 @@ function growRim(site: KeepSite, dirX: number, dirY: number, minR2: number): Arr
     }
     if (!best) break
     chosen.push(best)
-    used.add(best.ty * MAP_W + best.tx)
+    used.add(best.ty * mapW + best.tx)
   }
   return chosen.map((spot) => [spot.tx, spot.ty])
 }
@@ -283,10 +364,12 @@ function openMineralRoute(
   site: KeepSite,
   other: KeepSite,
   patch: Array<[number, number]>,
+  mapW: number,
+  mapH: number,
 ): void {
   if (patch.length === 0) return
-  const oreAt = new Set(patch.map(([tx, ty]) => ty * MAP_W + tx))
-  const blocked = routeBlocked(tiles, site, oreAt)
+  const oreAt = new Set(patch.map(([tx, ty]) => ty * mapW + tx))
+  const blocked = routeBlocked(tiles, site, oreAt, mapW, mapH)
   const dirX = other.tx - site.tx
   const dirY = other.ty - site.ty
   let start: [number, number] | null = null
@@ -294,8 +377,8 @@ function openMineralRoute(
   for (let y = site.ty - 1; y <= site.ty + KEEP_H; y++) {
     for (let x = site.tx - 1; x <= site.tx + KEEP_W; x++) {
       if (coversFootprint(site, x, y)) continue
-      if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
-      if (blocked[y * MAP_W + x]) continue
+      if (x < 0 || y < 0 || x >= mapW || y >= mapH) continue
+      if (blocked[y * mapW + x]) continue
       const score = (x - site.tx) * dirX + (y - site.ty) * dirY
       if (score < startScore) {
         startScore = score
@@ -306,36 +389,41 @@ function openMineralRoute(
   if (!start) return
   const from = start
   const reaches = (grid: Uint8Array) =>
-    approachTiles(grid, patch).some(([gx, gy]) => findPath(grid, MAP_W, MAP_H, from[0], from[1], gx, gy))
+    approachTiles(grid, patch, mapW, mapH).some(([gx, gy]) => findPath(grid, mapW, mapH, from[0], from[1], gx, gy))
   if (reaches(blocked)) return
 
   const homeX = site.tx + 1
   const homeY = site.ty + 1
-  for (const [tx, ty] of patch) clearRockLine(tiles, site, oreAt, homeX, homeY, tx, ty)
-  const opened = routeBlocked(tiles, site, oreAt)
+  for (const [tx, ty] of patch) clearRockLine(tiles, site, oreAt, homeX, homeY, tx, ty, mapW, mapH)
+  const opened = routeBlocked(tiles, site, oreAt, mapW, mapH)
   if (reaches(opened)) return
   for (const [tx, ty] of patch) {
     for (let oy = -1; oy <= 1; oy++) {
-      for (let ox = -1; ox <= 1; ox++) clearRockTile(tiles, site, oreAt, tx + ox, ty + oy)
+      for (let ox = -1; ox <= 1; ox++) clearRockTile(tiles, site, oreAt, tx + ox, ty + oy, mapW, mapH)
     }
   }
 }
 
-function routeBlocked(tiles: Uint8Array, site: KeepSite, oreAt: Set<number>): Uint8Array {
+function routeBlocked(tiles: Uint8Array, site: KeepSite, oreAt: Set<number>, mapW: number, mapH: number): Uint8Array {
   const blocked = new Uint8Array(tiles)
   for (let y = 0; y < KEEP_H; y++) {
     for (let x = 0; x < KEEP_W; x++) {
       const tx = site.tx + x
       const ty = site.ty + y
-      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue
-      blocked[ty * MAP_W + tx] = 1
+      if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) continue
+      blocked[ty * mapW + tx] = 1
     }
   }
   for (const index of oreAt) blocked[index] = 1
   return blocked
 }
 
-function approachTiles(blocked: Uint8Array, patch: Array<[number, number]>): Array<[number, number]> {
+function approachTiles(
+  blocked: Uint8Array,
+  patch: Array<[number, number]>,
+  mapW: number,
+  mapH: number,
+): Array<[number, number]> {
   const goals: Array<[number, number]> = []
   const seen = new Set<number>()
   for (const [tx, ty] of patch) {
@@ -344,8 +432,8 @@ function approachTiles(blocked: Uint8Array, patch: Array<[number, number]>): Arr
         if (ox === 0 && oy === 0) continue
         const x = tx + ox
         const y = ty + oy
-        if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue
-        const key = y * MAP_W + x
+        if (x < 0 || y < 0 || x >= mapW || y >= mapH) continue
+        const key = y * mapW + x
         if (seen.has(key) || blocked[key]) continue
         seen.add(key)
         goals.push([x, y])
@@ -363,6 +451,8 @@ function clearRockLine(
   y0: number,
   x1: number,
   y1: number,
+  mapW: number,
+  mapH: number,
 ): void {
   let x = x0
   let y = y0
@@ -373,7 +463,7 @@ function clearRockLine(
   let err = dx - dy
   const guardMax = dx + dy + 4
   for (let guard = 0; guard < guardMax; guard++) {
-    clearRockTile(tiles, site, oreAt, x, y)
+    clearRockTile(tiles, site, oreAt, x, y, mapW, mapH)
     if (x === x1 && y === y1) break
     const e2 = 2 * err
     const prevX = x
@@ -387,8 +477,8 @@ function clearRockLine(
       y += sy
     }
     if (x !== prevX && y !== prevY) {
-      clearRockTile(tiles, site, oreAt, x, prevY)
-      clearRockTile(tiles, site, oreAt, prevX, y)
+      clearRockTile(tiles, site, oreAt, x, prevY, mapW, mapH)
+      clearRockTile(tiles, site, oreAt, prevX, y, mapW, mapH)
     }
   }
 }
@@ -399,27 +489,35 @@ function clearRockTile(
   oreAt: Set<number>,
   tx: number,
   ty: number,
+  mapW: number,
+  mapH: number,
 ): void {
-  if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return
+  if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return
   if (coversFootprint(site, tx, ty)) return
-  if (oreAt.has(ty * MAP_W + tx)) return
-  tiles[ty * MAP_W + tx] = 0
+  if (oreAt.has(ty * mapW + tx)) return
+  tiles[ty * mapW + tx] = 0
 }
 
-function campAnchor(site: KeepSite): KeepSite {
+function campAnchor(site: KeepSite, mapW: number, mapH: number): KeepSite {
   return {
-    tx: Math.max(1, Math.min(MAP_W - 2, site.tx + 1)),
-    ty: Math.max(1, Math.min(MAP_H - 2, site.ty + 1)),
+    tx: Math.max(1, Math.min(mapW - 2, site.tx + 1)),
+    ty: Math.max(1, Math.min(mapH - 2, site.ty + 1)),
   }
 }
 
 /** Four worker tiles on the ring around a Castle, preferring the side away from the other camp. */
-export function workerCamp(site: KeepSite, other: KeepSite, ore: OreSpawn[]): Array<[number, number]> {
+export function workerCamp(
+  site: KeepSite,
+  other: KeepSite,
+  ore: OreSpawn[],
+  mapW = MAP_W,
+  mapH = MAP_H,
+): Array<[number, number]> {
   const spots: Array<[number, number]> = []
   for (let y = site.ty - 1; y <= site.ty + KEEP_H; y++) {
     for (let x = site.tx - 1; x <= site.tx + KEEP_W; x++) {
       if (x >= site.tx && x < site.tx + KEEP_W && y >= site.ty && y < site.ty + KEEP_H) continue
-      if (x < 1 || y < 1 || x >= MAP_W - 1 || y >= MAP_H - 1) continue
+      if (x < 1 || y < 1 || x >= mapW - 1 || y >= mapH - 1) continue
       if (ore.some((spot) => spot.tx === x && spot.ty === y)) continue
       spots.push([x, y])
     }

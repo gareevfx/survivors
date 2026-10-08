@@ -14,13 +14,19 @@ export function worldToScreen(cam: Camera, wx: number, wy: number): { x: number;
   return { x: (wx - cam.x) * cam.zoom, y: (wy - cam.y) * cam.zoom }
 }
 
-export function clampCamera(cam: Camera, viewW: number, viewH: number): void {
+export function clampCamera(
+  cam: Camera,
+  viewW: number,
+  viewH: number,
+  mapPxW = MAP_PX_W,
+  mapPxH = MAP_PX_H,
+): void {
   const worldW = viewW / cam.zoom
   const worldH = viewH / cam.zoom
-  if (worldW >= MAP_PX_W) cam.x = (MAP_PX_W - worldW) / 2
-  else cam.x = Math.max(0, Math.min(MAP_PX_W - worldW, cam.x))
-  if (worldH >= MAP_PX_H) cam.y = (MAP_PX_H - worldH) / 2
-  else cam.y = Math.max(0, Math.min(MAP_PX_H - worldH, cam.y))
+  if (worldW >= mapPxW) cam.x = (mapPxW - worldW) / 2
+  else cam.x = Math.max(0, Math.min(mapPxW - worldW, cam.x))
+  if (worldH >= mapPxH) cam.y = (mapPxH - worldH) / 2
+  else cam.y = Math.max(0, Math.min(mapPxH - worldH, cam.y))
 }
 
 export function centerCamera(
@@ -29,8 +35,10 @@ export function centerCamera(
   wy: number,
   viewW: number,
   viewH: number,
+  mapPxW = MAP_PX_W,
+  mapPxH = MAP_PX_H,
 ): void {
   cam.x = wx - viewW / (2 * cam.zoom)
   cam.y = wy - viewH / (2 * cam.zoom)
-  clampCamera(cam, viewW, viewH)
+  clampCamera(cam, viewW, viewH, mapPxW, mapPxH)
 }

@@ -60,7 +60,7 @@ function depositDistance(unit: Unit, node: { tx: number; ty: number }): number {
 function revealedScore(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
   const access = haulCost(state, unit, node)
   if (!Number.isFinite(access)) return 2_000_000_000 + depositDistance(unit, node)
-  if (unit.owner === 1) return access
+  if (unit.owner !== 0) return access
   if (access >= 1_000_000) return 1_000_000_000 + depositDistance(unit, node)
   return depositDistance(unit, node)
 }
