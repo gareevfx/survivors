@@ -166,7 +166,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Tower',
-    blurb: 'One cell. Sees as far as a Drone and shoots like a Bike, including half damage to Drones. Place it inside Castle sight.',
+    blurb: 'One cell. Sees as far as a Drone and shoots the closest enemy in that sight, with a Bike\'s damage and rate, including half damage to Drones. Place it inside Castle sight.',
     w: 1,
     h: 1,
     hp: 320,
@@ -249,6 +249,9 @@ export interface Building {
   attackCd: number
   /** Seconds this building stays a defense alarm after it takes damage. */
   alert: number
+  /** Enemy the Tower is shooting. Kept until that enemy leaves sight or dies. */
+  focusId: number | null
+  focusKind: TargetKind | null
 }
 
 export interface OreNode {

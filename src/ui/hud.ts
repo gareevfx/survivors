@@ -344,7 +344,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">Northmark</p>
       <h2>Ash ridge</h2>
-      <p class="meta">Destroy the enemy Castle. If your Castle falls, the field is lost. Workers mine the minerals beside your Castle first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and minerals block every ground unit. Raise a Tower inside Castle sight to watch and shoot. Bikes and tanks cannot break rock. A Drone flies and does not shoot.</p>
+      <p class="meta">Destroy the enemy Castle. If your Castle falls, the field is lost. Workers mine the minerals beside your Castle first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and minerals block every ground unit. Raise a Tower inside Castle sight. It shoots the closest enemy in its own sight. Bikes and tanks cannot break rock. A Drone flies and does not shoot.</p>
     `
   }
   if (units.length === 1) {

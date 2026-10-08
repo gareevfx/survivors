@@ -2,7 +2,7 @@ import { sideKnowsEnemyKeep, spottedPlayerKeep, updateAi } from './ai'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
-import { updateVision } from './vision'
+import { aiTileVisible, tileVisible, updateVision } from './vision'
 import {
   buildingById,
   isWalkable,
@@ -744,45 +744,41 @@ function tryFire(state: MatchState, unit: Unit): void {
   state.events.push({ type: 'attack' })
 }
 
-/** A finished Tower uses the Bike's damage, range, and rate, and will not shoot rocks or trees. */
+/**
+ * A finished Tower uses the Bike's damage and rate, and the Drone's sight as its range.
+ * It holds the closest enemy it can see until that enemy leaves sight or dies.
+ * Rocks and trees block the shot. Ground the Tower cannot currently see is ignored.
+ */
 function tryFireTower(state: MatchState, building: Building, dt: number): void {
   building.attackCd = Math.max(0, building.attackCd - dt)
-  if (!building.complete || building.hp <= 0 || building.attackCd > 0) return
+  if (!building.complete || building.hp <= 0) {
+    building.focusId = null
+    building.focusKind = null
+    return
+  }
   const pike = UNIT_STATS.pike
   const origin = buildingCenter(building)
-  let best: Target | null = null
-  let bestD = Infinity
-  for (const unit of state.units) {
-    if (unit.owner === building.owner || unit.hp <= 0) continue
-    const target = unitTarget(unit)
-    const reach = pike.range + target.radius * 0.85
-    const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
-    if (distance > reach || distance >= bestD) continue
-    best = target
-    bestD = distance
-  }
-  if (!best) {
-    for (const other of state.buildings) {
-      if (other.owner === building.owner || other.hp <= 0) continue
-      const target = buildingTarget(other)
-      const reach = pike.range + target.radius * 0.85
-      const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
-      if (distance > reach || distance >= bestD) continue
-      best = target
-      bestD = distance
+  let target = lockedTowerTarget(state, building, origin)
+  if (!target) {
+    building.focusId = null
+    building.focusKind = null
+    target = closestTowerTarget(state, building, origin)
+    if (target) {
+      building.focusId = target.id
+      building.focusKind = target.targetKind
     }
   }
-  if (!best || !shotClear(state, origin.x, origin.y, best.x, best.y)) return
+  if (!target || building.attackCd > 0) return
   building.attackCd = pike.cooldown
-  const aim = Math.atan2(best.y - origin.y, best.x - origin.x)
+  const aim = Math.atan2(target.y - origin.y, target.x - origin.x)
   state.projectiles.push({
     id: state.nextId++,
     owner: building.owner,
     sourceId: building.id,
     x: origin.x + Math.cos(aim) * 14,
     y: origin.y + Math.sin(aim) * 14,
-    targetId: best.id,
-    targetKind: best.targetKind,
+    targetId: target.id,
+    targetKind: target.targetKind,
     damage: pike.damage,
     speed: pike.projectileSpeed,
     radius: pike.projectileRadius,
@@ -799,6 +795,81 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     color: building.owner === 0 ? '#e7f6ff' : '#ffe1d6',
   })
   state.events.push({ type: 'attack' })
+}
+
+function lockedTowerTarget(state: MatchState, building: Building, origin: { x: number; y: number }): Target | null {
+  if (building.focusId == null || (building.focusKind !== 'unit' && building.focusKind !== 'building')) return null
+  const target = getTarget(state, building.focusId, building.focusKind)
+  if (!target || !towerEngages(state, building, origin, target)) return null
+  return target
+}
+
+function closestTowerTarget(state: MatchState, building: Building, origin: { x: number; y: number }): Target | null {
+  let best: Target | null = null
+  let bestD = Infinity
+  for (const unit of state.units) {
+    if (unit.owner === building.owner || unit.hp <= 0) continue
+    const target = unitTarget(unit)
+    if (!towerEngages(state, building, origin, target)) continue
+    const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
+    if (distance < bestD) {
+      best = target
+      bestD = distance
+    }
+  }
+  for (const other of state.buildings) {
+    if (other.id === building.id || other.owner === building.owner || other.hp <= 0) continue
+    const target = buildingTarget(other)
+    if (!towerEngages(state, building, origin, target)) continue
+    const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
+    if (distance < bestD) {
+      best = target
+      bestD = distance
+    }
+  }
+  return best
+}
+
+/** True when this enemy is inside the Tower's own sight, currently visible, and not behind rock or a tree. */
+function towerEngages(state: MatchState, building: Building, origin: { x: number; y: number }, target: Target): boolean {
+  if (target.hp <= 0 || target.owner === building.owner || target.targetKind === 'rock') return false
+  if (!targetInTowerSight(state, building, origin, target)) return false
+  return shotClear(state, origin.x, origin.y, target.x, target.y)
+}
+
+function targetInTowerSight(
+  state: MatchState,
+  building: Building,
+  origin: { x: number; y: number },
+  target: Target,
+): boolean {
+  if (target.targetKind === 'unit') {
+    const tx = Math.floor(target.x / TILE)
+    const ty = Math.floor(target.y / TILE)
+    return tileInTowerCircle(origin, tx, ty) && sideSeesTile(state, building.owner, tx, ty)
+  }
+  if (target.targetKind !== 'building') return false
+  const other = buildingById(state, target.id)
+  if (!other) return false
+  const stats = BUILDING_STATS[other.kind]
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      const tx = other.tx + x
+      const ty = other.ty + y
+      if (tileInTowerCircle(origin, tx, ty) && sideSeesTile(state, building.owner, tx, ty)) return true
+    }
+  }
+  return false
+}
+
+function tileInTowerCircle(origin: { x: number; y: number }, tx: number, ty: number): boolean {
+  const cx = (tx + 0.5) * TILE
+  const cy = (ty + 0.5) * TILE
+  return Math.hypot(cx - origin.x, cy - origin.y) <= BUILDING_STATS.tower.sight
+}
+
+function sideSeesTile(state: MatchState, owner: 0 | 1, tx: number, ty: number): boolean {
+  return owner === 0 ? tileVisible(state, tx, ty) : aiTileVisible(state, tx, ty)
 }
 
 function isAttackable(unit: Unit, focus: Target): boolean {

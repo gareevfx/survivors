@@ -289,6 +289,8 @@ export function makeBuilding(
     spawnN: 0,
     attackCd: 0,
     alert: 0,
+    focusId: null,
+    focusKind: null,
   }
   state.buildings.push(building)
   return building

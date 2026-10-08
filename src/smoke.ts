@@ -6,7 +6,7 @@ import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
-import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState } from './game/types'
+import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1949,6 +1949,7 @@ droneFliesFromTheFactory()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
+towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 console.log('smoke ok')
 
@@ -2370,6 +2371,234 @@ function towerFitsInsideCastleSightAndShoots(): void {
     }
   }
   assert(revealed, 'the Tower did not reveal ground past the Castle')
+}
+
+function pin(unit: Unit): void {
+  unit.order = { type: 'move', x: unit.x, y: unit.y }
+  unit.path = []
+  unit.goalX = unit.x
+  unit.goalY = unit.y
+  unit.nodeMemory = -1
+}
+
+function clearPad(state: MatchState, tx0: number, ty0: number, tx1: number, ty1: number): void {
+  const x0 = Math.max(0, Math.min(tx0, tx1))
+  const x1 = Math.min(MAP_W - 1, Math.max(tx0, tx1))
+  const y0 = Math.max(0, Math.min(ty0, ty1))
+  const y1 = Math.min(MAP_H - 1, Math.max(ty0, ty1))
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) state.tiles[ty * MAP_W + tx] = 0
+  }
+  for (const node of state.ore) {
+    if (node.tx >= x0 && node.tx <= x1 && node.ty >= y0 && node.ty <= y1) node.amount = 0
+  }
+  state.rocks = state.rocks.filter((rock) => rock.tx < x0 || rock.tx > x1 || rock.ty < y0 || rock.ty > y1)
+}
+
+/** Tower range is its own sight, shared by both sides. It holds one target and will not fire through rock, trees, or fog. */
+function towerFiresOutToItsSight(): void {
+  const state = createMatch(8)
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing a castle for the long Tower shot')
+  const homeCenter = buildingCenter(home)
+  const midX = (MAP_W / 2) * TILE
+  const midY = (MAP_H / 2) * TILE
+  let spot: { tx: number; ty: number } | null = null
+  let towardCenter = Infinity
+  for (let ty = home.ty - 8; ty <= home.ty + 10; ty++) {
+    for (let tx = home.tx - 8; tx <= home.tx + 10; tx++) {
+      if (!canPlace(state, 'tower', tx, ty)) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      if (Math.hypot(x - homeCenter.x, y - homeCenter.y) > BUILDING_STATS.keep.sight - TILE) continue
+      const inward = Math.hypot(x - midX, y - midY)
+      if (inward < towardCenter) {
+        towardCenter = inward
+        spot = { tx, ty }
+      }
+    }
+  }
+  assert(spot, 'no tile for a long-range Tower')
+  const tower = makeBuilding(state, 0, 'tower', spot.tx, spot.ty, true)
+  const origin = buildingCenter(tower)
+  const towardX = midX - origin.x
+  const towardY = midY - origin.y
+  const stepX = Math.abs(towardX) >= Math.abs(towardY) ? (towardX >= 0 ? 1 : -1) : 0
+  const stepY = stepX === 0 ? (towardY >= 0 ? 1 : -1) : 0
+  const tileAlong = (tilesAway: number) => ({ tx: spot.tx + stepX * tilesAway, ty: spot.ty + stepY * tilesAway })
+  const edge = tileAlong(7)
+  const beyond = tileAlong(11)
+  const onMap = (tx: number, ty: number) => tx >= 1 && ty >= 1 && tx < MAP_W - 1 && ty < MAP_H - 1
+  let flankX = stepY
+  let flankY = stepX
+  if (!onMap(spot.tx + flankX * 6, spot.ty + flankY * 6)) {
+    flankX = -flankX
+    flankY = -flankY
+  }
+  const sideTile = { tx: spot.tx + flankX * 3, ty: spot.ty + flankY * 3 }
+  const otherSide = { tx: spot.tx + flankX * 6, ty: spot.ty + flankY * 6 }
+  const pads = [edge, beyond, sideTile, otherSide, { tx: spot.tx, ty: spot.ty }]
+  let minX = spot.tx
+  let maxX = spot.tx
+  let minY = spot.ty
+  let maxY = spot.ty
+  for (const pad of pads) {
+    minX = Math.min(minX, pad.tx)
+    maxX = Math.max(maxX, pad.tx)
+    minY = Math.min(minY, pad.ty)
+    maxY = Math.max(maxY, pad.ty)
+  }
+  clearPad(state, minX - 1, minY - 1, maxX + 1, maxY + 1)
+  const rockTx = spot.tx + flankX
+  const rockTy = spot.ty + flankY
+  state.tiles[rockTy * MAP_W + rockTx] = 1
+  const rock = { id: state.nextId++, tx: rockTx, ty: rockTy, hp: ROCK_HP, hitFlash: 0, kind: 'rock' as const }
+  state.rocks.push(rock)
+  const treeTx = spot.tx + flankX * 4
+  const treeTy = spot.ty + flankY * 4
+  state.tiles[treeTy * MAP_W + treeTx] = 3
+  const tree = { id: state.nextId++, tx: treeTx, ty: treeTy, hp: ROCK_HP, hitFlash: 0, kind: 'tree' as const }
+  state.rocks.push(tree)
+  rebuildBlocked(state)
+  const edgeDist = Math.hypot((edge.tx + 0.5) * TILE - origin.x, (edge.ty + 0.5) * TILE - origin.y)
+  const beyondDist = Math.hypot((beyond.tx + 0.5) * TILE - origin.x, (beyond.ty + 0.5) * TILE - origin.y)
+  assert(edgeDist > UNIT_STATS.pike.range + 30, `edge target is only ${edgeDist.toFixed(0)}px away`)
+  assert(edgeDist <= BUILDING_STATS.tower.sight, `edge target is outside sight at ${edgeDist.toFixed(0)}px`)
+  assert(beyondDist > BUILDING_STATS.tower.sight, `fog target is inside sight at ${beyondDist.toFixed(0)}px`)
+  assert(
+    !rockShotClear(state.tiles, MAP_W, MAP_H, { tx: spot.tx, ty: spot.ty }, sideTile),
+    'the rock does not block the side shot',
+  )
+  assert(
+    !rockShotClear(state.tiles, MAP_W, MAP_H, { tx: spot.tx, ty: spot.ty }, otherSide),
+    'the tree does not block the other shot',
+  )
+  assert(
+    rockShotClear(state.tiles, MAP_W, MAP_H, { tx: spot.tx, ty: spot.ty }, edge),
+    'rock or a tree blocks the sight-edge shot',
+  )
+  const far = makeUnit(state, 1, 'porter', (edge.tx + 0.5) * TILE, (edge.ty + 0.5) * TILE)
+  const hidden = makeUnit(state, 1, 'porter', (beyond.tx + 0.5) * TILE, (beyond.ty + 0.5) * TILE)
+  const behindRock = makeUnit(state, 1, 'porter', (sideTile.tx + 0.5) * TILE, (sideTile.ty + 0.5) * TILE)
+  const behindTree = makeUnit(state, 1, 'porter', (otherSide.tx + 0.5) * TILE, (otherSide.ty + 0.5) * TILE)
+  let shotSeen = false
+  let drop = 0
+  for (let i = 0; i < 180; i++) {
+    pin(far)
+    pin(hidden)
+    pin(behindRock)
+    pin(behindTree)
+    const before = far.hp
+    step(state, 1 / 60)
+    const shot = state.projectiles.find((entry) => entry.sourceId === tower.id)
+    if (
+      shot &&
+      shot.damage === UNIT_STATS.pike.damage &&
+      shot.speed === UNIT_STATS.pike.projectileSpeed &&
+      shot.radius === UNIT_STATS.pike.projectileRadius
+    ) {
+      shotSeen = true
+    }
+    if (far.hp < before) {
+      drop = before - far.hp
+      break
+    }
+  }
+  assert(shotSeen, 'the Tower shot was not a Bike projectile')
+  assert(drop === UNIT_STATS.pike.damage, `the Tower dealt ${drop} at the edge of its sight`)
+  assert(behindRock.hp === UNIT_STATS.porter.hp, 'the Tower shot through a rock')
+  assert(behindTree.hp === UNIT_STATS.porter.hp, 'the Tower shot through a tree')
+  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower shot an enemy outside its sight')
+  assert(rock.hp === ROCK_HP && tree.hp === ROCK_HP, 'the Tower shot a rock or a tree')
+  const near = tileAlong(2)
+  const closer = makeUnit(state, 1, 'porter', (near.tx + 0.5) * TILE, (near.ty + 0.5) * TILE)
+  const closerHp = closer.hp
+  const farHp = far.hp
+  for (let i = 0; i < 90; i++) {
+    pin(far)
+    pin(hidden)
+    pin(behindRock)
+    pin(behindTree)
+    pin(closer)
+    step(state, 1 / 60)
+  }
+  assert(closer.hp === closerHp, 'the Tower left its target for a closer enemy')
+  assert(far.hp < farHp, 'the Tower stopped firing on the enemy still in sight')
+  far.hp = 0
+  let closerDrop = 0
+  for (let i = 0; i < 180; i++) {
+    pin(hidden)
+    pin(behindRock)
+    pin(behindTree)
+    pin(closer)
+    const before = closer.hp
+    step(state, 1 / 60)
+    if (closer.hp < before) {
+      closerDrop = before - closer.hp
+      break
+    }
+  }
+  assert(closerDrop === UNIT_STATS.pike.damage, `the Tower did not retarget after the kill (${closerDrop})`)
+  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower fired into the fog after retargeting')
+
+  const foeHome = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(foeHome, 'missing the Dunmarch castle')
+  const foeCenter = buildingCenter(foeHome)
+  let foeSpot: { tx: number; ty: number } | null = null
+  let foeInward = Infinity
+  for (let ty = foeHome.ty - 8; ty <= foeHome.ty + 10; ty++) {
+    for (let tx = foeHome.tx - 8; tx <= foeHome.tx + 10; tx++) {
+      if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue
+      if (!canPlace(state, 'tower', tx, ty)) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      if (Math.hypot(x - foeCenter.x, y - foeCenter.y) > BUILDING_STATS.keep.sight - TILE) continue
+      const inward = Math.hypot(x - midX, y - midY)
+      if (inward < foeInward) {
+        foeInward = inward
+        foeSpot = { tx, ty }
+      }
+    }
+  }
+  assert(foeSpot, 'no tile for a Dunmarch Tower')
+  const foeTower = makeBuilding(state, 1, 'tower', foeSpot.tx, foeSpot.ty, true)
+  const foeOrigin = buildingCenter(foeTower)
+  const foeTowardX = midX - foeOrigin.x
+  const foeTowardY = midY - foeOrigin.y
+  const foeStepX = Math.abs(foeTowardX) >= Math.abs(foeTowardY) ? (foeTowardX >= 0 ? 1 : -1) : 0
+  const foeStepY = foeStepX === 0 ? (foeTowardY >= 0 ? 1 : -1) : 0
+  const foeEdge = { tx: foeSpot.tx + foeStepX * 7, ty: foeSpot.ty + foeStepY * 7 }
+  clearPad(state, foeSpot.tx - 1, foeSpot.ty - 1, foeEdge.tx, foeEdge.ty)
+  clearPad(state, foeEdge.tx - 1, foeEdge.ty - 1, foeSpot.tx, foeSpot.ty)
+  rebuildBlocked(state)
+  const victim = makeUnit(state, 0, 'porter', (foeEdge.tx + 0.5) * TILE, (foeEdge.ty + 0.5) * TILE)
+  const victimDist = Math.hypot(victim.x - foeOrigin.x, victim.y - foeOrigin.y)
+  assert(victimDist > UNIT_STATS.pike.range && victimDist <= BUILDING_STATS.tower.sight, 'Dunmarch target is not at the sight edge')
+  let foeDrop = 0
+  for (let i = 0; i < 180; i++) {
+    pin(victim)
+    const before = victim.hp
+    step(state, 1 / 60)
+    if (victim.hp < before) {
+      foeDrop = before - victim.hp
+      break
+    }
+  }
+  assert(foeDrop === UNIT_STATS.pike.damage, `the Dunmarch Tower dealt ${foeDrop} at the edge of its sight`)
+
+  victim.hp = 0
+  const drone = makeUnit(state, 0, 'drone', victim.x, victim.y)
+  let droneDrop = 0
+  for (let i = 0; i < 180; i++) {
+    pin(drone)
+    const before = drone.hp
+    step(state, 1 / 60)
+    if (drone.hp < before) {
+      droneDrop = before - drone.hp
+      break
+    }
+  }
+  assert(droneDrop === UNIT_STATS.pike.damage / 2, `the Tower dealt ${droneDrop} to a Drone at the edge of its sight`)
 }
 
 function workersMineCastleMineralsThenTheNearestPatch(): void {
