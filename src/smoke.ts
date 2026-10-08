@@ -2086,7 +2086,7 @@ function hoverCostsDumpsAndNoStoreCells(): void {
   assert(UNIT_STATS.drone.cost === 75, `hover cost is ${UNIT_STATS.drone.cost}, not 75 dumps`)
   assert(UNIT_STATS.drone.supply === 0, 'hover still uses store cells')
   assert(
-    UNIT_STATS.drone.blurb.includes('75 dumps') && UNIT_STATS.drone.blurb.includes('no store cells'),
+    UNIT_STATS.drone.blurb.includes('75 dumps') && UNIT_STATS.drone.blurb.includes('no cells'),
     'hover tooltip omits the cost',
   )
 

@@ -508,7 +508,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
   if (stats.supply > 0 && state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
-    return 'Store Cells cap reached — raise a Storage'
+    return 'Cells cap reached — raise a Storage'
   }
   if (building.queue.length >= 5) return 'Training queue is full'
   state.oreHeld[building.owner] -= stats.cost

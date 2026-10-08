@@ -101,7 +101,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   drone: {
     label: 'Hover',
-    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 75 dumps and no store cells. Flashers deal half damage; gorillas cannot attack it.',
+    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 75 dumps and no cells. Flashers deal half damage; gorillas cannot attack it.',
     hp: 40,
     speed: 118,
     radius: 8,
@@ -157,7 +157,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the store cells cap by 8.',
+    blurb: 'Raises the cells cap by 8.',
     w: 2,
     h: 2,
     hp: 400,
