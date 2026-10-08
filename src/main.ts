@@ -192,19 +192,19 @@ function loop(now: number): void {
   renderMinimap(mini, match, camera, drawn.viewW, drawn.viewH)
   syncHud(match, sfx.muted, {
     armPlace: (kind) => {
-      if (match.paused) return
+      if (match.paused || match.aiControl) return
       match.placement = match.placement === kind ? null : kind
       match.attackMoveArmed = false
       match.moveArmed = false
     },
     armMove: () => {
-      if (match.paused) return
+      if (match.paused || match.aiControl) return
       match.moveArmed = !match.moveArmed
       match.attackMoveArmed = false
       match.placement = null
     },
     armAttack: () => {
-      if (match.paused) return
+      if (match.paused || match.aiControl) return
       match.attackMoveArmed = !match.attackMoveArmed
       match.moveArmed = false
       match.placement = null

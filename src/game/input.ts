@@ -87,7 +87,7 @@ export function attachInput(opts: {
 
   function armPlace(kind: BuildingKind): void {
     const state = opts.getState()
-    if (state.outcome || state.paused) return
+    if (state.outcome || state.paused || state.aiControl) return
     const keep = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
     const keepOk = keep?.owner === 0 && keep.kind === 'keep'
@@ -138,52 +138,56 @@ function clearSelection(state: MatchState): void {
     const world = worldAt(sx, sy)
     opts.onActivity()
 
-    if (state.paused && (state.placement || state.attackMoveArmed || state.moveArmed)) return
+    if (!state.aiControl) {
+      if (state.paused && (state.placement || state.attackMoveArmed || state.moveArmed)) return
 
-    if (state.placement) {
-      const tx = Math.floor(world.x / TILE)
-      const ty = Math.floor(world.y / TILE)
-      const porters = state.selectedUnits.filter((id) => unitById(state, id)?.kind === 'porter')
-      const error = tryPlace(state, 0, state.placement, tx, ty, porters)
-      if (error) pushToast(state, error)
-      return
-    }
+      if (state.placement) {
+        const tx = Math.floor(world.x / TILE)
+        const ty = Math.floor(world.y / TILE)
+        const porters = state.selectedUnits.filter((id) => unitById(state, id)?.kind === 'porter')
+        const error = tryPlace(state, 0, state.placement, tx, ty, porters)
+        if (error) pushToast(state, error)
+        return
+      }
 
-    if (state.attackMoveArmed && state.selectedUnits.length) {
-      commandMove(state, state.selectedUnits, world.x, world.y, true)
-      state.attackMoveArmed = false
-      return
-    }
-    if (state.moveArmed && state.selectedUnits.length) {
-      commandMove(state, state.selectedUnits, world.x, world.y, false)
-      state.moveArmed = false
-      return
+      if (state.attackMoveArmed && state.selectedUnits.length) {
+        commandMove(state, state.selectedUnits, world.x, world.y, true)
+        state.attackMoveArmed = false
+        return
+      }
+      if (state.moveArmed && state.selectedUnits.length) {
+        commandMove(state, state.selectedUnits, world.x, world.y, false)
+        state.moveArmed = false
+        return
+      }
+
+      const touchHit = touch ? pick(state, world.x, world.y) : null
+      if (touch && state.selectedUnits.length && touchHit?.type === 'unit') {
+        const unit = unitById(state, touchHit.id)
+        if (unit && unit.owner === 1) {
+          commandAttack(state, state.selectedUnits, touchHit.id, 'unit')
+          return
+        }
+      }
+      if (touch && state.selectedUnits.length && touchHit?.type === 'building') {
+        const building = buildingById(state, touchHit.id)
+        if (building && building.owner === 1) {
+          commandAttack(state, state.selectedUnits, touchHit.id, 'building')
+          return
+        }
+      }
+      if (touch && state.selectedUnits.length && touchHit?.type === 'rock') {
+        commandAttack(state, state.selectedUnits, touchHit.id, 'rock')
+        return
+      }
+      if (touch && state.selectedUnits.length && (!touchHit || touchHit.type === 'ore')) {
+        if (touchHit?.type === 'ore') commandGather(state, state.selectedUnits, touchHit.id)
+        else commandMove(state, state.selectedUnits, world.x, world.y, false)
+        return
+      }
     }
 
     const hit = pick(state, world.x, world.y)
-    if (touch && state.selectedUnits.length && hit?.type === 'unit') {
-      const unit = unitById(state, hit.id)
-      if (unit && unit.owner === 1) {
-        commandAttack(state, state.selectedUnits, hit.id, 'unit')
-        return
-      }
-    }
-    if (touch && state.selectedUnits.length && hit?.type === 'building') {
-      const building = buildingById(state, hit.id)
-      if (building && building.owner === 1) {
-        commandAttack(state, state.selectedUnits, hit.id, 'building')
-        return
-      }
-    }
-    if (touch && state.selectedUnits.length && hit?.type === 'rock') {
-      commandAttack(state, state.selectedUnits, hit.id, 'rock')
-      return
-    }
-    if (touch && state.selectedUnits.length && (!hit || hit.type === 'ore')) {
-      if (hit?.type === 'ore') commandGather(state, state.selectedUnits, hit.id)
-      else commandMove(state, state.selectedUnits, world.x, world.y, false)
-      return
-    }
 
     if (!hit) {
       if (!shift) clearSelection(state)
@@ -239,6 +243,7 @@ function clearSelection(state: MatchState): void {
     const state = opts.getState()
     if (state.outcome) return
     opts.onActivity()
+    if (state.aiControl) return
     if (state.placement || state.attackMoveArmed || state.moveArmed) {
       state.placement = null
       state.attackMoveArmed = false
@@ -488,6 +493,19 @@ function clearSelection(state: MatchState): void {
       return
     }
     if (state.outcome) return
+    if (
+      state.aiControl &&
+      (event.code === 'KeyQ' ||
+        event.code === 'KeyX' ||
+        event.code === 'KeyY' ||
+        event.code === 'KeyL' ||
+        event.code === 'KeyP' ||
+        event.code === 'KeyK' ||
+        event.code === 'KeyJ' ||
+        event.code === 'KeyH')
+    ) {
+      return
+    }
     if (event.code === 'KeyQ' && state.selectedUnits.length) {
       if (state.paused) return
       state.attackMoveArmed = !state.attackMoveArmed

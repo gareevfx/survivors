@@ -315,14 +315,20 @@ export interface MatchState {
   aiVisible: Uint8Array
   /** Player buildings Dunmarch has seen. The last position is kept until that building is gone. */
   aiSpotted: Array<{ id: number; x: number; y: number }>
+  /** Dunmarch buildings Northmark has seen. Used only while AI control is playing this side. */
+  playerSpotted: Array<{ id: number; x: number; y: number }>
   /** Drone, bike, or spare worker currently scouting fog for minerals and the enemy. */
   aiScout: number
+  /** Northmark scout while AI control is on. */
+  playerAiScout: number
   /** When set, the player's fog stays off for the rest of this match. Dunmarch still scouts. */
   fogCleared: boolean
   /** When set, the map is drawn with Dunmarch's fog instead of Northmark's. */
   enemyCam: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean
+  /** When set, Dunmarch's build-and-fight loop plays Northmark from Northmark's own sight. */
+  aiControl: boolean
   ore: OreNode[]
   rocks: Rock[]
   units: Unit[]
@@ -348,6 +354,9 @@ export interface MatchState {
   aiAcc: number
   aiAttacking: boolean
   aiNext: 'pike' | 'howler'
+  playerAiAcc: number
+  playerAiAttacking: boolean
+  playerAiNext: 'pike' | 'howler'
   underAttackCd: number
   events: GameEvent[]
   tutorial: boolean

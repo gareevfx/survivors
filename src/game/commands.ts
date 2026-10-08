@@ -657,10 +657,10 @@ export function coverOpenSites(state: MatchState): void {
   }
 }
 
-export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo'): boolean {
-  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo', owner: PlayerId = 1): boolean {
+  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
   const spot = findBuildSpot(state, kind, keep.tx, keep.ty)
   if (!spot) return false
-  return tryPlace(state, 1, kind, spot.tx, spot.ty, []) === null
+  return tryPlace(state, owner, kind, spot.tx, spot.ty, []) === null
 }

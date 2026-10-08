@@ -162,6 +162,104 @@ function pauseFreezesTheSimulation(): void {
   assert(worker.x !== frozenX || worker.y !== frozenY, 'the move did not continue after resume')
 }
 
+function northmarkPlaysItself(): void {
+  const state = createMatch(8)
+  assert(!state.aiControl, 'a match starts under AI control')
+  assert(!runCommand(state, 'ai'), 'a partial line turned AI control on')
+  assert(!state.aiControl, 'a partial line changed AI control')
+  assert(runCommand(state, 'AI Control'), 'AI Control was rejected')
+  assert(state.aiControl, 'AI Control did not turn on')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'AI control is on.', 'AI control did not announce itself')
+  assert(runCommand(state, 'ai control'), 'repeating AI control was rejected')
+  assert(state.aiControl, 'repeating AI control turned it off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'AI control is already on.', 'the repeat used the wrong notice')
+
+  const watcher = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(watcher, 'missing a Northmark worker')
+  state.paused = true
+  const frozenTime = state.time
+  const frozenX = watcher.x
+  for (let i = 0; i < 40; i++) step(state, 1 / 60)
+  assert(state.time === frozenTime, 'AI control advanced the clock while paused')
+  assert(watcher.x === frozenX && watcher.order == null, 'AI control gave orders while paused')
+  state.paused = false
+
+  const hidden = state.ore.find((node) => node.amount > 0 && !depositKnown(state, 0, node.tx, node.ty))
+  assert(hidden, 'every mineral started inside Northmark sight')
+  state.aiExplored[hidden.ty * MAP_W + hidden.tx] = 1
+  state.oreHeld[0] = 800
+  for (let i = 0; i < 90; i++) step(state, 1 / 60)
+
+  const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  const mined = porters.filter((unit) => {
+    const order = unit.order
+    return order?.type === 'gather' || (order?.type === 'attack' && order.resumeNode != null)
+  })
+  assert(mined.length > 0, 'Northmark did not mine under AI control')
+  for (const unit of mined) {
+    const order = unit.order
+    const nodeId = order?.type === 'gather' ? order.nodeId : order?.type === 'attack' ? order.resumeNode : null
+    const node = state.ore.find((entry) => entry.id === nodeId)
+    assert(node, 'a miner was sent to a missing deposit')
+    assert(depositKnown(state, 0, node.tx, node.ty), 'AI control mined minerals Northmark has not seen')
+    assert(node.id !== hidden.id, 'AI control used Dunmarch sight to pick minerals')
+  }
+  const site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
+  assert(site && (site.kind === 'yard' || site.kind === 'silo'), 'Northmark did not start a Factory or Silo')
+  assert(
+    porters.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === site.id),
+    'no free worker was sent to the new site',
+  )
+
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(enemy && home, 'missing a castle to attack')
+  state.playerSpotted.push({ id: enemy.id, x: (enemy.tx + 1.5) * TILE, y: (enemy.ty + 1.5) * TILE })
+  const pikes = []
+  for (let i = 0; i < 10; i++) {
+    pikes.push(makeUnit(state, 0, 'pike', (home.tx + 1.5) * TILE + (i - 5) * 6, (home.ty - 2) * TILE))
+  }
+  recomputeSupply(state)
+  for (let i = 0; i < 90; i++) step(state, 1 / 60)
+  const marching = pikes.filter((unit) => {
+    const order = unit.order
+    return unit.hp > 0 && (order?.type === 'attackMove' || (order?.type === 'attack' && order.kind === 'building'))
+  })
+  assert(marching.length > 0, 'Northmark did not march on the Dunmarch Castle')
+  const leader = marching[0]
+  assert(leader, 'missing the marching bike')
+  if (leader.order?.type === 'attackMove') {
+    const toEnemy = Math.hypot(leader.order.x - (enemy.tx + 1.5) * TILE, leader.order.y - (enemy.ty + 1.5) * TILE)
+    const toHome = Math.hypot(leader.order.x - (home.tx + 1.5) * TILE, leader.order.y - (home.ty + 1.5) * TILE)
+    assert(toEnemy < toHome, 'the attack-move was not toward Dunmarch')
+  }
+
+  assert(runCommand(state, 'Off AI Control'), 'off ai control was rejected')
+  assert(!state.aiControl, 'AI control stayed on')
+  const idle = porters.find((unit) => unit.hp > 0 && unit.order?.type !== 'construct')
+  const mover = porters.find((unit) => unit.hp > 0 && unit.id !== idle?.id && unit.order?.type !== 'construct')
+  assert(idle && mover, 'missing workers to hand back')
+  idle.order = null
+  idle.cargo = 0
+  idle.nodeMemory = -1
+  commandMove(state, [mover.id], mover.x + 240, mover.y, false)
+  const goalX = mover.goalX
+  const goalY = mover.goalY
+  assert(mover.order?.type === 'move', 'the player could not order a worker after AI control')
+  for (let i = 0; i < 120; i++) step(state, 1 / 60)
+  assert(idle.order == null, 'AI control kept assigning workers after it was turned off')
+  assert(
+    mover.order?.type === 'move' && mover.goalX === goalX && mover.goalY === goalY,
+    'turning AI control off replaced the player order',
+  )
+
+  const fresh = createMatch(9)
+  assert(!fresh.aiControl, 'a new match kept AI control')
+  assert(runCommand(fresh, 'OFF AI CONTROL'), 'off ai control was rejected while already off')
+  assert(!fresh.aiControl, 'the off command turned AI control on')
+  assert(fresh.toasts[fresh.toasts.length - 1]?.text === 'AI control is already off.', 'the off notice was wrong')
+}
+
 function pathAroundWall(): void {
   const w = 12
   const h = 12
@@ -1656,6 +1754,7 @@ clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
+northmarkPlaysItself()
 shotsCannotCrossRocks()
 stuckWorkerRetargets()
 unitsSteerAroundEachOther()

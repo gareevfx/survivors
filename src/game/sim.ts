@@ -1,4 +1,4 @@
-import { spottedPlayerKeep, updateAi } from './ai'
+import { sideKnowsEnemyKeep, spottedPlayerKeep, updateAi } from './ai'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -738,7 +738,9 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
     }
   }
   if (!best && buildingsToo) {
-    const castleFirst = unit.owner === 1 && spottedPlayerKeep(state) != null
+    const castleFirst =
+      (unit.owner === 1 && spottedPlayerKeep(state) != null) ||
+      (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0))
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
       if (castleFirst && building.kind !== 'keep') continue

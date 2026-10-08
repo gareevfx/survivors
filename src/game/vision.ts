@@ -160,6 +160,24 @@ function rememberSightings(state: MatchState): void {
     const building = state.buildings.find((entry) => entry.id === spot.id)
     return !!building && building.hp > 0 && building.owner === 0
   })
+  for (const building of state.buildings) {
+    if (building.owner !== 1 || building.hp <= 0) continue
+    if (!buildingSeen(state, building)) continue
+    const stats = BUILDING_STATS[building.kind]
+    const x = (building.tx + stats.w / 2) * TILE
+    const y = (building.ty + stats.h / 2) * TILE
+    const known = state.playerSpotted.find((spot) => spot.id === building.id)
+    if (known) {
+      known.x = x
+      known.y = y
+    } else {
+      state.playerSpotted.push({ id: building.id, x, y })
+    }
+  }
+  state.playerSpotted = state.playerSpotted.filter((spot) => {
+    const building = state.buildings.find((entry) => entry.id === spot.id)
+    return !!building && building.hp > 0 && building.owner === 1
+  })
 }
 
 function aiSeesBuilding(state: MatchState, building: Building): boolean {

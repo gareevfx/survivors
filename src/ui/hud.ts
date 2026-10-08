@@ -43,6 +43,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   const mode = document.querySelector('#modeflag')
   const pause = document.querySelector<HTMLButtonElement>('#pause')
   const pausedBanner = document.querySelector('#paused')
+  const aiBadge = document.querySelector('#ai-badge')
   const inspect = document.querySelector('#inspect')
   const toasts = document.querySelector('#toasts')
   const overlay = document.querySelector('#overlay')
@@ -70,6 +71,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     pause.setAttribute('aria-pressed', state.paused ? 'true' : 'false')
   }
   if (pausedBanner) pausedBanner.classList.toggle('hidden', !state.paused)
+  if (aiBadge) aiBadge.classList.toggle('hidden', !state.aiControl)
 
   if (mode) {
     if (state.placement) {
@@ -107,10 +109,10 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   }
 
   const commands = buildCommands(state, actions)
-  const key = commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')
+  const key = `${state.aiControl ? 'ai' : 'player'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
   if (key !== commandKey) {
     commandKey = key
-    paintCommands(commands)
+    paintCommands(commands, state.aiControl)
   }
 }
 
@@ -254,7 +256,7 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   }
 }
 
-function paintCommands(commands: Cmd[]): void {
+function paintCommands(commands: Cmd[], handsOff: boolean): void {
   const root = document.querySelector('#commands')
   if (!root) return
   root.innerHTML = ''
@@ -270,8 +272,8 @@ function paintCommands(commands: Cmd[]): void {
     button.type = 'button'
     button.className = 'cmd'
     if (cmd.armed) button.classList.add('armed')
-    button.disabled = cmd.disabled
-    button.title = cmd.title
+    button.disabled = cmd.disabled || handsOff
+    button.title = handsOff ? 'AI control is giving the orders' : cmd.title
     const label = document.createElement('span')
     label.className = 'cmd-label'
     label.textContent = cmd.label
@@ -287,7 +289,10 @@ function paintCommands(commands: Cmd[]): void {
       detail.textContent = cmd.detail
       button.append(detail)
     }
-    button.addEventListener('click', () => cmd.run())
+    button.addEventListener('click', () => {
+      if (handsOff) return
+      cmd.run()
+    })
     root.append(button)
   }
 }

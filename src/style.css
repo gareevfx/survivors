@@ -223,6 +223,23 @@ button, canvas { font: inherit; }
   text-transform: uppercase;
 }
 
+#ai-badge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  pointer-events: none;
+  padding: 6px 14px;
+  background: rgba(18, 22, 14, 0.86);
+  border: 1px solid var(--gold);
+  color: #f6e7b0;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 #modeflag {
   position: absolute;
   left: 12px;

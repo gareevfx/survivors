@@ -63,6 +63,32 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'Enemy cam is off.')
     return true
   }
+  if (text === 'ai control') {
+    if (state.aiControl) {
+      pushToast(state, 'AI control is already on.')
+      return true
+    }
+    state.aiControl = true
+    state.placement = null
+    state.attackMoveArmed = false
+    state.moveArmed = false
+    state.playerAiAcc = 0.5
+    pushToast(state, 'AI control is on.')
+    return true
+  }
+  if (text === 'off ai control') {
+    if (!state.aiControl) {
+      pushToast(state, 'AI control is already off.')
+      return true
+    }
+    state.aiControl = false
+    for (const unit of state.units) {
+      if (unit.owner !== 0 || unit.order != null || unit.nodeMemory !== 0) continue
+      unit.nodeMemory = -1
+    }
+    pushToast(state, 'AI control is off.')
+    return true
+  }
   pushToast(state, 'Unknown command.')
   return false
 }
