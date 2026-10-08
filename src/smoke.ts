@@ -1,6 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea } from './game/ai'
 import { runCommand } from './game/console'
-import { aiPlaceNearKeep, assignMiners, commandAttack, commandConstruct, commandGather, commandMove, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, commandAttack, commandConstruct, commandGather, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -21,6 +21,7 @@ import {
   viewTileVisible,
   viewUnitSeen,
 } from './game/vision'
+import { toggleScanner, updateScanners } from './game/scanner'
 import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -1952,6 +1953,7 @@ aiBuildingsLeaveAGapAndAvoidMinerals()
 aiDroneNeverIdles()
 droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
+scanningHoverRevealsBlackFog()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
@@ -2080,6 +2082,70 @@ function aiDroneNeverIdles(): void {
   const playerDrone = makeUnit(north, 0, 'drone', (castle.tx + 1.5) * TILE, (castle.ty + 1.5) * TILE)
   step(north, 0.5)
   assert(unitById(north, playerDrone.id)?.order?.type === 'move', 'AI Control left the Northmark Drone idle')
+}
+
+function exploredTiles(state: MatchState): number {
+  let count = 0
+  for (let i = 0; i < state.explored.length; i++) count += state.explored[i] ?? 0
+  return count
+}
+
+function scanningHoverRevealsBlackFog(): void {
+  const state = createMatch(31)
+  const hover = makeUnit(state, 0, 'drone', 40 * TILE, 22 * TILE)
+  updateVision(state)
+  const before = exploredTiles(state)
+  toggleScanner(state, [hover.id])
+  assert(hover.scanning, 'scanner did not arm the hover')
+  assert(hover.order?.type === 'move', 'scanner did not send the hover into the fog')
+  const order = hover.order
+  assert(order?.type === 'move', 'scanner order was lost')
+  if (order?.type !== 'move') return
+  assert(
+    !tileExplored(state, Math.floor(order.x / TILE), Math.floor(order.y / TILE)),
+    'scanner flew toward ground that was already explored',
+  )
+  for (let i = 0; i < 12 * 60; i++) step(state, 1 / 60)
+  const flown = unitById(state, hover.id)
+  assert(flown?.scanning, 'the hover left scanner mode on its own')
+  assert(exploredTiles(state) > before, 'a scanning hover revealed no new tiles')
+  assert(flown, 'the scanning hover is gone')
+
+  const partner = makeUnit(state, 0, 'drone', flown.x + 20, flown.y)
+  toggleScanner(state, [flown.id, partner.id])
+  const first = flown.order
+  const second = partner.order
+  assert(first?.type === 'move' && second?.type === 'move', 'two hovers were not both sent scanning')
+  if (first?.type !== 'move' || second?.type !== 'move') return
+  assert(
+    Math.hypot(first.x - second.x, first.y - second.y) >= 8 * TILE,
+    'two scanning hovers took the same patch',
+  )
+
+  commandStop(state, [flown.id, partner.id])
+  assert(!flown.scanning && !partner.scanning, 'stop left scanner mode on')
+  toggleScanner(state, [partner.id])
+  assert(partner.scanning, 'scanner did not turn back on')
+  commandMove(state, [partner.id], partner.x + 400, partner.y, false)
+  assert(!partner.scanning, 'a move order left scanner mode on')
+
+  const sweep = createMatch(32)
+  sweep.explored.fill(1)
+  sweep.seenAt.fill(40)
+  sweep.visible.fill(0)
+  const oldTx = 4
+  const oldTy = 4
+  sweep.seenAt[oldTy * MAP_W + oldTx] = 1
+  const scout = makeUnit(sweep, 0, 'drone', 60.5 * TILE, 30.5 * TILE)
+  scout.scanning = true
+  updateScanners(sweep)
+  const memory = scout.order
+  assert(memory?.type === 'move', 'a fully explored map gave the hover no flight')
+  if (memory?.type !== 'move') return
+  assert(
+    Math.hypot(memory.x - (oldTx + 0.5) * TILE, memory.y - (oldTy + 0.5) * TILE) < TILE,
+    'scanner did not fly to the tile seen longest ago',
+  )
 }
 
 function hoverCostsDumpsAndNoStoreCells(): void {

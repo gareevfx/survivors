@@ -13,6 +13,10 @@ export function updateVision(state: MatchState): void {
   const aiVisible = new Uint8Array(MAP_W * MAP_H)
   paintSight(state, 1, aiVisible, state.aiExplored)
   state.aiVisible = aiVisible
+  const now = state.time
+  for (let i = 0; i < state.visible.length; i++) {
+    if (state.visible[i] === 1) state.seenAt[i] = now
+  }
   rememberSightings(state)
   if (state.selectedOre != null) {
     const node = state.ore.find((entry) => entry.id === state.selectedOre)

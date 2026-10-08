@@ -1,4 +1,5 @@
 import { sideKnowsEnemyKeep, spottedPlayerKeep, updateAi } from './ai'
+import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -71,6 +72,7 @@ export function step(state: MatchState, dt: number): void {
   fillOpenGatherSlots(state)
   watchStuckUnits(state, dt)
   updateVision(state)
+  updateScanners(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
 }
@@ -702,6 +704,7 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     idleAcquire: false,
     nodeMemory: -1,
     repathIn: 0,
+    scanning: false,
   }
   state.units.push(unit)
   if (Math.hypot(building.rallyX - spot.x, building.rallyY - spot.y) > 20) {

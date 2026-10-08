@@ -259,6 +259,7 @@ export function makeUnit(
     idleAcquire: false,
     nodeMemory: -1,
     repathIn: 0,
+    scanning: false,
   }
   state.units.push(unit)
   return unit
@@ -305,6 +306,7 @@ export function createMatch(seed: number): MatchState {
     blocked: new Uint8Array(MAP_W * MAP_H),
     explored: new Uint8Array(MAP_W * MAP_H),
     visible: new Uint8Array(MAP_W * MAP_H),
+    seenAt: new Float32Array(MAP_W * MAP_H),
     aiExplored: new Uint8Array(MAP_W * MAP_H),
     aiVisible: new Uint8Array(MAP_W * MAP_H),
     aiSpotted: [],

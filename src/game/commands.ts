@@ -340,6 +340,7 @@ export function commandStop(state: MatchState, ids: number[]): void {
   for (const unit of living(state, ids)) {
     noteProgress(unit)
     unit.order = null
+    unit.scanning = false
     unit.nodeMemory = -1
     unit.idleAcquire = false
     stopMoving(unit)
@@ -355,6 +356,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
   const rows = Math.ceil(units.length / cols)
   units.sort((a, b) => a.y - b.y || a.x - b.x)
   units.forEach((unit, index) => {
+    unit.scanning = false
     const col = index % cols
     const row = Math.floor(index / cols)
     const ox = (col - (cols - 1) / 2) * spacing

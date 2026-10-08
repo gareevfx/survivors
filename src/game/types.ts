@@ -227,6 +227,8 @@ export interface Unit {
   idleAcquire: boolean
   nodeMemory: number
   repathIn: number
+  /** Player Hover flying itself across black fog, then the oldest sightings. */
+  scanning: boolean
 }
 
 export interface TrainJob {
@@ -333,6 +335,8 @@ export interface MatchState {
   explored: Uint8Array
   /** Tiles currently inside Northmark sight. Rebuilt each step. */
   visible: Uint8Array
+  /** Match time when Northmark last saw each tile. Zero until that tile is seen. */
+  seenAt: Float32Array
   /** Tiles Dunmarch has scouted. Minerals and enemies outside this are unknown. */
   aiExplored: Uint8Array
   /** Tiles currently inside Dunmarch sight. Rebuilt each step. */

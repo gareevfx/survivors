@@ -1,4 +1,5 @@
 import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/commands'
+import { toggleScanner } from '../game/scanner'
 import { buildingById, unitById } from '../game/state'
 import {
   BUILDING_STATS,
@@ -215,6 +216,20 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         },
       },
     ]
+    const hovers = state.selectedUnits
+      .map((id) => unitById(state, id))
+      .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0)
+    if (hovers.length) {
+      cmds.push({
+        id: 'scan',
+        label: 'Scanner',
+        hotkey: 'C',
+        title: 'Fly to the nearest black fog, then the tiles seen longest ago',
+        disabled: false,
+        armed: hovers.every((unit) => unit.scanning),
+        run: () => toggleScanner(state, hovers.map((unit) => unit.id)),
+      })
+    }
     if (porters) {
       cmds.push(placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
     }
@@ -368,16 +383,19 @@ export function describeSelection(state: MatchState): string {
       <h2>${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp} · ${stats.blurb}</p>
+      ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }
   const counts = new Map<string, number>()
   for (const unit of units) counts.set(UNIT_STATS[unit.kind].label, (counts.get(UNIT_STATS[unit.kind].label) ?? 0) + 1)
   const summary = [...counts.entries()].map(([label, count]) => `${count} ${label}${count > 1 ? 's' : ''}`).join(', ')
+  const scanning = units.some((unit) => unit.scanning)
   return `
     <p class="eyebrow">${PLAYER_NAME[0]}</p>
     <h2>${units.length} selected</h2>
     <p class="meta">${escapeHtml(summary)}</p>
+    ${scanning ? '<p class="meta">Scanning</p>' : ''}
   `
 }
 

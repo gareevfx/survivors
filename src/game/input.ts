@@ -9,6 +9,7 @@ import {
   tryPlace,
   tryTrain,
 } from './commands'
+import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
 import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
 import {
@@ -503,7 +504,8 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyK' ||
         event.code === 'KeyJ' ||
         event.code === 'KeyH' ||
-        event.code === 'KeyT')
+        event.code === 'KeyT' ||
+        event.code === 'KeyC')
     ) {
       return
     }
@@ -546,6 +548,15 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyH') {
       trainSelected('drone')
+      return
+    }
+    if (event.code === 'KeyC') {
+      if (state.paused) return
+      const ids = state.selectedUnits.filter((id) => {
+        const unit = unitById(state, id)
+        return !!unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0
+      })
+      if (ids.length) toggleScanner(state, ids)
       return
     }
     if (event.code === 'KeyF') {
