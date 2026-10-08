@@ -25,6 +25,116 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
+function castleSendsTheNearestFreeWorker(): void {
+  const state = createMatch(4)
+  state.oreHeld[0] = 800
+  state.oreHeld[1] = 800
+  const workers = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(workers.length >= 4, 'Northmark needs four workers')
+  const spot = { tx: 20, ty: 20 }
+  const clearPad = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        state.tiles[ty * MAP_W + tx] = 0
+        for (const ore of state.ore) {
+          if (ore.tx === tx && ore.ty === ty) ore.amount = 0
+        }
+      }
+    }
+    state.rocks = state.rocks.filter((rock) => rock.tx < x0 || rock.tx > x1 || rock.ty < y0 || rock.ty > y1)
+  }
+  clearPad(16, 18, 40, 24)
+  rebuildBlocked(state)
+  assert(canPlace(state, 'yard', spot.tx, spot.ty), 'factory pad is blocked')
+  const centerX = (spot.tx + BUILDING_STATS.yard.w / 2) * TILE
+  const centerY = (spot.ty + BUILDING_STATS.yard.h / 2) * TILE
+  const near = workers[0]
+  const far = workers[1]
+  const miner = workers[2]
+  const busy = workers[3]
+  assert(near && far && miner && busy, 'missing a worker')
+  const foe = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(foe, 'missing a Dunmarch worker')
+  const place = (unit: (typeof workers)[number], dx: number) => {
+    unit.x = centerX + dx
+    unit.y = centerY
+    unit.cargo = 0
+    unit.nodeMemory = -1
+    unit.path = []
+    unit.goalX = null
+    unit.goalY = null
+  }
+  place(near, 140)
+  near.order = null
+  place(far, 420)
+  far.order = null
+  place(miner, 48)
+  const node = state.ore.find((entry) => entry.amount > 0)
+  assert(node, 'missing minerals')
+  miner.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
+  place(busy, 16)
+  busy.order = { type: 'attack', targetId: foe.id, kind: 'unit' }
+  const job = (unit: { order: { type: string } | null }) => unit.order?.type ?? 'idle'
+  const placed = tryPlace(state, 0, 'yard', spot.tx, spot.ty, [])
+  assert(placed === null, placed ?? 'Castle build failed')
+  assert(job(near) === 'construct', 'the nearer idle worker was not sent to build')
+  assert(job(far) === 'idle', 'a farther idle worker was sent instead')
+  assert(job(miner) === 'gather', 'a closer miner was pulled while an idle worker was free')
+  assert(job(busy) === 'attack', 'a busy worker was pulled off a fight')
+  const held = state.oreHeld[0]
+  near.hp = 0
+  step(state, 1 / 60)
+  assert(job(far) === 'construct', 'the next idle worker did not take over the site')
+  assert(job(miner) === 'gather', 'a miner took over while an idle worker was free')
+  for (const unit of state.units) {
+    if (unit.owner !== 0 || unit.kind !== 'porter' || unit.hp <= 0) continue
+    unit.order = { type: 'attack', targetId: foe.id, kind: 'unit' }
+  }
+  const before = state.buildings.length
+  let refusedSpot: { tx: number; ty: number } | null = null
+  for (let ty = 2; ty < MAP_H - 4 && !refusedSpot; ty++) {
+    for (let tx = 2; tx < MAP_W - 4; tx++) {
+      if (canPlace(state, 'silo', tx, ty)) {
+        refusedSpot = { tx, ty }
+        break
+      }
+    }
+  }
+  assert(refusedSpot, 'no open silo site')
+  const refused = tryPlace(state, 0, 'silo', refusedSpot.tx, refusedSpot.ty, [])
+  assert(refused === 'No free Worker. Idle workers build first, then miners.', refused ?? 'a busy camp was allowed to build')
+  assert(state.oreHeld[0] === held, 'minerals were spent with no free worker')
+  assert(state.buildings.length === before, 'a building was placed with no free worker')
+
+  const ai = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(ai.length >= 2, 'Dunmarch needs two workers')
+  const aiNear = ai[0]
+  const aiFar = ai[1]
+  assert(aiNear && aiFar, 'missing a Dunmarch worker')
+  const aiSpot = { tx: 24, ty: 30 }
+  clearPad(20, 28, 44, 34)
+  rebuildBlocked(state)
+  assert(canPlace(state, 'silo', aiSpot.tx, aiSpot.ty), 'Dunmarch silo pad is blocked')
+  const aiX = (aiSpot.tx + 1) * TILE
+  const aiY = (aiSpot.ty + 1) * TILE
+  aiNear.x = aiX + 70
+  aiNear.y = aiY
+  aiNear.order = null
+  aiNear.cargo = 0
+  aiFar.x = aiX + 320
+  aiFar.y = aiY
+  aiFar.order = null
+  aiFar.cargo = 0
+  for (const unit of ai) {
+    if (unit.id === aiNear.id || unit.id === aiFar.id) continue
+    unit.order = { type: 'attack', targetId: near.id, kind: 'unit' }
+  }
+  const aiPlaced = tryPlace(state, 1, 'silo', aiSpot.tx, aiSpot.ty, [])
+  assert(aiPlaced === null, aiPlaced ?? 'Dunmarch build failed')
+  assert(job(aiNear) === 'construct', 'Dunmarch did not send its nearer idle worker')
+  assert(job(aiFar) === 'idle', 'Dunmarch sent a farther worker')
+}
+
 function pauseFreezesTheSimulation(): void {
   const state = createMatch(5)
   assert(!state.paused, 'a new match starts paused')
@@ -182,6 +292,13 @@ function constructionPausesUntilWorkerReturns(): void {
   assert(placed === null, placed ?? 'place failed')
   const yard = state.buildings.find((building) => building.owner === 0 && building.kind === 'yard' && !building.complete)
   assert(yard, 'yard was not started')
+  const foe = state.units.find((unit) => unit.owner === 1 && unit.hp > 0)
+  assert(foe, 'missing an enemy for the spare workers')
+  for (const unit of porters) {
+    if (unit.order?.type === 'construct') continue
+    unit.order = { type: 'attack', targetId: foe.id, kind: 'unit' }
+    unit.nodeMemory = -1
+  }
   let worked = false
   for (let i = 0; i < 20 * 30; i++) {
     step(state, 1 / 30)
@@ -1523,6 +1640,7 @@ routeExists()
 castlesSpawnFarApart()
 mineralsSitOnTheVisionEdge()
 pauseFreezesTheSimulation()
+castleSendsTheNearestFreeWorker()
 buriedMineralsPreferTheFasterRock()
 gatherWorks()
 buildAndTrain()

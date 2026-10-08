@@ -1,4 +1,4 @@
-import { findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { depositKnown } from './vision'
 import {
   buildingById,
@@ -526,20 +526,25 @@ export function tryPlace(
 
   const porters = state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)
   const preferred = new Set(preferredPorterIds)
-  const pool = preferred.size
-    ? porters.filter((unit) => preferred.has(unit.id))
-    : porters
-  const choices = (pool.length ? pool : porters).slice().sort((a, b) => {
-    const da = (a.x - (tx + stats.w / 2) * TILE) ** 2 + (a.y - (ty + stats.h / 2) * TILE) ** 2
-    const db = (b.x - (tx + stats.w / 2) * TILE) ** 2 + (b.y - (ty + stats.h / 2) * TILE) ** 2
-    return da - db
-  })
-  if (!choices.length) return 'You need a worker to build'
-  // A new site with nobody selected takes a free worker. Builders stay on the job they already have.
-  const free = preferred.size === 0 ? choices.filter((unit) => unit.order?.type !== 'construct') : []
-  const ranked = free.length ? free : choices
-  const limit = preferred.size === 0 ? 1 : Math.min(2, ranked.length)
-  const crew = ranked.slice(0, limit)
+  let crew: Unit[]
+  if (preferred.size === 0) {
+    const choice = nearestFreeBuilder(state, owner, tx, ty, stats.w, stats.h)
+    if (!choice) {
+      return porters.length
+        ? 'No free Worker. Idle workers build first, then miners.'
+        : 'You need a worker to build'
+    }
+    crew = [choice]
+  } else {
+    const pool = porters.filter((unit) => preferred.has(unit.id))
+    const choices = (pool.length ? pool : porters).slice().sort((a, b) => {
+      const da = (a.x - (tx + stats.w / 2) * TILE) ** 2 + (a.y - (ty + stats.h / 2) * TILE) ** 2
+      const db = (b.x - (tx + stats.w / 2) * TILE) ** 2 + (b.y - (ty + stats.h / 2) * TILE) ** 2
+      return da - db
+    })
+    if (!choices.length) return 'You need a worker to build'
+    crew = choices.slice(0, Math.min(2, choices.length))
+  }
 
   state.oreHeld[owner] -= stats.cost
   const building = makeBuilding(state, owner, kind, tx, ty, false)
@@ -587,6 +592,69 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   rebuildBlocked(state)
   recomputeSupply(state)
   if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} minerals.`)
+}
+
+/**
+ * Idle workers first, then workers who are mining or carrying minerals home.
+ * Someone already sent to a building stays there. Path length picks the
+ * nearest; a worker with no route falls back to straight-line distance.
+ */
+export function nearestFreeBuilder(
+  state: MatchState,
+  owner: PlayerId,
+  tx: number,
+  ty: number,
+  w: number,
+  h: number,
+): Unit | null {
+  const centerX = (tx + w / 2) * TILE
+  const centerY = (ty + h / 2) * TILE
+  let best: Unit | null = null
+  let bestTier = Infinity
+  let bestScore = Infinity
+  for (const unit of state.units) {
+    if (unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    const tier = freeBuilderTier(unit)
+    if (tier == null) continue
+    const along = builderTravel(state, unit, tx, ty, w, h)
+    const score = Number.isFinite(along)
+      ? along
+      : 1_000_000 + Math.hypot(unit.x - centerX, unit.y - centerY) / TILE
+    if (tier < bestTier || (tier === bestTier && score < bestScore)) {
+      best = unit
+      bestTier = tier
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/** 0 = idle, 1 = mining or returning minerals. Builders and other orders are busy. */
+function freeBuilderTier(unit: Unit): 0 | 1 | null {
+  if (unit.order?.type === 'construct') return null
+  if (unit.order == null && unit.cargo <= 0) return 0
+  if (unit.cargo > 0) return 1
+  if (unit.order?.type === 'gather') return 1
+  if (unit.order?.type === 'attack' && unit.order.resumeNode != null) return 1
+  return null
+}
+
+/** An unfinished building with nobody assigned gets the next nearest free worker. */
+export function coverOpenSites(state: MatchState): void {
+  for (const building of state.buildings) {
+    if (building.complete || building.hp <= 0 || building.kind === 'keep') continue
+    const staffed = state.units.some(
+      (unit) => unit.hp > 0 && unit.order?.type === 'construct' && unit.order.buildingId === building.id,
+    )
+    if (staffed) continue
+    const stats = BUILDING_STATS[building.kind]
+    const worker = nearestFreeBuilder(state, building.owner, building.tx, building.ty, stats.w, stats.h)
+    if (!worker) continue
+    worker.order = { type: 'construct', buildingId: building.id }
+    worker.idleAcquire = false
+    worker.nodeMemory = -1
+    stopMoving(worker)
+  }
 }
 
 export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo'): boolean {

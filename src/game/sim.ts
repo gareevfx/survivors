@@ -1,5 +1,5 @@
 import { spottedPlayerKeep, updateAi } from './ai'
-import { assignMiners, fillOpenGatherSlots, redirectStuckPorter } from './commands'
+import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { gatherBlockRock, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { updateVision } from './vision'
@@ -61,6 +61,7 @@ export function step(state: MatchState, dt: number): void {
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
   cleanup(state)
+  coverOpenSites(state)
   fillOpenGatherSlots(state)
   watchStuckUnits(state, dt)
   updateVision(state)

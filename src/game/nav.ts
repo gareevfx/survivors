@@ -267,6 +267,33 @@ function reachableRock(state: MatchState, start: { tx: number; ty: number }, roc
   return false
 }
 
+/** Path length in tiles from a worker to the open ring around a footprint. */
+export function builderTravel(
+  state: MatchState,
+  unit: Unit,
+  tx: number,
+  ty: number,
+  w: number,
+  h: number,
+): number {
+  const start = nearestWalkable(state, unit.x, unit.y)
+  if (!start) return Number.POSITIVE_INFINITY
+  let goal: { tx: number; ty: number; d: number } | null = null
+  for (let y = ty - 1; y <= ty + h; y++) {
+    for (let x = tx - 1; x <= tx + w; x++) {
+      const inside = x >= tx && x < tx + w && y >= ty && y < ty + h
+      if (inside || !isWalkable(state, x, y)) continue
+      const d = (unit.x - (x + 0.5) * TILE) ** 2 + (unit.y - (y + 0.5) * TILE) ** 2
+      if (!goal || d < goal.d) goal = { tx: x, ty: y, d }
+    }
+  }
+  if (!goal) return Number.POSITIVE_INFINITY
+  if (goal.tx === start.tx && goal.ty === start.ty) return 0
+  const path = findPath(state.blocked, MAP_W, MAP_H, start.tx, start.ty, goal.tx, goal.ty)
+  if (!path) return Number.POSITIVE_INFINITY
+  return routeLength(start, path)
+}
+
 function routeLength(start: { tx: number; ty: number }, path: Array<{ tx: number; ty: number }>): number {
   let length = 0
   let prev = start
