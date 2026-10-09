@@ -57,7 +57,7 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
 }
 
 /**
- * One Silo in each corner of the square field, then shuffled so any side can
+ * One Silo in each corner of the 80×50 field, then shuffled so any side can
  * start in any corner. Each site sits as far into its corner as the window allows.
  */
 export function pickFfaSites(seed: number): KeepSite[] {
@@ -243,7 +243,7 @@ export function generateBattlefield(
   return { tiles, ore }
 }
 
-/** Duel keeps its original patch list. The square map spreads the same patches over the extra ground. */
+/** Duel keeps its original patch list. Free-for-all spreads patches across the 80×50 field, clear of the corner yards. */
 function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
   if (mapW === MAP_W && mapH === MAP_H) {
     return [
@@ -261,8 +261,8 @@ function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
     ]
   }
   const patches: Array<[number, number]> = []
-  for (const ty of [16, 28, 40, 52, 64]) {
-    for (const tx of [18, 30, 42, 54]) patches.push([tx, ty])
+  for (const ty of [13, 23, 33, 43]) {
+    for (const tx of [24, 36, 48, 60]) patches.push([tx, ty])
   }
   return patches
 }

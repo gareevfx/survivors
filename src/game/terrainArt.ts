@@ -2,24 +2,28 @@ import { CASTLE_YARD, pickFfaSites, pickKeepSites } from './map'
 import { hash2 } from './rng'
 import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, TILE } from './types'
 
+export {
+  DUMPS_COLOR,
+  drawOreSprite,
+  drawRockSprite,
+  drawTreeSprite,
+  dumpsPortraitUrl,
+  oreProp,
+  rockProp,
+  treeProp,
+} from './propArt'
+
 /**
- * Original procedural ground and props. Everything is drawn in code and cached:
- * the battlefield is one offscreen canvas, and rocks, trees, dumps, and fog
- * edges are small sprites reused every frame.
+ * Original procedural ground. The battlefield is one offscreen canvas.
+ * Rocks, trees, and dumps are cached painterly sprites in propArt.
  */
 
-const ROCK_SPRITES = 4
-const TREE_SPRITES = 4
-const ORE_SPRITES = 3
 const FOG_FADE = 16
 
 type Rgb = [number, number, number]
 
 let yardKey = ''
 let yardMask: Uint8Array | null = null
-let rocks: HTMLCanvasElement[] | null = null
-let trees: HTMLCanvasElement[] | null = null
-let ore: HTMLCanvasElement[] | null = null
 const fogCache = new Map<string, HTMLCanvasElement>()
 
 function smooth(t: number): number {
@@ -221,224 +225,6 @@ export function paintTerrain(ctx: CanvasRenderingContext2D, seed: number, mapW: 
   ctx.strokeStyle = 'rgba(28, 20, 12, 0.65)'
   ctx.lineWidth = 4
   ctx.strokeRect(2, 2, width - 4, height - 4)
-}
-
-function poly(ctx: CanvasRenderingContext2D, points: Array<[number, number]>): void {
-  ctx.beginPath()
-  const first = points[0]
-  if (!first) return
-  ctx.moveTo(first[0], first[1])
-  for (let i = 1; i < points.length; i++) {
-    const point = points[i]
-    if (point) ctx.lineTo(point[0], point[1])
-  }
-  ctx.closePath()
-}
-
-function rockSprites(): HTMLCanvasElement[] {
-  if (rocks) return rocks
-  const shapes: Array<Array<[number, number]>> = [
-    [[10, 28], [14, 14], [22, 9], [33, 16], [31, 30], [18, 34]],
-    [[8, 26], [16, 11], [27, 8], [35, 18], [28, 33], [12, 32]],
-    [[12, 30], [11, 16], [20, 8], [31, 12], [34, 26], [22, 34]],
-    [[9, 24], [15, 12], [26, 10], [34, 20], [30, 32], [14, 33]],
-  ]
-  rocks = shapes.map((shape, variant) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 44
-    canvas.height = 44
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.38)'
-    ctx.beginPath()
-    ctx.ellipse(24, 34, 13, 4.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = variant % 2 === 0 ? '#3c342c' : '#463c32'
-    poly(ctx, shape)
-    ctx.fill()
-    const lit = shape.map(([px, py]) => [px - 2, py - 3] as [number, number])
-    ctx.fillStyle = variant === 2 ? '#7d7368' : '#6e655c'
-    poly(ctx, lit)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(255, 244, 220, 0.38)'
-    ctx.beginPath()
-    ctx.ellipse(shape[1]?.[0] ?? 16, (shape[1]?.[1] ?? 14) - 1, 4.2, 2.1, -0.6, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(32, 24, 18, 0.75)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(16, 16)
-    ctx.lineTo(22, 22)
-    ctx.lineTo(20, 28)
-    ctx.stroke()
-    if (variant === 1 || variant === 3) {
-      ctx.beginPath()
-      ctx.moveTo(24, 14)
-      ctx.lineTo(28, 20)
-      ctx.stroke()
-    }
-    return canvas
-  })
-  return rocks
-}
-
-function treeSprites(): HTMLCanvasElement[] {
-  if (trees) return trees
-  trees = []
-  for (let variant = 0; variant < TREE_SPRITES; variant++) {
-    const canvas = document.createElement('canvas')
-    canvas.width = 48
-    canvas.height = 58
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      trees.push(canvas)
-      continue
-    }
-    const dead = variant === 3
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
-    ctx.beginPath()
-    ctx.ellipse(28, 50, 14, 4.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#3a2616'
-    ctx.fillRect(22, 28, 5, 20)
-    ctx.fillStyle = '#6b4a2c'
-    ctx.fillRect(21, 28, 3, 20)
-    if (dead) {
-      ctx.strokeStyle = '#5a3e28'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(24, 30)
-      ctx.lineTo(14, 16)
-      ctx.moveTo(24, 26)
-      ctx.lineTo(34, 12)
-      ctx.moveTo(24, 22)
-      ctx.lineTo(18, 12)
-      ctx.stroke()
-      ctx.fillStyle = '#6a5438'
-      ctx.beginPath()
-      ctx.arc(16, 16, 4, 0, Math.PI * 2)
-      ctx.arc(33, 13, 3.5, 0, Math.PI * 2)
-      ctx.fill()
-    } else {
-      const greens = ['#2f6a32', '#3d7a38', '#4c8a3c']
-      const shade = ['#1e4424', '#24502c', '#2c5c30']
-      ctx.fillStyle = shade[variant] ?? shade[0]
-      ctx.beginPath()
-      ctx.arc(30, 24, 11, 0, Math.PI * 2)
-      ctx.arc(16, 22, 9, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = greens[variant] ?? greens[0]
-      ctx.beginPath()
-      ctx.arc(22, 18, 12, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = variant === 0 ? '#6ea24a' : '#7aaf52'
-      ctx.beginPath()
-      ctx.arc(18, 14, 6, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(230, 240, 180, 0.35)'
-      ctx.beginPath()
-      ctx.arc(16, 12, 2.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    trees.push(canvas)
-  }
-  return trees
-}
-
-function oreSprites(): HTMLCanvasElement[] {
-  if (ore) return ore
-  const layouts = [
-    [[0, -2, 8], [-8, 6, 6], [7, 6, 6.5]],
-    [[-2, -4, 7], [8, 2, 5.5], [-7, 5, 6], [2, 8, 4]],
-    [[2, -3, 8.5], [-9, 4, 5], [8, 7, 6]],
-  ]
-  ore = layouts.map((layout) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 40
-    canvas.height = 40
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-    ctx.fillStyle = 'rgba(10, 16, 24, 0.35)'
-    ctx.beginPath()
-    ctx.ellipse(22, 30, 12, 4, 0, 0, Math.PI * 2)
-    ctx.fill()
-    for (const [ox, oy, r] of layout) {
-      const cx = 20 + (ox ?? 0)
-      const cy = 18 + (oy ?? 0)
-      const rad = r ?? 6
-      ctx.beginPath()
-      for (let i = 0; i < 6; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / 3
-        const px = cx + Math.cos(a) * rad
-        const py = cy + Math.sin(a) * rad * 0.82
-        if (i === 0) ctx.moveTo(px, py)
-        else ctx.lineTo(px, py)
-      }
-      ctx.closePath()
-      ctx.fillStyle = '#2f6ea8'
-      ctx.fill()
-      ctx.fillStyle = '#7ec8f0'
-      ctx.beginPath()
-      ctx.moveTo(cx, cy - rad * 0.8)
-      ctx.lineTo(cx + rad * 0.45, cy)
-      ctx.lineTo(cx, cy + rad * 0.15)
-      ctx.lineTo(cx - rad * 0.35, cy - rad * 0.1)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
-      ctx.fillRect(cx - rad * 0.35, cy - rad * 0.55, 2, 2)
-    }
-    return canvas
-  })
-  return ore
-}
-
-export function drawRockSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = rockSprites()
-  const index = Math.floor(hash2(tx + 3, ty + 9, seed) * ROCK_SPRITES) % ROCK_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  ctx.drawImage(sprite, tx * TILE - 6, ty * TILE - 6)
-}
-
-export function drawTreeSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = treeSprites()
-  const index = Math.floor(hash2(tx + 11, ty + 4, seed) * TREE_SPRITES) % TREE_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  ctx.drawImage(sprite, tx * TILE - 8, ty * TILE - 22)
-}
-
-export function drawOreSprite(
-  ctx: CanvasRenderingContext2D,
-  tx: number,
-  ty: number,
-  seed: number,
-  selected: boolean,
-  amount: number,
-  full: number,
-): void {
-  const x = (tx + 0.5) * TILE
-  const y = (ty + 0.5) * TILE
-  if (selected) {
-    ctx.save()
-    ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
-    ctx.lineWidth = 1.6
-    ctx.beginPath()
-    ctx.ellipse(x, y + 4, 16, 9, 0, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.restore()
-  }
-  const sheet = oreSprites()
-  const index = Math.floor(hash2(tx + 5, ty + 2, seed + 3) * ORE_SPRITES) % ORE_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  const ratio = full > 0 ? Math.max(0.15, Math.min(1, amount / full)) : 1
-  const scale = 0.68 + 0.32 * ratio
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.scale(scale, scale)
-  ctx.drawImage(sprite, -20, -22)
-  ctx.restore()
 }
 
 function fade(dist: number): number {

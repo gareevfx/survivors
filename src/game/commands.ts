@@ -1,5 +1,6 @@
 import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { depositKnown } from './vision'
+import { DUMPS_COLOR } from './terrainArt'
 import {
   buildingById,
   buildingCenter,
@@ -456,7 +457,7 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
       y: (node.ty + 0.5) * TILE,
       life: 0.45,
       max: 0.45,
-      color: '#e6c15a',
+      color: DUMPS_COLOR,
     })
     noteOrder(state, porters)
   }
