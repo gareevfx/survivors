@@ -296,7 +296,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
   ctx.fillStyle = '#f6e7b0'
   ctx.font = '12px Georgia, serif'
   ctx.textAlign = 'center'
-  ctx.fillText('Right-click dumps', best.x, best.y - 20)
+  ctx.fillText('Right-click dumps', best.x, best.y - 34)
   ctx.restore()
 }
 
@@ -720,7 +720,7 @@ export function renderMinimap(
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
-  ctx.fillStyle = '#7ec8f0'
+  ctx.fillStyle = '#d4894a'
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)

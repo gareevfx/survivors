@@ -103,8 +103,8 @@ function startMatch(mode: MatchMode, seed?: number): void {
   if (hintCopy) {
     hintCopy.textContent =
       mode === 'ffa'
-        ? 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the gold dumps beside the Silo.'
-        : 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the gold dumps beside the Silo.'
+        ? 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+        : 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
   }
   input.clearGroups()
   resetHudCache()
