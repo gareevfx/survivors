@@ -2,7 +2,8 @@ import type { Camera } from './camera'
 import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
-import { stalkerSprite } from './stalkerArt'
+import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
+import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
@@ -526,9 +527,12 @@ function drawSilo(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
 
 function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, selected: boolean): void {
   const stats = UNIT_STATS[unit.kind]
-  const body = teamColor(unit.owner, '#6ecfff', '#ff6d5e', '#8ee87a', '#d2b0ff')
-  const ink = teamColor(unit.owner, '#14384c', '#4c1814', '#173318', '#2a1844')
-  const bob = unit.goalX != null ? Math.sin(unit.anim) * 1.1 : 0
+  const bob =
+    unit.kind === 'drone'
+      ? Math.sin(state.time * 3.1 + unit.id * 0.7) * 1.15
+      : unit.goalX != null
+        ? Math.sin(unit.anim) * 1.1
+        : 0
 
   if (selected || (state.tutorial && unit.owner === 0 && unit.kind === 'porter')) {
     const pulse = state.tutorial && !selected ? 0.45 + Math.sin(state.time * 4) * 0.2 : 0.9
@@ -582,67 +586,39 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
       ctx.fill()
     }
     ctx.restore()
-  } else {
-  ctx.fillStyle = 'rgba(0,0,0,0.25)'
-  ctx.beginPath()
-  const lift = unit.kind === 'drone' ? 10 : 5
-  ctx.ellipse(1, lift, stats.radius * 0.85, stats.radius * 0.4, 0, 0, Math.PI * 2)
-  ctx.fill()
-  if (unit.kind === 'drone') ctx.translate(0, -8)
-  ctx.rotate(unit.facing)
-
-  if (unit.kind === 'drone') {
-    ctx.strokeStyle = body
-    ctx.lineWidth = 1.6
+  } else if (unit.kind === 'drone') {
+    const dir = facingDir(unit.facing)
+    const { fx, fy } = facingBasis(dir)
+    const accent = teamColor(unit.owner, '#5ec8ff', '#ff5d4e', '#7dff6a', '#c58bff')
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
     ctx.beginPath()
-    ctx.moveTo(-12, 0)
-    ctx.lineTo(12, 0)
-    ctx.moveTo(0, -7)
-    ctx.lineTo(0, 7)
-    ctx.stroke()
-    ctx.fillStyle = '#d7f08a'
-    ctx.beginPath()
-    ctx.moveTo(7, 0)
-    ctx.lineTo(0, -4.5)
-    ctx.lineTo(-7, 0)
-    ctx.lineTo(0, 4.5)
-    ctx.closePath()
+    ctx.ellipse(2, 12, 8.5, 3.1, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.strokeStyle = ink
-    ctx.lineWidth = 1.3
-    ctx.stroke()
-    ctx.fillStyle = body
-    ctx.beginPath()
-    ctx.arc(0, 0, 1.7, 0, Math.PI * 2)
-    ctx.fill()
-  } else {
-    ctx.fillStyle = body
-    ctx.beginPath()
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3
-      const px = Math.cos(a) * 8
-      const py = Math.sin(a) * 7
-      if (i === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
+    ctx.translate(0, -6)
+    if (unit.goalX != null) {
+      ctx.translate(fx * 1.2, fy * 0.35)
+      ctx.rotate(fx * 0.16)
     }
-    ctx.closePath()
-    ctx.fill()
-    ctx.strokeStyle = ink
-    ctx.lineWidth = 1.4
-    ctx.stroke()
-    ctx.fillStyle = ink
-    ctx.fillRect(4, -2.2, 12, 4.4)
-    ctx.fillStyle = '#efe6cf'
-    ctx.fillRect(14, -1.4, 3, 2.8)
-  }
-
-  if (unit.hitFlash > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
-    ctx.beginPath()
-    ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.restore()
+    const sway = Math.floor(state.time * 2.4 + unit.id) % 2
+    ctx.drawImage(hoverSprite(unit, sway), -28, -30)
+    paintHoverRotors(ctx, dir, state.time * 9, accent)
+    if (unit.scanning) {
+      const cam = hoverCameraPoint(dir)
+      ctx.strokeStyle = accent
+      ctx.globalAlpha = 0.5 + Math.sin(state.time * 6) * 0.15
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(cam.x, cam.y, 2.7, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+    if (unit.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
+      ctx.beginPath()
+      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
   }
 
   const showHp = selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0

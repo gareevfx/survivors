@@ -2,6 +2,7 @@ import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/comm
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
+import { hoverPortraitUrl } from '../game/hoverArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, unitById } from '../game/state'
 import {
@@ -323,16 +324,18 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'AI control is giving the orders' : cmd.title
-    if (cmd.id === 'train-porter' || cmd.id === 'train-pike' || cmd.id === 'train-howler') {
+    if (cmd.id === 'train-porter' || cmd.id === 'train-pike' || cmd.id === 'train-howler' || cmd.id === 'train-drone') {
       const icon = document.createElement('img')
       icon.className = 'unit-icon'
       icon.alt = ''
       const src =
-        cmd.id === 'train-howler'
-          ? gorillaPortraitUrl(0)
-          : cmd.id === 'train-pike'
-            ? flasherPortraitUrl(0)
-            : stalkerPortraitUrl(0)
+        cmd.id === 'train-drone'
+          ? hoverPortraitUrl(0)
+          : cmd.id === 'train-howler'
+            ? gorillaPortraitUrl(0)
+            : cmd.id === 'train-pike'
+              ? flasherPortraitUrl(0)
+              : stalkerPortraitUrl(0)
       icon.src = src
       button.append(icon)
     }
@@ -427,7 +430,9 @@ export function describeSelection(state: MatchState): string {
           ? flasherPortraitUrl(unit.owner)
           : unit.kind === 'howler'
             ? gorillaPortraitUrl(unit.owner)
-            : ''
+            : unit.kind === 'drone'
+              ? hoverPortraitUrl(unit.owner)
+              : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
@@ -448,7 +453,9 @@ export function describeSelection(state: MatchState): string {
       ? flasherPortraitUrl(0)
       : units.some((unit) => unit.kind === 'howler')
         ? gorillaPortraitUrl(0)
-        : ''
+        : units.some((unit) => unit.kind === 'drone')
+          ? hoverPortraitUrl(0)
+          : ''
   const portrait = groupPortrait ? `<img class="unit-icon" alt="" src="${groupPortrait}" />` : ''
   return `
     <p class="eyebrow">${PLAYER_NAME[0]}</p>
