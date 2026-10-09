@@ -87,7 +87,7 @@ function startMatch(mode: MatchMode, seed?: number): void {
   menuOpen = false
   menu?.classList.add('hidden')
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
-  terrain = buildTerrain(match.seed, match.mapW, match.mapH)
+  terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode === 'ffa')
   camera.zoom = mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
     hintCopy.textContent =

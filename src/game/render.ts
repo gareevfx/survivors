@@ -44,13 +44,13 @@ function teamRgba(owner: number, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H): HTMLCanvasElement {
+export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H, ffa = false): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = mapW * TILE
   canvas.height = mapH * TILE
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-  paintTerrain(ctx, seed, mapW, mapH)
+  paintTerrain(ctx, seed, mapW, mapH, ffa)
   return canvas
 }
 
@@ -671,7 +671,7 @@ function hpColor(ratio: number): string {
   return '#e25b4a'
 }
 
-/** Fit the 16:9 map inside the minimap element without stretching it. */
+/** Fit the map inside the minimap element without stretching it. */
 export function minimapFrame(
   cssW: number,
   cssH: number,
@@ -719,7 +719,7 @@ export function renderMinimap(
     for (let tx = 0; tx < state.mapW; tx++) {
       if (!viewTileExplored(state, tx, ty)) continue
       ctx.fillStyle = viewTileVisible(state, tx, ty)
-        ? terrainCss(tx, ty, state.seed, state.mapW, state.mapH)
+        ? terrainCss(tx, ty, state.seed, state.mapW, state.mapH, state.mode === 'ffa')
         : '#12100c'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }

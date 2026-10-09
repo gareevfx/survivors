@@ -57,7 +57,7 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
 }
 
 /**
- * One Silo in each corner of the square field, then shuffled so any side can
+ * One Silo in each corner of the 80×50 field, then shuffled so any side can
  * start in any corner. Each site sits as far into its corner as the window allows.
  */
 export function pickFfaSites(seed: number): KeepSite[] {
@@ -160,7 +160,8 @@ export function generateBattlefield(
   const tiles = new Uint8Array(mapW * mapH)
   const guarded = (tx: number, ty: number) => sites.some((site) => inCamp(site, tx, ty))
   const at = (tx: number, ty: number) => ty * mapW + tx
-  const blobs = mapW === MAP_W && mapH === MAP_H ? 96 : Math.round((96 * mapW * mapH) / (MAP_W * MAP_H))
+  // Density matches the old 80×45 field, so the taller map keeps the same clutter.
+  const blobs = Math.max(1, Math.round((96 * mapW * mapH) / (80 * 45)))
 
   for (let i = 0; i < blobs; i++) {
     const cx = 2 + Math.floor(rng() * (mapW - 4))
@@ -243,28 +244,23 @@ export function generateBattlefield(
   return { tiles, ore }
 }
 
-/** Duel keeps its original patch list. The square map spreads the same patches over the extra ground. */
+/** Shared dump patches for the 80×50 field. The last row sits in the extra southern ground, clear of the corner yards. */
 function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
-  if (mapW === MAP_W && mapH === MAP_H) {
-    return [
-      [24, 10],
-      [36, 8],
-      [48, 11],
-      [22, 20],
-      [34, 18],
-      [46, 21],
-      [28, 30],
-      [40, 27],
-      [52, 31],
-      [18, 16],
-      [58, 16],
-    ]
-  }
-  const patches: Array<[number, number]> = []
-  for (const ty of [16, 28, 40, 52, 64]) {
-    for (const tx of [18, 30, 42, 54]) patches.push([tx, ty])
-  }
-  return patches
+  const patches: Array<[number, number]> = [
+    [24, 10],
+    [36, 8],
+    [48, 11],
+    [22, 20],
+    [34, 18],
+    [46, 21],
+    [28, 30],
+    [40, 27],
+    [52, 31],
+    [18, 16],
+    [58, 16],
+    [36, 39],
+  ]
+  return patches.filter(([tx, ty]) => tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH)
 }
 
 function aimOf(site: KeepSite, sites: KeepSite[]): KeepSite {

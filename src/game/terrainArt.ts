@@ -1,6 +1,6 @@
 import { CASTLE_YARD, pickFfaSites, pickKeepSites } from './map'
 import { hash2 } from './rng'
-import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, TILE } from './types'
+import { BUILDING_STATS, TILE } from './types'
 
 /**
  * Original procedural ground and props. Everything is drawn in code and cached:
@@ -64,9 +64,9 @@ export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
   return color
 }
 
-export function terrainCss(tx: number, ty: number, seed: number, mapW: number, mapH: number): string {
+export function terrainCss(tx: number, ty: number, seed: number, mapW: number, mapH: number, ffa = false): string {
   let [r, g, b] = terrainRgb(tx + 0.5, ty + 0.5, seed)
-  if (yardAt(seed, mapW, mapH, tx, ty)) {
+  if (yardAt(seed, mapW, mapH, tx, ty, ffa)) {
     r = r * 0.62 + 168 * 0.38
     g = g * 0.62 + 142 * 0.38
     b = b * 0.62 + 96 * 0.38
@@ -74,20 +74,17 @@ export function terrainCss(tx: number, ty: number, seed: number, mapW: number, m
   return `rgb(${r | 0},${g | 0},${b | 0})`
 }
 
-function yardAt(seed: number, mapW: number, mapH: number, tx: number, ty: number): boolean {
-  const yards = yardsFor(seed, mapW, mapH)
+function yardAt(seed: number, mapW: number, mapH: number, tx: number, ty: number, ffa: boolean): boolean {
+  const yards = yardsFor(seed, mapW, mapH, ffa)
   if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return false
   return yards[ty * mapW + tx] === 1
 }
 
-function yardsFor(seed: number, mapW: number, mapH: number): Uint8Array {
-  const key = `${seed}:${mapW}x${mapH}`
+function yardsFor(seed: number, mapW: number, mapH: number, ffa: boolean): Uint8Array {
+  const key = `${seed}:${mapW}x${mapH}:${ffa ? 'ffa' : 'duel'}`
   if (yardMask && yardKey === key) return yardMask
   const mask = new Uint8Array(mapW * mapH)
-  const sites =
-    mapW === FFA_MAP_W && mapH === FFA_MAP_H
-      ? pickFfaSites(seed)
-      : [pickKeepSites(seed).player, pickKeepSites(seed).enemy]
+  const sites = ffa ? pickFfaSites(seed) : [pickKeepSites(seed).player, pickKeepSites(seed).enemy]
   const footprintW = BUILDING_STATS.keep.w
   const footprintH = BUILDING_STATS.keep.h
   for (const site of sites) {
@@ -104,10 +101,10 @@ function yardsFor(seed: number, mapW: number, mapH: number): Uint8Array {
 }
 
 /** Paint the whole field once. The caller keeps this canvas for the match. */
-export function paintTerrain(ctx: CanvasRenderingContext2D, seed: number, mapW: number, mapH: number): void {
+export function paintTerrain(ctx: CanvasRenderingContext2D, seed: number, mapW: number, mapH: number, ffa = false): void {
   const width = mapW * TILE
   const height = mapH * TILE
-  const yards = yardsFor(seed, mapW, mapH)
+  const yards = yardsFor(seed, mapW, mapH, ffa)
   const tileR = new Float32Array(mapW * mapH)
   const tileG = new Float32Array(mapW * mapH)
   const tileB = new Float32Array(mapW * mapH)

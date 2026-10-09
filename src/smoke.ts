@@ -231,18 +231,20 @@ function northmarkPlaysItself(): void {
   }
   recomputeSupply(state)
   for (let i = 0; i < 90; i++) step(state, 1 / 60)
-  const marching = pikes.filter((unit) => {
+  const enemyX = (enemy.tx + 1.5) * TILE
+  const enemyY = (enemy.ty + 1.5) * TILE
+  const homeX = (home.tx + 1.5) * TILE
+  const homeY = (home.ty + 1.5) * TILE
+  const strikers = pikes.filter((unit) => {
+    if (unit.hp <= 0) return false
     const order = unit.order
-    return unit.hp > 0 && (order?.type === 'attackMove' || (order?.type === 'attack' && order.kind === 'building'))
+    if (order?.type === 'attack' && order.kind === 'building') return true
+    if (order?.type !== 'attackMove') return false
+    const toEnemy = Math.hypot(order.x - enemyX, order.y - enemyY)
+    const toHome = Math.hypot(order.x - homeX, order.y - homeY)
+    return toEnemy < toHome
   })
-  assert(marching.length > 0, 'Northmark did not march on the Dunmarch Castle')
-  const leader = marching[0]
-  assert(leader, 'missing the marching bike')
-  if (leader.order?.type === 'attackMove') {
-    const toEnemy = Math.hypot(leader.order.x - (enemy.tx + 1.5) * TILE, leader.order.y - (enemy.ty + 1.5) * TILE)
-    const toHome = Math.hypot(leader.order.x - (home.tx + 1.5) * TILE, leader.order.y - (home.ty + 1.5) * TILE)
-    assert(toEnemy < toHome, 'the attack-move was not toward Dunmarch')
-  }
+  assert(strikers.length > 0, 'Northmark did not march on the Dunmarch Castle')
 
   assert(runCommand(state, 'Off AI Control'), 'off ai control was rejected')
   assert(!state.aiControl, 'AI control stayed on')
@@ -727,20 +729,22 @@ function workersBreakRockToReachMinerals(): void {
   const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter')
   assert(porters.length > 0, 'Dunmarch has no workers')
   let placed = 0
-  for (let tx = 4; tx < MAP_W - 4 && placed < porters.length; tx++) {
-    if (!isWalkable(state, tx, 20)) continue
-    const porter = porters[placed]
-    if (!porter) break
-    porter.x = (tx + 0.5) * TILE
-    porter.y = 20.5 * TILE
-    porter.order = null
-    porter.cargo = 0
-    porter.path = []
-    porter.goalX = null
-    porter.goalY = null
-    placed += 1
+  for (let ty = wallY - 1; ty >= 2 && placed < porters.length; ty--) {
+    for (let tx = 1; tx < MAP_W - 1 && placed < porters.length; tx++) {
+      if (!isWalkable(state, tx, ty)) continue
+      const porter = porters[placed]
+      if (!porter) break
+      porter.x = (tx + 0.5) * TILE
+      porter.y = (ty + 0.5) * TILE
+      porter.order = null
+      porter.cargo = 0
+      porter.path = []
+      porter.goalX = null
+      porter.goalY = null
+      placed += 1
+    }
   }
-  assert(placed > 0, 'no open ground for Dunmarch workers')
+  assert(placed === porters.length, 'no open ground north of the wall for every Dunmarch worker')
   const origin = porters[0]
   assert(origin, 'missing worker')
   let south: { tx: number; ty: number } | null = null
@@ -754,7 +758,7 @@ function workersBreakRockToReachMinerals(): void {
   }
   assert(south, 'no open ground south of the wall')
   assert(
-    findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), 20, south.tx, south.ty) === null,
+    findPath(state.blocked, MAP_W, MAP_H, Math.floor(origin.x / TILE), Math.floor(origin.y / TILE), south.tx, south.ty) === null,
     'workers could path across the minerals wall',
   )
   state.oreHeld[1] = 40
@@ -1756,7 +1760,7 @@ function dunmarchScoutsMineralsAndTheEnemy(): void {
 }
 
 function wideMapHidesObjectsAndMakesDunmarchScout(): void {
-  assert(MAP_W * 9 === MAP_H * 16, `map is ${MAP_W}x${MAP_H}, not 16:9`)
+  assert(MAP_W === 80 && MAP_H === 50, `map is ${MAP_W}x${MAP_H}, not 80×50`)
   const state = createMatch(1)
   assert(state.ore.length >= 40, `expected more mineral patches, saw ${state.ore.length}`)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -1960,7 +1964,7 @@ hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
-freeForAllUsesASquareMap()
+bothModesUseAnEightyByFiftyMap()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
@@ -1970,26 +1974,52 @@ towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 console.log('smoke ok')
 
-function freeForAllUsesASquareMap(): void {
+function bothModesUseAnEightyByFiftyMap(): void {
   const duel = createMatch(4)
-  assert(duel.mode === 'duel' && duel.mapW === MAP_W && duel.mapH === MAP_H, '1 vs 1 left the 80×45 field')
+  assert(duel.mode === 'duel' && duel.mapW === 80 && duel.mapH === 50, `1 vs 1 map is ${duel.mapW}×${duel.mapH}`)
+  assert(duel.tiles.length === 80 * 50, '1 vs 1 did not fill 80×50 cells')
   assert(duel.playerCount === 2, '1 vs 1 seated extra sides')
+  const duelKeeps = duel.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
+  assert(duelKeeps.length === 2, '1 vs 1 is missing a Silo')
+  const duelA = duelKeeps[0]
+  const duelB = duelKeeps[1]
+  assert(duelA && duelB, '1 vs 1 Silos did not both place')
+  const duelDx = duelA.tx + 1.5 - (duelB.tx + 1.5)
+  const duelDy = duelA.ty + 1.5 - (duelB.ty + 1.5)
+  assert(Math.hypot(duelDx, duelDy) > 65, `1 vs 1 Silos are only ${Math.hypot(duelDx, duelDy).toFixed(1)} tiles apart`)
   const corners = new Map<number, Set<string>>()
   const sight = BUILDING_STATS.keep.sight
   const inner = sight - TILE
   for (let seed = 1; seed <= 12; seed++) {
     const state = createMatch(seed, 'ffa')
-    assert(state.mapW === 80 && state.mapH === 80, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.mapW === 80 && state.mapH === 50, `free for all map is ${state.mapW}×${state.mapH}`)
     assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
-    assert(state.tiles.length === 80 * 80, 'the square map did not fill 80×80 cells')
+    assert(state.tiles.length === 80 * 50, 'the free-for-all map did not fill 80×50 cells')
     const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
     assert(keeps.length === 4, 'free for all is missing a Silo')
     const owners = new Set(keeps.map((keep) => keep.owner))
     assert(owners.size === 4, 'two Silos share a side')
-    const quads = new Set(keeps.map((keep) => `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`))
+    const midX = state.mapW / 2
+    const midY = state.mapH / 2
+    const quads = new Set(keeps.map((keep) => `${keep.tx < midX ? 'W' : 'E'}${keep.ty < midY ? 'N' : 'S'}`))
     assert(quads.size === 4, `Silos are not in four corners (${[...quads].join(', ')})`)
+    const yards = keeps.map((keep) => ({
+      x0: keep.tx - 9,
+      y0: keep.ty - 9,
+      x1: keep.tx + 2 + 9,
+      y1: keep.ty + 2 + 9,
+    }))
+    for (let i = 0; i < yards.length; i++) {
+      for (let j = i + 1; j < yards.length; j++) {
+        const a = yards[i]
+        const b = yards[j]
+        if (!a || !b) continue
+        const overlap = a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+        assert(!overlap, `seed ${seed} Silo yards overlap`)
+      }
+    }
     for (const keep of keeps) {
-      const quad = `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`
+      const quad = `${keep.tx < midX ? 'W' : 'E'}${keep.ty < midY ? 'N' : 'S'}`
       const seen = corners.get(keep.owner) ?? new Set<string>()
       seen.add(quad)
       corners.set(keep.owner, seen)
