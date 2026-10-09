@@ -1984,11 +1984,25 @@ console.log('smoke ok')
 function rulesPanelListsRosterFromConfig(): void {
   assert(PLAYER_NAME.join(',') === 'Silo 01,Silo 02,Silo 03,Silo 04', `side names are ${PLAYER_NAME.join(', ')}`)
   const text = rulesMarkup()
+  const plain = text.replace(/<[^>]+>/g, '')
   assert(!text.includes('Silo_'), 'rules still use an underscore in a side name')
   assert(!text.includes('Ridgekeep'), 'rules still name the game Ridgekeep')
-  for (const name of PLAYER_NAME) assert(text.includes(name), `rules omit ${name}`)
+  assert(!plain.includes('Destroy an enemy Silo to capture it'), 'rules still open with the old match paragraph')
   assert(text.includes('God Mode') && text.includes('Both Cam') && text.includes('AI Control') && text.includes('FOW'), 'rules omit a command')
-  assert(text.includes('capture') && text.includes('Storage'), 'rules omit capture or storage')
+  const lore = [
+    '"New Ground": Uncharted territory; however, the remnants of old machinery and debris on the surface indicate that an advanced civilization once existed here.',
+    '"Silo": A shelter housing people; it was clearly built a long time ago. This building serves as a training site for "Stalkers" and acts as a command center for construction operations.',
+    '"Stalker": Shelter inhabitants retrained for surface operations. Their task is to scavenge valuable parts left over from the past from the piles of technical debris on the surface to use in future construction of machinery and buildings. Their lives are highly valued, and their protected status is widely recognized, though they can still be captured. They are also capable of traversing the terrain by clearing obstacles like rocks and trees from their path.',
+    '"Dumps": The piles of technical debris found on the "New Ground" surface.',
+    '"Cells": Storage units for processed, useful parts intended for future construction.',
+    '"Storage": Buildings that house these storage cells. These can be placed near "Dumps" to facilitate rapid delivery by "Stalkers."',
+    '"Pillar": A structure serving as both a wind turbine and a combat observation post. Its weapon-equipped tower helps fend off hostile intruders.',
+    '"Factory": An automated facility for manufacturing combat and exploration robotics.',
+    '"Flasher": A combat robot unit resembling an off-road motorcycle equipped with a cannon; its key feature is high-speed mobility.',
+    '"Gorilla": A heavy combat robot (tank).',
+    '"Hover": A flying robot primarily tasked with terrain exploration.',
+  ]
+  for (const line of lore) assert(plain.includes(line), `rules omit lore: ${line.slice(0, 48)}`)
   for (const stats of Object.values(UNIT_STATS)) {
     assert(text.includes(stats.label), `rules omit ${stats.label}`)
     assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
@@ -1999,8 +2013,6 @@ function rulesPanelListsRosterFromConfig(): void {
     assert(text.includes(`health ${stats.hp}`), `rules omit the health of ${stats.label}`)
     if (stats.cost > 0) assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
   }
-  assert(text.includes(String(SUPPLY_MAX)), 'rules omit the cells cap')
-  assert(text.includes(String(TREE_HP)) && text.includes(String(ROCK_HP)), 'rules omit tree and rock life')
 }
 
 function captureHarvestAndPassages(): void {

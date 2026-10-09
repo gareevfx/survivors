@@ -1,15 +1,6 @@
 import {
   BUILDING_STATS,
-  GATHER_AMOUNT,
-  GATHER_TIME,
-  MAP_H,
-  MAP_W,
-  MINERS_PER_DEPOSIT,
   PLAYER_NAME,
-  ROCK_HP,
-  STARTING_ORE,
-  SUPPLY_MAX,
-  TREE_HP,
   UNIT_STATS,
   type BuildingKind,
   type UnitKind,
@@ -62,25 +53,38 @@ function buildingArticle(kind: BuildingKind): string {
   `
 }
 
-/** Rules, commands, and the roster. Costs and stats come from the match config. */
+const LORE: Array<[string, string]> = [
+  ['New Ground', 'Uncharted territory; however, the remnants of old machinery and debris on the surface indicate that an advanced civilization once existed here.'],
+  ['Silo', 'A shelter housing people; it was clearly built a long time ago. This building serves as a training site for "Stalkers" and acts as a command center for construction operations.'],
+  ['Stalker', 'Shelter inhabitants retrained for surface operations. Their task is to scavenge valuable parts left over from the past from the piles of technical debris on the surface to use in future construction of machinery and buildings. Their lives are highly valued, and their protected status is widely recognized, though they can still be captured. They are also capable of traversing the terrain by clearing obstacles like rocks and trees from their path.'],
+  ['Dumps', 'The piles of technical debris found on the "New Ground" surface.'],
+  ['Cells', 'Storage units for processed, useful parts intended for future construction.'],
+  ['Storage', 'Buildings that house these storage cells. These can be placed near "Dumps" to facilitate rapid delivery by "Stalkers."'],
+  ['Pillar', 'A structure serving as both a wind turbine and a combat observation post. Its weapon-equipped tower helps fend off hostile intruders.'],
+  ['Factory', 'An automated facility for manufacturing combat and exploration robotics.'],
+  ['Flasher', 'A combat robot unit resembling an off-road motorcycle equipped with a cannon; its key feature is high-speed mobility.'],
+  ['Gorilla', 'A heavy combat robot (tank).'],
+  ['Hover', 'A flying robot primarily tasked with terrain exploration.'],
+]
+
+function term(name: string): string {
+  return `<b>"${escapeHtml(name)}"</b>`
+}
+
+function loreMarkup(): string {
+  const items = LORE.map(([name, body]) => {
+    const text = escapeHtml(body).replace(/&quot;|\"([^\"]+)\"/g, (_match, quoted: string) => term(quoted))
+    return `<li>${term(name)}: ${text}</li>`
+  })
+  return `<ul>${items.join('')}</ul>`
+}
+
+/** Lore, commands, and the roster. Costs and stats come from the match config. */
 export function rulesMarkup(): string {
   const you = PLAYER_NAME[0] ?? 'Silo 01'
-  const foe = PLAYER_NAME[1] ?? 'Silo 02'
-  const sides = PLAYER_NAME.join(', ')
-  const keep = BUILDING_STATS.keep
-  const storage = BUILDING_STATS.silo
   return `
-    <h3>Objective</h3>
-    <p>Destroy an enemy Silo to capture it. The destroyer takes that side's remaining buildings, units, and dumps. They change owner and team color. In 1 vs 1, ${you} against ${foe} on the ${MAP_W}×${MAP_H} field, that ends the match: the captor wins and the loser is defeated. In a free-for-all the sides are ${sides}. Capturing one Silo removes that side and the captor keeps everything. The match continues until your Silo falls or every enemy Silo is gone. If your Silo falls, you lose.</p>
-    <h3>Stalkers</h3>
-    <p>Opponents cannot destroy a Stalker. An enemy hit captures it only when it stands outside the sight of its own Silo, Flashers, and Gorillas. A hit while one of those can see it does nothing: no damage and no capture. Auto-targeting and Pillars skip a covered Stalker.</p>
-    <h3>Dumps</h3>
-    <p>You start with ${STARTING_ORE} dumps. A Stalker carries ${GATHER_AMOUNT} dumps after ${num(GATHER_TIME)}s at a patch, then drops them at the nearest finished Silo or Storage. A Silo drop adds to the bank. A Storage drop adds to that building's stock and to the bank. Spending draws the stock back down, richest Storage first. Up to ${MINERS_PER_DEPOSIT} Stalkers work one patch.</p>
-    <p>A Stalker ordered onto an enemy Storage that holds dumps hauls them out, up to ${GATHER_AMOUNT} at a time. That amount leaves the stock and the victim's bank. A Flasher or Gorilla that destroys a Storage leaves one harvestable dumps pile of whatever was stored. Any other killer leaves no pile, and the dumps stay in the bank.</p>
-    <h3>Cells</h3>
-    <p>A Silo provides ${keep.supply} cells. Each Storage adds ${storage.supply}. Training reserves cells until the unit is cancelled or finished. The cap stops at ${SUPPLY_MAX}.</p>
-    <h3>Fog of war</h3>
-    <p>Unexplored ground is black and hides everything. Ground you have seen stays dark gray: rocks, trees, and dumps stay drawn, and enemies stay hidden until a unit or building is watching that tile. Each side has its own sight. Passages on both maps are at least two tiles wide. Trees have ${TREE_HP} life, half of rock's ${ROCK_HP}.</p>
+    <h3>Rules</h3>
+    ${loreMarkup()}
     <h3>Commands</h3>
     <ul>
       <li><b>Enter</b> opens the command line. The box says “write here”. Escape closes it.</li>
