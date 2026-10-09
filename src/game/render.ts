@@ -6,6 +6,7 @@ import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
+import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
@@ -347,7 +348,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  if (building.kind !== 'keep' && building.kind !== 'yard') {
+  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
     ctx.beginPath()
     ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
@@ -363,7 +364,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
   else if (building.kind === 'tower')
     drawTower(ctx, x, y, w, h, color, building.attackCd > UNIT_STATS.pike.cooldown - 0.18)
-  else drawSilo(ctx, x, y, w, h, color)
+  else drawStorage(ctx, state, building, x, y, color)
 
   if (building.hp < stats.hp) {
     ctx.strokeStyle = 'rgba(40, 24, 18, 0.45)'
@@ -499,29 +500,23 @@ function drawTower(
   ctx.fill()
 }
 
-function drawSilo(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
-  ctx.fillStyle = '#6d6458'
-  ctx.beginPath()
-  ctx.ellipse(x + w / 2, y + h - 14, w * 0.34, 8, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillRect(x + w * 0.2, y + 16, w * 0.6, h - 32)
-  ctx.fillStyle = '#857b6d'
-  ctx.beginPath()
-  ctx.ellipse(x + w / 2, y + 16, w * 0.3, 8, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(40, 32, 24, 0.35)'
-  ctx.beginPath()
-  ctx.moveTo(x + w * 0.2, y + h * 0.45)
-  ctx.lineTo(x + w * 0.8, y + h * 0.45)
-  ctx.moveTo(x + w * 0.2, y + h * 0.62)
-  ctx.lineTo(x + w * 0.8, y + h * 0.62)
-  ctx.stroke()
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.moveTo(x + w / 2, y + 4)
-  ctx.lineTo(x + w / 2 + 8, y + 10)
-  ctx.lineTo(x + w / 2, y + 16)
-  ctx.fill()
+function drawStorage(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  building: Building,
+  x: number,
+  y: number,
+  color: string,
+): void {
+  const stats = BUILDING_STATS.silo
+  const cap = state.supplyCap[building.owner] ?? 0
+  const fill = building.complete ? storageFill(cap) : 0
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawStorageSprite(ctx, x, y, color, fill, storageDamageStage(building.hp, stats.hp))
+  ctx.restore()
+  ctx.imageSmoothingEnabled = false
 }
 
 function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, selected: boolean): void {
@@ -762,6 +757,17 @@ export function renderMinimap(
       )
       ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.fillRect(ox + building.tx * sx, oy + (building.ty + stats.h) * sy - Math.max(1, sy * 0.35), stats.w * sx, Math.max(1, sy * 0.35))
+    } else if (building.kind === 'silo') {
+      const cx = ox + (building.tx + stats.w / 2) * sx
+      const cy = oy + (building.ty + stats.h / 2) * sy
+      const radius = Math.min(stats.w * sx, stats.h * sy) * 0.42
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+      ctx.fillStyle = '#c8c2b4'
+      ctx.fill()
+      ctx.lineWidth = Math.max(1, radius * 0.28)
+      ctx.strokeStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.stroke()
     } else {
       ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)

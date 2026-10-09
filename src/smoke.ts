@@ -8,7 +8,8 @@ import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
-import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
+import { storageFill } from './game/storageArt'
+import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1966,6 +1967,7 @@ scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
+storageStartsEmptyAndFillsWithCells()
 bothModesUseAnEightyByFiftyMap()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
@@ -2340,6 +2342,15 @@ function unitsLeaveByTheFactoryDoor(): void {
   assert(born && born.kind === 'pike' && born.owner === 0, 'the new unit is not a Flasher')
   assert(Math.hypot(born.x - mouth.x, born.y - mouth.y) < 28, 'the Flasher did not emerge at the bay door')
   assert(yard.hatch > 0, 'the Factory door did not open')
+}
+
+function storageStartsEmptyAndFillsWithCells(): void {
+  const first = BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply
+  assert(storageFill(first) === 0, 'the first Storage is not empty')
+  assert(storageFill(BUILDING_STATS.keep.supply) === 0, 'Silo Cells already fill a Storage')
+  assert(storageFill(SUPPLY_MAX) === 1, 'the Cells maximum does not fill Storage')
+  const middle = storageFill((first + SUPPLY_MAX) / 2)
+  assert(middle > 0.4 && middle < 0.6, `a middle Cells cap filled Storage by ${middle}`)
 }
 
 function scanningHoverRevealsBlackFog(): void {
