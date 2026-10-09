@@ -382,6 +382,19 @@ button, canvas { font: inherit; }
 
 .cmd-label { display: block; font-size: 14px; }
 
+.stalker-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.cmd .stalker-icon {
+  float: left;
+  margin: -2px 6px 2px 0;
+}
+
 .cmd-detail {
   display: block;
   margin-top: 4px;
