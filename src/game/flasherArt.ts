@@ -159,6 +159,9 @@ function paintFlasher(
   plate(ctx, at(-5.6, 5.4), 4.4, 3.2, ang, '#2a2e2c')
   plate(ctx, at(-5.6, -5.4), 4.4, 3.2, ang, '#2a2e2c')
 
+  // Nose toward the camera: the rear mast sits behind the hull and shows above it.
+  if (fy > 0) paintAntenna(ctx, at, frame, color)
+
   const hull = [
     at(-9.2, 3.3),
     at(0.5, 5.1),
@@ -242,6 +245,9 @@ function paintFlasher(
   ctx.fillStyle = 'rgba(255, 255, 255, 0.62)'
   ctx.fill()
 
+  // Nose away or to the side: the rear mast is in front of the tail.
+  if (fy <= 0) paintAntenna(ctx, at, frame, color)
+
   if (firing) {
     const root = at(5.2, 2.5)
     const tip = at(16.2, 2.7)
@@ -272,6 +278,41 @@ function paintFlasher(
       ctx.fill()
     }
   }
+}
+
+function paintAntenna(
+  ctx: CanvasRenderingContext2D,
+  at: (forward: number, side: number) => { x: number; y: number },
+  frame: number,
+  color: string,
+): void {
+  const sway = frame ? 2.2 : 0
+  const base = at(-8.8, 0)
+  const mid = at(-12.6, sway * 0.55)
+  const tip = at(-16.4, sway)
+  mid.y -= 3.4
+  tip.y -= 7.4
+  ctx.beginPath()
+  ctx.moveTo(base.x, base.y)
+  ctx.quadraticCurveTo(mid.x, mid.y, tip.x, tip.y)
+  ctx.strokeStyle = '#1a1e24'
+  ctx.lineWidth = 1.45
+  ctx.stroke()
+  ctx.lineWidth = 0.55
+  ctx.strokeStyle = '#4a5560'
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(base.x, base.y, 1.15, 0, Math.PI * 2)
+  ctx.fillStyle = '#2a3038'
+  ctx.fill()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = 1
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(tip.x, tip.y, 1.4, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+  ctx.stroke()
 }
 
 function wheel(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, frame: number): void {
