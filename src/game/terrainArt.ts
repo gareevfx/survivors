@@ -5,21 +5,24 @@ import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, TILE } from './types'
 /**
  * Original procedural ground and props. Everything is drawn in code and cached:
  * the battlefield is one offscreen canvas, and rocks, trees, dumps, and fog
- * edges are small sprites reused every frame.
+ * edges are small sprites reused every frame. Props are painted once on a
+ * low-resolution canvas, outlined, and scaled with nearest-neighbor.
  */
 
 const ROCK_SPRITES = 4
-const TREE_SPRITES = 4
-const ORE_SPRITES = 3
+const TREE_SPRITES = 5
+const ORE_SPRITES = 4
+const ORE_LEVELS = 4
+const PIXEL = 2
 const FOG_FADE = 16
+
+/** Minimap and HUD color for a scrap heap. */
+export const DUMPS_COLOR = '#c6dc4a'
 
 type Rgb = [number, number, number]
 
 let yardKey = ''
 let yardMask: Uint8Array | null = null
-let rocks: HTMLCanvasElement[] | null = null
-let trees: HTMLCanvasElement[] | null = null
-let ore: HTMLCanvasElement[] | null = null
 const fogCache = new Map<string, HTMLCanvasElement>()
 
 function smooth(t: number): number {
@@ -223,189 +226,561 @@ export function paintTerrain(ctx: CanvasRenderingContext2D, seed: number, mapW: 
   ctx.strokeRect(2, 2, width - 4, height - 4)
 }
 
-function poly(ctx: CanvasRenderingContext2D, points: Array<[number, number]>): void {
-  ctx.beginPath()
-  const first = points[0]
-  if (!first) return
-  ctx.moveTo(first[0], first[1])
-  for (let i = 1; i < points.length; i++) {
-    const point = points[i]
-    if (point) ctx.lineTo(point[0], point[1])
+const INK = '#1a1410'
+const STONE_L = '#b3a99c'
+const STONE_M = '#7a7268'
+const STONE_D = '#463f38'
+const SOIL = '#6b4e30'
+const SOIL_D = '#3e2c1a'
+const BARK_L = '#8d623c'
+const BARK_M = '#5c3d26'
+const BARK_D = '#3a2618'
+const BIRCH_L = '#efe4cc'
+const BIRCH_M = '#d2c6aa'
+const BIRCH_D = '#2c261c'
+const OAK_L = '#9cbe58'
+const OAK_M = '#3d7836'
+const OAK_D = '#1b4622'
+const PINE_L = '#6d9850'
+const PINE_M = '#2d5c34'
+const PINE_D = '#14301c'
+const BIRCH_LEAF_L = '#c5d46e'
+const BIRCH_LEAF_M = '#7c9844'
+const BIRCH_LEAF_D = '#3c5a28'
+const DRY = '#a08c64'
+
+const SCRAP: Record<string, string> = {
+  G: '#2e7634',
+  a: '#d4b44a',
+  M: '#8c949c',
+  m: '#4c545c',
+  L: '#c6ccd2',
+  S: '#142028',
+  s: '#3a6866',
+  K: '#2a2c30',
+  k: '#686c72',
+  C: '#b44836',
+  c: '#e4d6b4',
+  T: '#c8ae68',
+  t: '#7a663c',
+  W: '#1c1a16',
+}
+
+let rockCache: HTMLCanvasElement[][] | null = null
+let treeCache: HTMLCanvasElement[] | null = null
+let oreCache: HTMLCanvasElement[][] | null = null
+let dumpsIcon = ''
+const glyphCache = new Map<string, HTMLCanvasElement>()
+
+function dot(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+  ctx.fillStyle = color
+  ctx.fillRect(x, y, 1, 1)
+}
+
+function insideTri(px: number, py: number, x0: number, y0: number, x1: number, y1: number, x2: number, y2: number): boolean {
+  const a = (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0)
+  const b = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+  const c = (x0 - x2) * (py - y2) - (y0 - y2) * (px - x2)
+  return (a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0)
+}
+
+/** One angular shard. The left side is lit and the right side is in shade. */
+function shard(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, x2: number, y2: number): void {
+  const minX = Math.floor(Math.min(x0, x1, x2))
+  const maxX = Math.ceil(Math.max(x0, x1, x2))
+  const minY = Math.floor(Math.min(y0, y1, y2))
+  const maxY = Math.ceil(Math.max(y0, y1, y2))
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (!insideTri(x + 0.5, y + 0.5, x0, y0, x1, y1, x2, y2)) continue
+      const u = (x - minX) / Math.max(1, maxX - minX)
+      const top = y <= minY + 1 && u < 0.72
+      dot(ctx, x, y, top || u < 0.36 ? STONE_L : u < 0.68 ? STONE_M : STONE_D)
+    }
   }
-  ctx.closePath()
 }
 
-function rockSprites(): HTMLCanvasElement[] {
-  if (rocks) return rocks
-  const shapes: Array<Array<[number, number]>> = [
-    [[10, 28], [14, 14], [22, 9], [33, 16], [31, 30], [18, 34]],
-    [[8, 26], [16, 11], [27, 8], [35, 18], [28, 33], [12, 32]],
-    [[12, 30], [11, 16], [20, 8], [31, 12], [34, 26], [22, 34]],
-    [[9, 24], [15, 12], [26, 10], [34, 20], [30, 32], [14, 33]],
-  ]
-  rocks = shapes.map((shape, variant) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 44
-    canvas.height = 44
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.38)'
-    ctx.beginPath()
-    ctx.ellipse(24, 34, 13, 4.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = variant % 2 === 0 ? '#3c342c' : '#463c32'
-    poly(ctx, shape)
-    ctx.fill()
-    const lit = shape.map(([px, py]) => [px - 2, py - 3] as [number, number])
-    ctx.fillStyle = variant === 2 ? '#7d7368' : '#6e655c'
-    poly(ctx, lit)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(255, 244, 220, 0.38)'
-    ctx.beginPath()
-    ctx.ellipse(shape[1]?.[0] ?? 16, (shape[1]?.[1] ?? 14) - 1, 4.2, 2.1, -0.6, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(32, 24, 18, 0.75)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(16, 16)
-    ctx.lineTo(22, 22)
-    ctx.lineTo(20, 28)
-    ctx.stroke()
-    if (variant === 1 || variant === 3) {
-      ctx.beginPath()
-      ctx.moveTo(24, 14)
-      ctx.lineTo(28, 20)
-      ctx.stroke()
+function skirt(ctx: CanvasRenderingContext2D, w: number, ground: number): void {
+  for (let x = 1; x < w - 1; x++) {
+    const rise = (x * 5) % 3
+    for (let y = ground - rise; y <= ground + 1; y++) {
+      if (y < ground - 1 && (x < 3 || x > w - 4)) continue
+      if (y < ground && x > 2 && x < w - 3 && rise === 0) continue
+      dot(ctx, x, y, y >= ground ? SOIL_D : SOIL)
     }
-    return canvas
-  })
-  return rocks
-}
-
-function treeSprites(): HTMLCanvasElement[] {
-  if (trees) return trees
-  trees = []
-  for (let variant = 0; variant < TREE_SPRITES; variant++) {
-    const canvas = document.createElement('canvas')
-    canvas.width = 48
-    canvas.height = 58
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      trees.push(canvas)
-      continue
-    }
-    const dead = variant === 3
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
-    ctx.beginPath()
-    ctx.ellipse(28, 50, 14, 4.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#3a2616'
-    ctx.fillRect(22, 28, 5, 20)
-    ctx.fillStyle = '#6b4a2c'
-    ctx.fillRect(21, 28, 3, 20)
-    if (dead) {
-      ctx.strokeStyle = '#5a3e28'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(24, 30)
-      ctx.lineTo(14, 16)
-      ctx.moveTo(24, 26)
-      ctx.lineTo(34, 12)
-      ctx.moveTo(24, 22)
-      ctx.lineTo(18, 12)
-      ctx.stroke()
-      ctx.fillStyle = '#6a5438'
-      ctx.beginPath()
-      ctx.arc(16, 16, 4, 0, Math.PI * 2)
-      ctx.arc(33, 13, 3.5, 0, Math.PI * 2)
-      ctx.fill()
-    } else {
-      const greens = ['#2f6a32', '#3d7a38', '#4c8a3c']
-      const shade = ['#1e4424', '#24502c', '#2c5c30']
-      ctx.fillStyle = shade[variant] ?? shade[0]
-      ctx.beginPath()
-      ctx.arc(30, 24, 11, 0, Math.PI * 2)
-      ctx.arc(16, 22, 9, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = greens[variant] ?? greens[0]
-      ctx.beginPath()
-      ctx.arc(22, 18, 12, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = variant === 0 ? '#6ea24a' : '#7aaf52'
-      ctx.beginPath()
-      ctx.arc(18, 14, 6, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(230, 240, 180, 0.35)'
-      ctx.beginPath()
-      ctx.arc(16, 12, 2.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    trees.push(canvas)
   }
-  return trees
+  for (const x of [2, 6, w - 4]) {
+    dot(ctx, x, ground + 2, STONE_D)
+    dot(ctx, x + 1, ground + 2, STONE_M)
+  }
 }
 
-function oreSprites(): HTMLCanvasElement[] {
-  if (ore) return ore
-  const layouts = [
-    [[0, -2, 8], [-8, 6, 6], [7, 6, 6.5]],
-    [[-2, -4, 7], [8, 2, 5.5], [-7, 5, 6], [2, 8, 4]],
-    [[2, -3, 8.5], [-9, 4, 5], [8, 7, 6]],
-  ]
-  ore = layouts.map((layout) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 40
-    canvas.height = 40
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-    ctx.fillStyle = 'rgba(10, 16, 24, 0.35)'
-    ctx.beginPath()
-    ctx.ellipse(22, 30, 12, 4, 0, 0, Math.PI * 2)
-    ctx.fill()
-    for (const [ox, oy, r] of layout) {
-      const cx = 20 + (ox ?? 0)
-      const cy = 18 + (oy ?? 0)
-      const rad = r ?? 6
-      ctx.beginPath()
-      for (let i = 0; i < 6; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / 3
-        const px = cx + Math.cos(a) * rad
-        const py = cy + Math.sin(a) * rad * 0.82
-        if (i === 0) ctx.moveTo(px, py)
-        else ctx.lineTo(px, py)
+function crack(ctx: CanvasRenderingContext2D, x: number, y: number, stage: number): void {
+  const steps = 2 + stage
+  for (let i = 0; i < steps; i++) {
+    dot(ctx, x + (i % 2), y + i, INK)
+    if (stage >= 2 && i % 2 === 1) dot(ctx, x + 2, y + i, INK)
+  }
+}
+
+function outline(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const image = ctx.getImageData(0, 0, w, h)
+  const src = new Uint8ClampedArray(image.data)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4
+      if ((src[p + 3] ?? 0) > 24) continue
+      let touch = false
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const nx = x + dx
+        const ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+        if ((src[(ny * w + nx) * 4 + 3] ?? 0) > 220) {
+          touch = true
+          break
+        }
       }
-      ctx.closePath()
-      ctx.fillStyle = '#2f6ea8'
-      ctx.fill()
-      ctx.fillStyle = '#7ec8f0'
-      ctx.beginPath()
-      ctx.moveTo(cx, cy - rad * 0.8)
-      ctx.lineTo(cx + rad * 0.45, cy)
-      ctx.lineTo(cx, cy + rad * 0.15)
-      ctx.lineTo(cx - rad * 0.35, cy - rad * 0.1)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
-      ctx.fillRect(cx - rad * 0.35, cy - rad * 0.55, 2, 2)
+      if (!touch) continue
+      image.data[p] = 0x1a
+      image.data[p + 1] = 0x14
+      image.data[p + 2] = 0x10
+      image.data[p + 3] = 255
     }
-    return canvas
-  })
-  return ore
+  }
+  ctx.putImageData(image, 0, 0)
 }
 
-export function drawRockSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = rockSprites()
+function bake(w: number, h: number, paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+  const low = document.createElement('canvas')
+  low.width = w
+  low.height = h
+  const src = low.getContext('2d')
+  if (!src) return low
+  paint(src)
+  const out = document.createElement('canvas')
+  out.width = w * PIXEL
+  out.height = h * PIXEL
+  const ctx = out.getContext('2d')
+  if (!ctx) return out
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(low, 0, 0, out.width, out.height)
+  return out
+}
+
+function shadeOval(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+  ctx.fillStyle = 'rgba(16, 12, 8, 0.38)'
+  const x0 = Math.floor(cx - rx)
+  const x1 = Math.ceil(cx + rx)
+  const y0 = Math.floor(cy - ry)
+  const y1 = Math.ceil(cy + ry)
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const nx = (x + 0.5 - cx) / rx
+      const ny = (y + 0.5 - cy) / ry
+      if (nx * nx + ny * ny <= 1) ctx.fillRect(x, y, 1, 1)
+    }
+  }
+}
+
+type Shard = [number, number, number, number, number, number]
+
+const CLUSTERS: Shard[][] = [
+  [
+    [2, 8, 5, 4, 8, 8],
+    [7, 8, 10, 3, 14, 8],
+    [13, 8, 15, 5, 17, 8],
+  ],
+  [
+    [1, 8, 3, 5, 5, 8],
+    [4, 8, 7, 3, 9, 8],
+    [8, 8, 11, 5, 13, 8],
+    [12, 8, 15, 4, 17, 8],
+  ],
+  [
+    [2, 8, 6, 3, 10, 8],
+    [9, 8, 13, 2, 17, 8],
+  ],
+  [
+    [2, 8, 5, 5, 8, 8],
+    [6, 8, 9, 6, 12, 8],
+    [11, 8, 14, 3, 17, 8],
+  ],
+]
+
+function paintCrag(variant: number, stage: number): HTMLCanvasElement {
+  const parts = CLUSTERS[variant] ?? CLUSTERS[0] ?? []
+  const w = 18
+  const h = 13
+  return bake(w, h, (ctx) => {
+    shadeOval(ctx, 9, 10, 6, 1.4)
+    for (const part of parts) shard(ctx, part[0], part[1], part[2], part[3], part[4], part[5])
+    const tall = parts.reduce((best, part) => (part[3] < best[3] ? part : best), parts[0] ?? [8, 8, 9, 4, 10, 8])
+    crack(ctx, tall[2], tall[3] + 1, stage)
+    if (stage >= 2 && parts.length > 1) {
+      const other = parts[0] === tall ? parts[1] : parts[0]
+      if (other) crack(ctx, other[2], other[3] + 1, stage - 2)
+    }
+    skirt(ctx, w, 8)
+    outline(ctx, w, h)
+  })
+}
+
+function cragSheet(): HTMLCanvasElement[][] {
+  if (rockCache) return rockCache
+  rockCache = []
+  for (let variant = 0; variant < ROCK_SPRITES; variant++) {
+    const row: HTMLCanvasElement[] = []
+    for (let stage = 0; stage < 4; stage++) row.push(paintCrag(variant, stage))
+    rockCache.push(row)
+  }
+  return rockCache
+}
+
+export function rockProp(variant: number, stage: number): HTMLCanvasElement {
+  const row = cragSheet()[variant % ROCK_SPRITES]
+  return row?.[Math.max(0, Math.min(3, stage))] ?? paintCrag(0, 0)
+}
+
+function clump(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string): void {
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
+      const d = Math.abs(x - cx) + Math.abs(y - cy)
+      if (d <= r || (d === r + 1 && ((x + y) & 1) === 0)) dot(ctx, x, y, color)
+    }
+  }
+}
+
+function twig(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string): void {
+  const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps
+    dot(ctx, Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t), color)
+  }
+}
+
+function bole(ctx: CanvasRenderingContext2D, x: number, y0: number, y1: number, birch: boolean): void {
+  for (let y = y0; y <= y1; y++) {
+    if (birch) {
+      const mark = y % 4 === 0
+      dot(ctx, x, y, mark ? BIRCH_D : BIRCH_L)
+      dot(ctx, x + 1, y, mark ? BIRCH_D : BIRCH_M)
+    } else {
+      dot(ctx, x, y, y % 2 === 0 ? BARK_L : BARK_M)
+      dot(ctx, x + 1, y, BARK_M)
+      dot(ctx, x + 2, y, y % 3 === 0 ? BARK_D : BARK_M)
+    }
+  }
+  const foot = birch ? x : x
+  dot(ctx, foot - 1, y1, birch ? BIRCH_M : BARK_D)
+  dot(ctx, foot - 2, y1 + 1, birch ? BIRCH_D : BARK_D)
+  dot(ctx, foot + (birch ? 2 : 3), y1, birch ? BIRCH_M : BARK_M)
+  dot(ctx, foot + (birch ? 3 : 4), y1 + 1, birch ? BIRCH_D : BARK_D)
+}
+
+function clumps(ctx: CanvasRenderingContext2D, spots: Array<[number, number, number]>, color: string): void {
+  for (const [x, y, r] of spots) clump(ctx, x, y, r, color)
+}
+
+function paintOak(ctx: CanvasRenderingContext2D): void {
+  shadeOval(ctx, 15, 31, 10, 2)
+  twig(ctx, 15, 22, 5, 14, BARK_D)
+  twig(ctx, 16, 21, 25, 13, BARK_D)
+  twig(ctx, 15, 18, 8, 10, BARK_M)
+  twig(ctx, 16, 19, 22, 11, BARK_M)
+  twig(ctx, 5, 14, 4, 17, BARK_D)
+  twig(ctx, 25, 13, 26, 16, BARK_D)
+  bole(ctx, 14, 20, 29, false)
+  clumps(ctx, [
+    [8, 16, 3], [15, 15, 4], [22, 16, 3], [11, 18, 3], [19, 18, 3], [6, 14, 2], [24, 14, 2], [15, 20, 2],
+  ], OAK_D)
+  clumps(ctx, [
+    [9, 12, 3], [15, 10, 4], [21, 12, 3], [6, 13, 2], [24, 12, 2], [12, 15, 3], [18, 14, 3], [15, 17, 2],
+  ], OAK_M)
+  clumps(ctx, [
+    [11, 8, 2], [16, 7, 2], [8, 10, 2], [20, 9, 2], [14, 12, 2],
+  ], OAK_L)
+  twig(ctx, 7, 16, 3, 20, BARK_D)
+  twig(ctx, 23, 15, 27, 19, BARK_M)
+  twig(ctx, 15, 18, 18, 22, BARK_D)
+}
+
+function paintPine(ctx: CanvasRenderingContext2D): void {
+  shadeOval(ctx, 13, 31, 8, 1.8)
+  bole(ctx, 12, 16, 29, false)
+  const layer = (apex: number, rows: number, half: number) => {
+    for (let row = 0; row < rows; row++) {
+      const y = apex + row
+      const wide = Math.max(1, Math.round((half * (row + 1)) / rows))
+      for (let x = 13 - wide; x <= 13 + wide; x++) {
+        dot(ctx, x, y, x < 12 ? PINE_L : x < 15 ? PINE_M : PINE_D)
+      }
+    }
+  }
+  layer(2, 6, 4)
+  layer(9, 7, 6)
+  layer(17, 8, 8)
+  dot(ctx, 8, 22, PINE_D)
+  dot(ctx, 19, 21, PINE_M)
+  dot(ctx, 19, 22, PINE_D)
+}
+
+function paintBirch(ctx: CanvasRenderingContext2D): void {
+  shadeOval(ctx, 13, 31, 7, 1.7)
+  twig(ctx, 13, 18, 6, 12, BIRCH_D)
+  twig(ctx, 14, 17, 20, 11, BIRCH_D)
+  twig(ctx, 6, 12, 5, 15, BIRCH_D)
+  twig(ctx, 20, 11, 21, 14, BIRCH_D)
+  bole(ctx, 12, 16, 29, true)
+  clumps(ctx, [
+    [8, 13, 2], [13, 12, 3], [18, 13, 2], [13, 16, 2],
+  ], BIRCH_LEAF_D)
+  clumps(ctx, [
+    [9, 10, 2], [13, 8, 3], [17, 10, 2], [7, 12, 2], [19, 11, 2],
+  ], BIRCH_LEAF_M)
+  clumps(ctx, [
+    [11, 7, 2], [15, 6, 2], [9, 9, 1],
+  ], BIRCH_LEAF_L)
+}
+
+function paintDead(ctx: CanvasRenderingContext2D): void {
+  shadeOval(ctx, 14, 29, 7, 1.6)
+  bole(ctx, 13, 12, 27, false)
+  twig(ctx, 14, 14, 4, 6, BARK_M)
+  twig(ctx, 15, 13, 24, 5, BARK_D)
+  twig(ctx, 14, 18, 6, 13, BARK_D)
+  twig(ctx, 15, 17, 23, 11, BARK_M)
+  twig(ctx, 14, 10, 9, 6, BARK_D)
+  twig(ctx, 4, 6, 3, 4, BARK_D)
+  twig(ctx, 24, 5, 26, 3, BARK_M)
+  dot(ctx, 3, 3, DRY)
+  dot(ctx, 26, 2, DRY)
+  dot(ctx, 6, 12, DRY)
+  dot(ctx, 23, 10, DRY)
+}
+
+function paintBush(ctx: CanvasRenderingContext2D): void {
+  shadeOval(ctx, 13, 17, 8, 1.6)
+  twig(ctx, 12, 12, 6, 9, BARK_D)
+  twig(ctx, 14, 12, 20, 9, BARK_D)
+  bole(ctx, 12, 12, 15, false)
+  clumps(ctx, [
+    [7, 12, 2], [13, 11, 3], [19, 12, 2], [10, 13, 2], [16, 13, 2],
+  ], OAK_D)
+  clumps(ctx, [
+    [8, 9, 2], [13, 8, 3], [18, 9, 2], [5, 11, 2], [21, 11, 2],
+  ], OAK_M)
+  clumps(ctx, [
+    [10, 7, 2], [15, 6, 2], [7, 8, 1],
+  ], OAK_L)
+}
+
+function treeSheet(): HTMLCanvasElement[] {
+  if (treeCache) return treeCache
+  const jobs: Array<{ w: number; h: number; paint: (ctx: CanvasRenderingContext2D) => void }> = [
+    { w: 30, h: 34, paint: paintOak },
+    { w: 28, h: 34, paint: paintPine },
+    { w: 26, h: 34, paint: paintBirch },
+    { w: 30, h: 32, paint: paintDead },
+    { w: 26, h: 20, paint: paintBush },
+  ]
+  treeCache = jobs.map((job) =>
+    bake(job.w, job.h, (ctx) => {
+      job.paint(ctx)
+      outline(ctx, job.w, job.h)
+    }),
+  )
+  return treeCache
+}
+
+export function treeProp(variant: number): HTMLCanvasElement {
+  const sheet = treeSheet()
+  return sheet[variant % TREE_SPRITES] ?? bake(8, 8, () => undefined)
+}
+
+function glyph(rows: string[]): HTMLCanvasElement {
+  const key = rows.join('|')
+  const cached = glyphCache.get(key)
+  if (cached) return cached
+  const width = rows.reduce((max, row) => Math.max(max, row.length), 0) + 2
+  const height = rows.length + 2
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    for (let y = 0; y < rows.length; y++) {
+      const row = rows[y] ?? ''
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x]
+        if (!ch || ch === ' ') continue
+        const color = SCRAP[ch]
+        if (color) dot(ctx, x + 1, y + 1, color)
+      }
+    }
+    outline(ctx, width, height)
+  }
+  glyphCache.set(key, canvas)
+  return canvas
+}
+
+const PARTS: Record<string, string[]> = {
+  pcb: ['GGGGGG', 'GaaaGG', 'GGGGGG'],
+  crt: ['SSSSS', 'SsssS', 'SsssS', 'MMMMM'],
+  lcd: ['ssss', 'sSSs', 'MMMM'],
+  keys: ['kkkkkk', 'KKKKKK'],
+  hdd: ['MMMM', 'MmmM'],
+  fan: [' MMM ', 'M m M', 'MmmMM', 'M m M', ' MMM '],
+  can: ['TTT', 'TtT', 'TtT', 'TTT'],
+  cap: ['cc', 'CC', 'CC'],
+  wire: ['WW ', ' WW', 'W W'],
+  box: ['LLLL', 'LmmL', 'LLLL'],
+  bit: ['GG', 'Ga'],
+}
+
+type Pile = { id: string; x: number; y: number; level: number }
+
+const PILES: Pile[][] = [
+  [
+    { id: 'wire', x: 1, y: 12, level: 1 },
+    { id: 'can', x: 16, y: 11, level: 1 },
+    { id: 'cap', x: 6, y: 13, level: 1 },
+    { id: 'bit', x: 19, y: 13, level: 1 },
+    { id: 'keys', x: 7, y: 9, level: 2 },
+    { id: 'hdd', x: 14, y: 10, level: 2 },
+    { id: 'crt', x: 3, y: 5, level: 3 },
+    { id: 'pcb', x: 11, y: 7, level: 3 },
+    { id: 'fan', x: 8, y: 1, level: 4 },
+    { id: 'box', x: 16, y: 3, level: 4 },
+  ],
+  [
+    { id: 'wire', x: 2, y: 13, level: 1 },
+    { id: 'can', x: 15, y: 12, level: 1 },
+    { id: 'bit', x: 1, y: 11, level: 1 },
+    { id: 'keys', x: 5, y: 10, level: 2 },
+    { id: 'box', x: 13, y: 9, level: 2 },
+    { id: 'lcd', x: 4, y: 6, level: 3 },
+    { id: 'hdd', x: 12, y: 7, level: 3 },
+    { id: 'crt', x: 7, y: 2, level: 4 },
+    { id: 'pcb', x: 15, y: 4, level: 4 },
+  ],
+  [
+    { id: 'cap', x: 2, y: 12, level: 1 },
+    { id: 'wire', x: 8, y: 13, level: 1 },
+    { id: 'can', x: 16, y: 12, level: 1 },
+    { id: 'hdd', x: 4, y: 9, level: 2 },
+    { id: 'keys', x: 11, y: 10, level: 2 },
+    { id: 'fan', x: 6, y: 4, level: 3 },
+    { id: 'pcb', x: 13, y: 6, level: 3 },
+    { id: 'lcd', x: 3, y: 2, level: 4 },
+    { id: 'box', x: 14, y: 2, level: 4 },
+  ],
+  [
+    { id: 'wire', x: 1, y: 11, level: 1 },
+    { id: 'can', x: 6, y: 12, level: 1 },
+    { id: 'can', x: 16, y: 12, level: 1 },
+    { id: 'cap', x: 12, y: 13, level: 1 },
+    { id: 'bit', x: 19, y: 11, level: 1 },
+    { id: 'box', x: 8, y: 9, level: 2 },
+    { id: 'hdd', x: 3, y: 8, level: 2 },
+    { id: 'crt', x: 5, y: 4, level: 3 },
+    { id: 'keys', x: 13, y: 7, level: 3 },
+    { id: 'pcb', x: 12, y: 1, level: 4 },
+    { id: 'fan', x: 4, y: 1, level: 4 },
+  ],
+]
+
+function paintPile(variant: number, level: number): HTMLCanvasElement {
+  const places = PILES[variant] ?? PILES[0] ?? []
+  return bake(24, 18, (ctx) => {
+    shadeOval(ctx, 12, 15, 8, 1.8)
+    for (let y = 12; y <= 15; y++) {
+      const inset = y === 12 ? 6 : y === 13 ? 4 : 2
+      for (let x = inset; x < 24 - inset; x++) dot(ctx, x, y, y > 13 ? '#22241e' : '#34382f')
+    }
+    outline(ctx, 24, 18)
+    for (const place of places) {
+      if (place.level > level) continue
+      const rows = PARTS[place.id]
+      if (!rows) continue
+      ctx.drawImage(glyph(rows), place.x, place.y)
+    }
+  })
+}
+
+function pileSheet(): HTMLCanvasElement[][] {
+  if (oreCache) return oreCache
+  oreCache = []
+  for (let variant = 0; variant < ORE_SPRITES; variant++) {
+    const row: HTMLCanvasElement[] = []
+    for (let level = 1; level <= ORE_LEVELS; level++) row.push(paintPile(variant, level))
+    oreCache.push(row)
+  }
+  return oreCache
+}
+
+export function oreProp(variant: number, level: number): HTMLCanvasElement {
+  const row = pileSheet()[variant % ORE_SPRITES]
+  const index = Math.max(1, Math.min(ORE_LEVELS, level)) - 1
+  return row?.[index] ?? paintPile(0, 4)
+}
+
+/** Static portrait for the Dumps selection panel. */
+export function dumpsPortraitUrl(): string {
+  if (typeof document === 'undefined') return ''
+  if (dumpsIcon) return dumpsIcon
+  const sprite = oreProp(0, 4)
+  const out = document.createElement('canvas')
+  out.width = 40
+  out.height = 40
+  const ctx = out.getContext('2d')
+  if (!ctx) return ''
+  ctx.imageSmoothingEnabled = false
+  const scale = Math.min(36 / sprite.width, 36 / sprite.height)
+  const dw = Math.round(sprite.width * scale)
+  const dh = Math.round(sprite.height * scale)
+  ctx.drawImage(sprite, (40 - dw) / 2, (40 - dh) / 2 + 1, dw, dh)
+  dumpsIcon = out.toDataURL()
+  return dumpsIcon
+}
+
+function crackStage(ratio: number): number {
+  if (ratio > 0.82) return 0
+  if (ratio > 0.55) return 1
+  if (ratio > 0.3) return 2
+  return 3
+}
+
+function pileLevel(amount: number, full: number): number {
+  const ratio = full > 0 ? amount / full : 1
+  if (ratio > 0.72) return 4
+  if (ratio > 0.48) return 3
+  if (ratio > 0.22) return 2
+  return 1
+}
+
+export function drawRockSprite(
+  ctx: CanvasRenderingContext2D,
+  tx: number,
+  ty: number,
+  seed: number,
+  hpRatio = 1,
+): void {
   const index = Math.floor(hash2(tx + 3, ty + 9, seed) * ROCK_SPRITES) % ROCK_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  ctx.drawImage(sprite, tx * TILE - 6, ty * TILE - 6)
+  const sprite = rockProp(index, crackStage(hpRatio))
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(sprite, tx * TILE + (TILE - sprite.width) / 2, ty * TILE + TILE - sprite.height + 2)
 }
 
 export function drawTreeSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = treeSprites()
   const index = Math.floor(hash2(tx + 11, ty + 4, seed) * TREE_SPRITES) % TREE_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  ctx.drawImage(sprite, tx * TILE - 8, ty * TILE - 22)
+  const sprite = treeProp(index)
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(sprite, tx * TILE + (TILE - sprite.width) / 2, ty * TILE + TILE - sprite.height + 8)
 }
 
 export function drawOreSprite(
@@ -428,17 +803,10 @@ export function drawOreSprite(
     ctx.stroke()
     ctx.restore()
   }
-  const sheet = oreSprites()
   const index = Math.floor(hash2(tx + 5, ty + 2, seed + 3) * ORE_SPRITES) % ORE_SPRITES
-  const sprite = sheet[index]
-  if (!sprite) return
-  const ratio = full > 0 ? Math.max(0.15, Math.min(1, amount / full)) : 1
-  const scale = 0.68 + 0.32 * ratio
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.scale(scale, scale)
-  ctx.drawImage(sprite, -20, -22)
-  ctx.restore()
+  const sprite = oreProp(index, pileLevel(amount, full))
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(sprite, x - sprite.width / 2, y - sprite.height / 2 + 6)
 }
 
 function fade(dist: number): number {
