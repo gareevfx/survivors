@@ -301,6 +301,9 @@ export function makeBuilding(
     alert: 0,
     focusId: null,
     focusKind: null,
+    stock: 0,
+    struckBy: null,
+    dropDumps: false,
   }
   state.buildings.push(building)
   return building

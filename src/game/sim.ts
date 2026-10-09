@@ -113,6 +113,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   if (order.type === 'attackMove') {
     let focus =
       order.focusId != null && order.focusKind ? getTarget(state, order.focusId, order.focusKind) : null
+    if (focus && coveredStalkerTarget(state, focus)) focus = null
     if (focus && (!isAttackable(unit, focus) || dist(unit, focus) > CHASE_BREAK)) focus = null
     if (!focus) {
       order.focusId = null
@@ -223,6 +224,10 @@ function dist(unit: Unit, focus: Target): number {
 }
 
 function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { type: 'gather' }>): void {
+  if (order.binId != null) {
+    refreshBinGather(state, unit, order)
+    return
+  }
   const node = state.ore.find((entry) => entry.id === order.nodeId) ?? null
   if ((!node || node.amount <= 0) && unit.cargo <= 0) {
     if (order.phase !== 'return') {
@@ -277,20 +282,48 @@ function refreshGather(state: MatchState, unit: Unit, order: Extract<Order, { ty
     return
   }
 
-  const keep = nearestCompleteKeep(state, unit.owner, unit.x, unit.y)
-  if (!keep) {
-    stopMoving(unit)
+  approachDropoff(state, unit)
+}
+
+function refreshBinGather(state: MatchState, unit: Unit, order: Extract<Order, { type: 'gather' }>): void {
+  const bin = order.binId != null ? buildingById(state, order.binId) : undefined
+  const open = !!bin && bin.hp > 0 && bin.kind === 'silo' && bin.owner !== unit.owner && bin.stock > 0
+  if (order.phase === 'mine') {
+    if (!open || !bin || distToRect(unit.x, unit.y, buildingRect(bin)) > INTERACT) {
+      order.phase = 'approach'
+      stopMoving(unit)
+    } else {
+      stopMoving(unit)
+      const center = buildingCenter(bin)
+      unit.facing = Math.atan2(center.y - unit.y, center.x - unit.x)
+    }
     return
   }
-  if (distToRect(unit.x, unit.y, buildingRect(keep)) <= INTERACT) {
-    stopMoving(unit)
+  if (order.phase === 'approach') {
+    if (unit.cargo > 0) {
+      order.phase = 'return'
+      stopMoving(unit)
+      return
+    }
+    if (!open || !bin) {
+      unit.order = null
+      stopMoving(unit)
+      return
+    }
+    if (distToRect(unit.x, unit.y, buildingRect(bin)) <= INTERACT) {
+      order.phase = 'mine'
+      unit.gatherTimer = 0
+      stopMoving(unit)
+      return
+    }
+    if (unit.goalX == null) {
+      const stats = BUILDING_STATS.silo
+      const spot = nearestParking(state, bin.tx, bin.ty, stats.w, stats.h, unit.x, unit.y)
+      if (spot) setUnitDestination(state, unit, spot.x, spot.y)
+    }
     return
   }
-  if (unit.goalX == null) {
-    const stats = BUILDING_STATS.keep
-    const spot = nearestParking(state, keep.tx, keep.ty, stats.w, stats.h, unit.x, unit.y)
-    if (spot) setUnitDestination(state, unit, spot.x, spot.y)
-  }
+  approachDropoff(state, unit)
 }
 
 function refreshConstruct(state: MatchState, unit: Unit, order: Extract<Order, { type: 'construct' }>): void {
@@ -342,11 +375,12 @@ function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
   stopMoving(unit)
 }
 
-function nearestCompleteKeep(state: MatchState, owner: number, x: number, y: number): Building | null {
+function nearestDropoff(state: MatchState, owner: number, x: number, y: number): Building | null {
   let best: Building | null = null
   let bestD = Infinity
   for (const building of state.buildings) {
-    if (building.owner !== owner || building.kind !== 'keep' || !building.complete || building.hp <= 0) continue
+    if (building.owner !== owner || !building.complete || building.hp <= 0) continue
+    if (building.kind !== 'keep' && building.kind !== 'silo') continue
     const center = buildingCenter(building)
     const d = (center.x - x) ** 2 + (center.y - y) ** 2
     if (d < bestD) {
@@ -355,6 +389,23 @@ function nearestCompleteKeep(state: MatchState, owner: number, x: number, y: num
     }
   }
   return best
+}
+
+function approachDropoff(state: MatchState, unit: Unit): void {
+  const drop = nearestDropoff(state, unit.owner, unit.x, unit.y)
+  if (!drop) {
+    stopMoving(unit)
+    return
+  }
+  if (distToRect(unit.x, unit.y, buildingRect(drop)) <= INTERACT) {
+    stopMoving(unit)
+    return
+  }
+  if (unit.goalX == null) {
+    const stats = BUILDING_STATS[drop.kind]
+    const spot = nearestParking(state, drop.tx, drop.ty, stats.w, stats.h, unit.x, unit.y)
+    if (spot) setUnitDestination(state, unit, spot.x, spot.y)
+  }
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
@@ -574,6 +625,10 @@ function advanceGather(state: MatchState, dt: number): void {
   for (const unit of state.units) {
     const order = unit.order
     if (!order || order.type !== 'gather') continue
+    if (order.binId != null) {
+      advanceBinGather(state, unit, order, dt)
+      continue
+    }
     if (order.phase === 'mine') {
       const node = state.ore.find((entry) => entry.id === order.nodeId)
       if (!node || node.amount <= 0) continue
@@ -596,25 +651,56 @@ function advanceGather(state: MatchState, dt: number): void {
       continue
     }
     if (order.phase !== 'return' || unit.cargo <= 0) continue
-    const keep = nearestCompleteKeep(state, unit.owner, unit.x, unit.y)
-    if (!keep) continue
-    if (distToRect(unit.x, unit.y, buildingRect(keep)) > INTERACT) continue
-    state.oreHeld[unit.owner] += unit.cargo
-    if (unit.owner === 0) state.tutorial = false
-    state.particles.push({
-      x: unit.x,
-      y: unit.y - 18,
-      vx: 0,
-      vy: -28,
-      life: 1.15,
-      max: 1.15,
-      r: 0,
-      color: '#ffe7a0',
-      text: `+${unit.cargo}`,
-    })
-    unit.cargo = 0
-    assignMiners(state, [unit], order.nodeId)
+    deliverCargo(state, unit, order)
   }
+}
+
+function advanceBinGather(
+  state: MatchState,
+  unit: Unit,
+  order: Extract<Order, { type: 'gather' }>,
+  dt: number,
+): void {
+  if (order.phase === 'mine') {
+    const bin = order.binId != null ? buildingById(state, order.binId) : undefined
+    if (!bin || bin.hp <= 0 || bin.kind !== 'silo' || bin.stock <= 0 || bin.owner === unit.owner) return
+    if (unit.hurtTimer > 0 && nearestHostile(state, unit, UNIT_STATS.porter.range + 12, false)) return
+    unit.gatherTimer += dt
+    if (unit.gatherTimer < GATHER_TIME) return
+    const take = Math.min(GATHER_AMOUNT, bin.stock)
+    bin.stock -= take
+    const bank = state.oreHeld[bin.owner] ?? 0
+    state.oreHeld[bin.owner] = Math.max(0, bank - take)
+    unit.cargo = take
+    unit.gatherTimer = 0
+    order.phase = 'return'
+    stopMoving(unit)
+    return
+  }
+  if (order.phase === 'return' && unit.cargo > 0) deliverCargo(state, unit, order)
+}
+
+function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { type: 'gather' }>): void {
+  const drop = nearestDropoff(state, unit.owner, unit.x, unit.y)
+  if (!drop) return
+  if (distToRect(unit.x, unit.y, buildingRect(drop)) > INTERACT) return
+  if (drop.kind === 'silo') drop.stock += unit.cargo
+  state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + unit.cargo
+  if (unit.owner === 0) state.tutorial = false
+  state.particles.push({
+    x: unit.x,
+    y: unit.y - 18,
+    vx: 0,
+    vy: -28,
+    life: 1.15,
+    max: 1.15,
+    r: 0,
+    color: '#ffe7a0',
+    text: `+${unit.cargo}`,
+  })
+  const resume = order.binId != null ? null : order.nodeId
+  unit.cargo = 0
+  assignMiners(state, [unit], resume)
 }
 
 function advanceConstruct(state: MatchState, dt: number): void {
@@ -884,6 +970,7 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
 /** True when this enemy is inside the Tower's own sight, currently visible, and not behind rock or a tree. */
 function towerEngages(state: MatchState, building: Building, origin: { x: number; y: number }, target: Target): boolean {
   if (target.hp <= 0 || target.owner === building.owner || target.targetKind === 'rock') return false
+  if (coveredStalkerTarget(state, target)) return false
   if (!targetInTowerSight(state, building, origin, target)) return false
   return shotClear(state, origin.x, origin.y, target.x, target.y)
 }
@@ -961,6 +1048,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   for (const other of state.units) {
     if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
+    if (other.kind === 'porter' && stalkerCovered(state, other)) continue
     const d = Math.hypot(other.x - unit.x, other.y - unit.y)
     if (d < bestD) {
       bestD = d
@@ -1023,26 +1111,29 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     if (!unit || unit.hp <= 0) return
     const source = unitById(state, sourceId)
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
+    if (unit.kind === 'porter') {
+      const attacker = source?.owner ?? sourceBuilding?.owner
+      if (attacker == null || attacker === unit.owner || stalkerCovered(state, unit)) return
+      captureStalker(state, unit, attacker)
+      return
+    }
     if (unit.kind === 'drone' && source?.kind === 'howler') return
     const bikeShot = source?.kind === 'pike' || sourceBuilding?.kind === 'tower'
     const dealt = unit.kind === 'drone' && bikeShot ? damage / 2 : damage
     unit.hp -= dealt
     unit.hitFlash = 0.16
     unit.hurtTimer = 3.2
-    if (unit.hp > 0 && unit.kind === 'porter' && !unit.order) {
-      const attacker = unitById(state, sourceId)
-      if (attacker && attacker.hp > 0) {
-        unit.order = { type: 'attack', targetId: attacker.id, kind: 'unit' }
-        unit.idleAcquire = true
-        unit.leashX = unit.x
-        unit.leashY = unit.y
-      }
-    }
     return
   }
   const building = buildingById(state, target.id)
   if (!building || building.hp <= 0) return
+  const attacker = attackerOwner(state, sourceId)
+  if (attacker != null) building.struckBy = attacker
   building.hp -= damage
+  if (building.hp <= 0) {
+    const source = unitById(state, sourceId)
+    building.dropDumps = source?.kind === 'pike' || source?.kind === 'howler'
+  }
   building.hitFlash = 0.18
   building.alert = 8
   if (building.owner === 0 && state.underAttackCd <= 0) {
@@ -1070,10 +1161,11 @@ function cleanup(state: MatchState): void {
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
     burst(state, center.x, center.y, sideTone(building.owner, '#9ec8de', '#e7a197', '#b7e0b4', '#d4c0ea'), 16)
-    for (const job of building.queue) state.oreHeld[building.owner] += UNIT_STATS[job.kind].cost
+    for (const job of building.queue) state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + UNIT_STATS[job.kind].cost
     if (!building.complete) {
-      state.oreHeld[building.owner] += Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
+      state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
     }
+    if (building.kind === 'silo' && building.dropDumps) dropStoragePile(state, building)
     for (const unit of state.units) {
       if (unit.order?.type === 'construct' && unit.order.buildingId === building.id) {
         unit.order = null
@@ -1087,12 +1179,14 @@ function cleanup(state: MatchState): void {
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
     state.events.push({ type: 'death' })
   }
+  const deadKeeps = deadBuildings.filter((building) => building.kind === 'keep')
   state.buildings = state.buildings.filter((building) => building.hp > 0)
   let removedSide = false
-  for (let owner = 1; owner < state.playerCount; owner++) {
-    const standing = state.buildings.some((building) => building.owner === owner && building.kind === 'keep')
-    if (standing || state.eliminated[owner]) continue
-    eliminateSide(state, owner)
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    if (state.eliminated[owner] || sideHasKeep(state, owner)) continue
+    const captor = captorFor(state, owner, deadKeeps)
+    if (captor == null) eliminateSide(state, owner)
+    else captureSide(state, owner, captor)
     removedSide = true
   }
   if (removedSide) recomputeSupply(state)
@@ -1113,6 +1207,166 @@ function sideTone(owner: number, first: string, second: string, third: string, f
   if (owner === 1) return second
   if (owner === 2) return third
   return fourth
+}
+
+/** A Stalker inside the sight of its own Silo, a Flasher, or a Gorilla cannot be captured. */
+function stalkerCovered(state: MatchState, unit: Unit): boolean {
+  for (const building of state.buildings) {
+    if (building.owner !== unit.owner || building.hp <= 0 || building.kind !== 'keep') continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - unit.x, center.y - unit.y) <= BUILDING_STATS.keep.sight) return true
+  }
+  for (const ally of state.units) {
+    if (ally.owner !== unit.owner || ally.hp <= 0 || ally.id === unit.id) continue
+    if (ally.kind !== 'pike' && ally.kind !== 'howler') continue
+    if (Math.hypot(ally.x - unit.x, ally.y - unit.y) <= UNIT_STATS[ally.kind].sight) return true
+  }
+  return false
+}
+
+function coveredStalkerTarget(state: MatchState, target: Target): boolean {
+  if (target.targetKind !== 'unit') return false
+  const unit = unitById(state, target.id)
+  return !!unit && unit.kind === 'porter' && stalkerCovered(state, unit)
+}
+
+function attackerOwner(state: MatchState, sourceId: number): number | null {
+  const unit = unitById(state, sourceId)
+  if (unit) return unit.owner
+  const building = buildingById(state, sourceId)
+  return building ? building.owner : null
+}
+
+function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
+  const previous = unit.owner
+  if (previous === newOwner) return
+  unit.owner = newOwner
+  unit.order = null
+  unit.idleAcquire = false
+  unit.scanning = false
+  unit.leashX = null
+  unit.leashY = null
+  stopMoving(unit)
+  state.selectedUnits = state.selectedUnits.filter((id) => {
+    const selected = unitById(state, id)
+    return !!selected && selected.owner === 0 && selected.hp > 0
+  })
+  for (const other of state.units) {
+    if (other.owner !== newOwner) continue
+    const order = other.order
+    if (order?.type === 'attack' && order.kind === 'unit' && order.targetId === unit.id) {
+      other.order = null
+      stopMoving(other)
+    }
+    if (order?.type === 'attackMove' && order.focusKind === 'unit' && order.focusId === unit.id) {
+      order.focusId = null
+      order.focusKind = null
+    }
+  }
+  recomputeSupply(state)
+  if (previous === 0) pushToast(state, 'A Stalker was captured.')
+  else if (newOwner === 0) pushToast(state, 'Stalker captured.')
+}
+
+function sideHasKeep(state: MatchState, owner: number): boolean {
+  return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+}
+
+function captorFor(state: MatchState, victim: number, deadKeeps: Building[]): number | null {
+  const fallen = deadKeeps.find((building) => building.owner === victim)
+  const struck = fallen?.struckBy
+  if (struck != null && struck !== victim && !state.eliminated[struck] && sideHasKeep(state, struck)) return struck
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    if (owner === victim || state.eliminated[owner]) continue
+    if (sideHasKeep(state, owner)) return owner
+  }
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    if (owner !== victim && !state.eliminated[owner]) return owner
+  }
+  return null
+}
+
+function captureSide(state: MatchState, victim: number, captor: number): void {
+  if (state.eliminated[victim]) return
+  state.eliminated[victim] = true
+  for (const building of state.buildings) {
+    if (building.owner !== victim || building.hp <= 0) continue
+    building.owner = captor
+    building.focusId = null
+    building.focusKind = null
+    building.alert = 0
+  }
+  const taken = new Set<number>()
+  for (const unit of state.units) {
+    if (unit.owner !== victim || unit.hp <= 0) continue
+    unit.owner = captor
+    unit.order = null
+    unit.idleAcquire = false
+    unit.scanning = false
+    unit.leashX = null
+    unit.leashY = null
+    stopMoving(unit)
+    taken.add(unit.id)
+  }
+  state.oreHeld[captor] = (state.oreHeld[captor] ?? 0) + (state.oreHeld[victim] ?? 0)
+  state.oreHeld[victim] = 0
+  state.selectedUnits = state.selectedUnits.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.owner === 0 && unit.hp > 0
+  })
+  if (state.selectedBuilding != null) {
+    const selected = buildingById(state, state.selectedBuilding)
+    if (!selected || selected.owner !== 0 || selected.hp <= 0) state.selectedBuilding = null
+  }
+  for (const unit of state.units) {
+    const order = unit.order
+    if (order?.type === 'attack' && order.kind === 'unit' && taken.has(order.targetId) && unit.owner === captor) {
+      unit.order = null
+      stopMoving(unit)
+    }
+    if (order?.type === 'attack' && order.kind === 'building') {
+      const building = buildingById(state, order.targetId)
+      if (building && building.owner === unit.owner) {
+        unit.order = null
+        stopMoving(unit)
+      }
+    }
+    if (order?.type === 'attackMove' && order.focusId != null && order.focusKind === 'unit' && taken.has(order.focusId)) {
+      order.focusId = null
+      order.focusKind = null
+    }
+    if (order?.type === 'construct') {
+      const site = buildingById(state, order.buildingId)
+      if (!site || site.owner !== unit.owner) {
+        unit.order = null
+        stopMoving(unit)
+      }
+    }
+  }
+  pushToast(state, `${PLAYER_NAME[victim] ?? 'A side'} is eliminated.`)
+}
+
+function dropStoragePile(state: MatchState, building: Building): void {
+  const amount = building.stock
+  if (amount <= 0) return
+  state.oreHeld[building.owner] = Math.max(0, (state.oreHeld[building.owner] ?? 0) - amount)
+  building.stock = 0
+  const stats = BUILDING_STATS[building.kind]
+  let spot: { tx: number; ty: number } | null = null
+  for (let y = 0; y < stats.h && !spot; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      const tx = building.tx + x
+      const ty = building.ty + y
+      if (state.ore.some((node) => node.tx === tx && node.ty === ty && node.amount > 0)) continue
+      spot = { tx, ty }
+      break
+    }
+  }
+  const cell = spot ?? { tx: building.tx, ty: building.ty }
+  state.tiles[cell.ty * state.mapW + cell.tx] = 0
+  const rock = state.rocks.find((entry) => entry.tx === cell.tx && entry.ty === cell.ty)
+  if (rock) rock.hp = 0
+  state.ore.push({ id: state.nextId++, tx: cell.tx, ty: cell.ty, amount })
 }
 
 function eliminateSide(state: MatchState, owner: number): void {
@@ -1235,8 +1489,8 @@ function workingInPlace(state: MatchState, unit: Unit): boolean {
   if (!order) return true
   if (order.type === 'gather' && order.phase === 'mine') return true
   if (order.type === 'gather' && order.phase === 'return') {
-    const keep = nearestCompleteKeep(state, unit.owner, unit.x, unit.y)
-    return !!keep && distToRect(unit.x, unit.y, buildingRect(keep)) <= INTERACT
+    const drop = nearestDropoff(state, unit.owner, unit.x, unit.y)
+    return !!drop && distToRect(unit.x, unit.y, buildingRect(drop)) <= INTERACT
   }
   if (order.type === 'construct') {
     const building = buildingById(state, order.buildingId)

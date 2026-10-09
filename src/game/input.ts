@@ -3,6 +3,7 @@ import {
   commandAttack,
   commandConstruct,
   commandGather,
+  commandHarvestOrAttack,
   commandMove,
   commandRally,
   commandStop,
@@ -174,7 +175,9 @@ function clearSelection(state: MatchState): void {
       if (touch && state.selectedUnits.length && touchHit?.type === 'building') {
         const building = buildingById(state, touchHit.id)
         if (building && building.owner !== 0) {
-          commandAttack(state, state.selectedUnits, touchHit.id, 'building')
+          if (!commandHarvestOrAttack(state, state.selectedUnits, touchHit.id)) {
+            commandAttack(state, state.selectedUnits, touchHit.id, 'building')
+          }
           return
         }
       }
@@ -277,7 +280,9 @@ function clearSelection(state: MatchState): void {
         }
       }
       if (building && building.owner !== 0) {
-        commandAttack(state, state.selectedUnits, hit.id, 'building')
+        if (!commandHarvestOrAttack(state, state.selectedUnits, hit.id)) {
+          commandAttack(state, state.selectedUnits, hit.id, 'building')
+        }
         return
       }
     }

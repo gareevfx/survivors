@@ -241,7 +241,104 @@ export function generateBattlefield(
     }
   }
 
+  widenPassages(tiles, ore, mapW, mapH, keepOre)
   return { tiles, ore }
+}
+
+/**
+ * A walkable cell with both sides blocked, and a walkable step along the corridor,
+ * is a one-tile passage. Open one blocking rock, tree, or dumps cell until every
+ * corridor is at least two tiles wide. Map edges count as walls. Rim dumps are
+ * opened only when nothing else will break the pinch.
+ */
+function widenPassages(
+  tiles: Uint8Array,
+  ore: OreSpawn[],
+  mapW: number,
+  mapH: number,
+  keepOre: (tx: number, ty: number) => boolean,
+): void {
+  const oreAt = new Set<number>()
+  const syncOre = () => {
+    oreAt.clear()
+    for (const node of ore) oreAt.add(node.ty * mapW + node.tx)
+  }
+  syncOre()
+  const blocked = (tx: number, ty: number) => cellBlocked(tiles, oreAt, mapW, mapH, tx, ty)
+  let guard = 0
+  let changed = true
+  while (changed && guard++ < mapW * mapH) {
+    changed = false
+    for (let ty = 0; ty < mapH; ty++) {
+      for (let tx = 0; tx < mapW; tx++) {
+        if (blocked(tx, ty) || !isNarrowPassage(tx, ty, blocked)) continue
+        const left = blocked(tx - 1, ty)
+        const right = blocked(tx + 1, ty)
+        const up = blocked(tx, ty - 1)
+        const down = blocked(tx, ty + 1)
+        const options: Array<[number, number]> = []
+        if (left && right && (!up || !down)) options.push([tx - 1, ty], [tx + 1, ty])
+        if (up && down && (!left || !right)) options.push([tx, ty - 1], [tx, ty + 1])
+        const interior = options.filter(([x, y]) => x >= 0 && y >= 0 && x < mapW && y < mapH && blocked(x, y))
+        const preferred = interior.filter(([x, y]) => !keepOre(x, y))
+        const pick = (preferred[0] ?? interior[0])
+        if (!pick) continue
+        const [x, y] = pick
+        const index = y * mapW + x
+        tiles[index] = 0
+        if (oreAt.has(index)) {
+          const next = ore.filter((node) => node.tx !== x || node.ty !== y)
+          ore.length = 0
+          for (const node of next) ore.push(node)
+          syncOre()
+        }
+        changed = true
+      }
+    }
+  }
+}
+
+function cellBlocked(
+  tiles: Uint8Array,
+  oreAt: Set<number>,
+  mapW: number,
+  mapH: number,
+  tx: number,
+  ty: number,
+): boolean {
+  if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return true
+  const index = ty * mapW + tx
+  const tile = tiles[index] ?? 0
+  return tile === 1 || tile === 3 || oreAt.has(index)
+}
+
+function isNarrowPassage(tx: number, ty: number, blocked: (tx: number, ty: number) => boolean): boolean {
+  const left = blocked(tx - 1, ty)
+  const right = blocked(tx + 1, ty)
+  const up = blocked(tx, ty - 1)
+  const down = blocked(tx, ty + 1)
+  const along = left && right && (!up || !down)
+  const across = up && down && (!left || !right)
+  return along || across
+}
+
+/** Walkable cells that are still a one-tile corridor. Both match maps should report zero. */
+export function narrowPassageCount(
+  tiles: Uint8Array,
+  ore: ReadonlyArray<{ tx: number; ty: number }>,
+  mapW: number,
+  mapH: number,
+): number {
+  const oreAt = new Set(ore.map((node) => node.ty * mapW + node.tx))
+  const blocked = (tx: number, ty: number) => cellBlocked(tiles, oreAt, mapW, mapH, tx, ty)
+  let count = 0
+  for (let ty = 0; ty < mapH; ty++) {
+    for (let tx = 0; tx < mapW; tx++) {
+      if (blocked(tx, ty)) continue
+      if (isNarrowPassage(tx, ty, blocked)) count += 1
+    }
+  }
+  return count
 }
 
 /** Shared dump patches for the 80×50 field. The last row sits in the extra southern ground, clear of the corner yards. */

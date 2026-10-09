@@ -1,7 +1,7 @@
 import { DRONE_BIKE_AVOID, scoutArea, updateAi } from './game/ai'
 import { runCommand } from './game/console'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
-import { CASTLE_YARD } from './game/map'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
+import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1445,7 +1445,7 @@ function fogAndGodModeTurnOff(): void {
   }
   carveGround(state, open)
   rebuildBlocked(state)
-  const worker = makeUnit(state, 0, 'porter', 14.5 * TILE, 10.5 * TILE)
+  const worker = makeUnit(state, 0, 'pike', 14.5 * TILE, 10.5 * TILE)
   const foe = makeUnit(state, 1, 'pike', worker.x + 28, worker.y)
   assert(runCommand(state, 'God Mode'), 'God Mode was rejected')
   commandAttack(state, [foe.id], worker.id, 'unit')
@@ -1976,7 +1976,180 @@ diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
+captureHarvestAndPassages()
 console.log('smoke ok')
+
+function captureHarvestAndPassages(): void {
+  assert(TREE_HP === 28 && ROCK_HP === 56, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
+  for (let seed = 1; seed <= 8; seed++) {
+    for (const mode of ['duel', 'ffa'] as const) {
+      const field = createMatch(seed, mode)
+      const gaps = narrowPassageCount(field.tiles, field.ore, field.mapW, field.mapH)
+      assert(gaps === 0, `${mode} seed ${seed} left ${gaps} one-tile passages`)
+    }
+  }
+
+  const open = createMatch(4)
+  const stalker = makeUnit(open, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  const pike = makeUnit(open, 0, 'pike', stalker.x + 18, stalker.y)
+  commandAttack(open, [pike.id], stalker.id, 'unit')
+  for (let i = 0; i < 40; i++) step(open, 1 / 60)
+  const taken = unitById(open, stalker.id)
+  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
+  assert(open.toasts.some((toast) => toast.text === 'Stalker captured.'), 'no stalker capture toast')
+
+  const home = createMatch(4)
+  const enemyKeep = home.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemyKeep, 'missing the covered stalker silo')
+  const homeCenter = buildingCenter(enemyKeep)
+  const guarded = makeUnit(home, 1, 'porter', homeCenter.x, homeCenter.y + 70)
+  const shooter = makeUnit(home, 0, 'pike', guarded.x + 16, guarded.y)
+  commandAttack(home, [shooter.id], guarded.id, 'unit')
+  for (let i = 0; i < 40; i++) step(home, 1 / 60)
+  const still = unitById(home, guarded.id)
+  assert(still?.owner === 1 && still.hp === UNIT_STATS.porter.hp, `a covered stalker changed (${still?.owner}, ${still?.hp})`)
+
+  const far = createMatch(4)
+  const lone = makeUnit(far, 1, 'porter', 40.5 * TILE, 24.5 * TILE)
+  makeUnit(far, 1, 'pike', lone.x + 40, lone.y)
+  const foe = makeUnit(far, 0, 'pike', lone.x - 18, lone.y)
+  commandAttack(far, [foe.id], lone.id, 'unit')
+  for (let i = 0; i < 40; i++) step(far, 1 / 60)
+  const safe = unitById(far, lone.id)
+  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, 'a friendly flasher did not keep the stalker')
+
+  const dump = createMatch(2)
+  const worker = dump.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  const playerKeep = dump.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(worker && playerKeep, 'missing a stalker to drop dumps')
+  const bin = makeBuilding(dump, 0, 'silo', 20, 20, true)
+  worker.x = (bin.tx + 1) * TILE
+  worker.y = (bin.ty + 2) * TILE + 8
+  worker.cargo = 8
+  worker.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  const bank = dump.oreHeld[0]
+  step(dump, 1 / 30)
+  assert(bin.stock === 8, `storage did not take the load (${bin.stock})`)
+  assert(dump.oreHeld[0] === bank + 8, `the bank did not take the load (${dump.oreHeld[0]})`)
+  bin.stock = 30
+  dump.oreHeld[0] = 100
+  assert(tryTrain(dump, playerKeep.id, 'porter') === null, 'the silo rejected a stalker paid from storage')
+  assert(bin.stock === 0, `spending left ${bin.stock} dumps in storage`)
+  assert(dump.oreHeld[0] === 50, `spending left ${dump.oreHeld[0]} dumps in the bank`)
+
+  const raid = createMatch(3)
+  raid.aiAcc = -10
+  const enemyBin = makeBuilding(raid, 1, 'silo', 30, 22, true)
+  enemyBin.stock = 20
+  raid.oreHeld[1] = 100
+  const thief = raid.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(thief, 'missing a thief')
+  thief.x = (enemyBin.tx + 1) * TILE
+  thief.y = (enemyBin.ty + 2) * TILE + 8
+  thief.cargo = 0
+  thief.order = null
+  assert(commandHarvestOrAttack(raid, [thief.id], enemyBin.id), 'stalkers did not haul from the enemy storage')
+  for (let i = 0; i < 80; i++) {
+    step(raid, 1 / 30)
+    if ((unitById(raid, thief.id)?.cargo ?? 0) > 0) break
+  }
+  const loaded = unitById(raid, thief.id)
+  assert(loaded?.cargo === GATHER_AMOUNT, `stolen cargo was ${loaded?.cargo}`)
+  assert(enemyBin.stock === 20 - GATHER_AMOUNT, `storage kept ${enemyBin.stock}`)
+  assert(raid.oreHeld[1] === 100 - GATHER_AMOUNT, `the victim bank is ${raid.oreHeld[1]}`)
+
+  const smash = createMatch(3)
+  smash.aiAcc = -10
+  const victimKeep = smash.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(victimKeep, 'missing a storage site')
+  const vault = makeBuilding(smash, 1, 'silo', victimKeep.tx + 4, victimKeep.ty, true)
+  vault.stock = 30
+  vault.hp = 10
+  smash.oreHeld[1] = 80
+  const vaultCenter = buildingCenter(vault)
+  const ape = makeUnit(smash, 0, 'howler', vaultCenter.x, vaultCenter.y + 60)
+  commandAttack(smash, [ape.id], vault.id, 'building')
+  for (let i = 0; i < 90; i++) {
+    step(smash, 1 / 60)
+    if (!smash.buildings.some((building) => building.id === vault.id)) break
+  }
+  assert(!smash.buildings.some((building) => building.id === vault.id), 'the gorilla left the storage standing')
+  assert(smash.ore.some((node) => node.amount === 30), 'the gorilla left no dumps pile')
+  assert(smash.oreHeld[1] === 50, `the pile did not leave the bank (${smash.oreHeld[1]})`)
+
+  const zap = createMatch(3)
+  zap.aiAcc = -10
+  const homeKeep = zap.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(homeKeep, 'missing the pillar yard')
+  const box = makeBuilding(zap, 1, 'silo', homeKeep.tx + 4, homeKeep.ty, true)
+  box.stock = 15
+  box.hp = 1
+  zap.oreHeld[1] = 40
+  makeBuilding(zap, 0, 'tower', homeKeep.tx + 6, homeKeep.ty, true)
+  rebuildBlocked(zap)
+  for (let i = 0; i < 180; i++) {
+    step(zap, 1 / 60)
+    if (!zap.buildings.some((building) => building.id === box.id)) break
+  }
+  assert(!zap.buildings.some((building) => building.id === box.id), 'the pillar left the storage standing')
+  assert(!zap.ore.some((node) => node.amount === 15), 'a pillar left a dumps pile')
+  assert(zap.oreHeld[1] === 40, `a pillar changed the bank to ${zap.oreHeld[1]}`)
+
+  const ffa = createMatch(5, 'ffa')
+  const fallen = ffa.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  const playerUnit = ffa.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(fallen && playerUnit, 'missing a free-for-all silo to capture')
+  const victimOre = ffa.oreHeld[2] ?? 0
+  const captorOre = ffa.oreHeld[1] ?? 0
+  const ids = ffa.units.filter((unit) => unit.owner === 2 && unit.hp > 0).map((unit) => unit.id)
+  const extra = makeBuilding(ffa, 2, 'silo', fallen.tx + 4, fallen.ty, true)
+  extra.stock = 11
+  fallen.hp = 6
+  const fallenCenter = buildingCenter(fallen)
+  const killer = makeUnit(ffa, 1, 'pike', fallenCenter.x, fallenCenter.y + 70)
+  const capturedId = ids[0]
+  assert(capturedId != null, 'the victim had no units')
+  ffa.selectedUnits = [playerUnit.id, capturedId]
+  commandAttack(ffa, [killer.id], fallen.id, 'building')
+  for (let i = 0; i < 90; i++) {
+    step(ffa, 1 / 60)
+    if (ffa.eliminated[2]) break
+  }
+  assert(ffa.eliminated[2], 'destroying the silo did not eliminate that side')
+  assert(ffa.outcome == null, 'one capture ended the free-for-all')
+  assert(!ffa.units.some((unit) => unit.owner === 2), 'captured units kept the loser')
+  assert(!ffa.buildings.some((building) => building.owner === 2), 'captured buildings kept the loser')
+  for (const id of ids) assert(unitById(ffa, id)?.owner === 1, 'a captured unit did not join the killer')
+  const moved = ffa.buildings.find((building) => building.id === extra.id)
+  assert(moved?.owner === 1 && moved.stock === 11, 'storage stock did not move with the building')
+  assert(ffa.oreHeld[1] === captorOre + victimOre, `dumps moved to ${ffa.oreHeld[1]}, expected ${captorOre + victimOre}`)
+  assert(ffa.oreHeld[2] === 0, 'the loser kept dumps')
+  assert(ffa.selectedUnits.includes(playerUnit.id), 'the player lost their own selection')
+  assert(!ffa.selectedUnits.includes(capturedId), 'a captured unit stayed in the player selection')
+  const sample = unitById(ffa, capturedId)
+  assert(sample, 'the captured unit disappeared')
+  assert(
+    sideTileVisible(ffa, 1, Math.floor(sample.x / TILE), Math.floor(sample.y / TILE)),
+    'the captor cannot see a unit it just took',
+  )
+  updateAi(ffa, 0.5)
+  assert(ffa.eliminated[2] && unitById(ffa, capturedId)?.owner === 1, 'AI gave the captured side back')
+
+  const duel = createMatch(2)
+  const enemy = duel.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing the 1v1 silo')
+  const enemyIds = duel.units.filter((unit) => unit.owner === 1 && unit.hp > 0).map((unit) => unit.id)
+  enemy.hp = 6
+  const enemyCenter = buildingCenter(enemy)
+  const finisher = makeUnit(duel, 0, 'pike', enemyCenter.x, enemyCenter.y + 70)
+  commandAttack(duel, [finisher.id], enemy.id, 'building')
+  for (let i = 0; i < 90; i++) {
+    step(duel, 1 / 60)
+    if (duel.outcome) break
+  }
+  assert(duel.outcome === 'win', `capturing the enemy silo did not win (${duel.outcome})`)
+  for (const id of enemyIds) assert(unitById(duel, id)?.owner === 0, '1v1 capture left units with the loser')
+}
 
 function bothModesUseAnEightyByFiftyMap(): void {
   const duel = createMatch(4)
@@ -2722,7 +2895,7 @@ function towerFitsInsideCastleSightAndShoots(): void {
   const tower = makeBuilding(fight, 0, 'tower', spot.tx, spot.ty, true)
   rebuildBlocked(fight)
   const origin = buildingCenter(tower)
-  const foe = makeUnit(fight, 1, 'porter', origin.x + 36, origin.y)
+  const foe = makeUnit(fight, 1, 'pike', origin.x + 36, origin.y)
   let drop = 0
   for (let i = 0; i < 120; i++) {
     const before = foe.hp
@@ -2874,7 +3047,7 @@ function towerFiresOutToItsSight(): void {
     rockShotClear(state.tiles, MAP_W, MAP_H, { tx: spot.tx, ty: spot.ty }, edge),
     'rock or a tree blocks the sight-edge shot',
   )
-  const far = makeUnit(state, 1, 'porter', (edge.tx + 0.5) * TILE, (edge.ty + 0.5) * TILE)
+  const far = makeUnit(state, 1, 'pike', (edge.tx + 0.5) * TILE, (edge.ty + 0.5) * TILE)
   const hidden = makeUnit(state, 1, 'porter', (beyond.tx + 0.5) * TILE, (beyond.ty + 0.5) * TILE)
   const behindRock = makeUnit(state, 1, 'porter', (sideTile.tx + 0.5) * TILE, (sideTile.ty + 0.5) * TILE)
   const behindTree = makeUnit(state, 1, 'porter', (otherSide.tx + 0.5) * TILE, (otherSide.ty + 0.5) * TILE)
@@ -2908,7 +3081,7 @@ function towerFiresOutToItsSight(): void {
   assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower shot an enemy outside its sight')
   assert(rock.hp === ROCK_HP && tree.hp === ROCK_HP, 'the Tower shot a rock or a tree')
   const near = tileAlong(2)
-  const closer = makeUnit(state, 1, 'porter', (near.tx + 0.5) * TILE, (near.ty + 0.5) * TILE)
+  const closer = makeUnit(state, 1, 'pike', (near.tx + 0.5) * TILE, (near.ty + 0.5) * TILE)
   const closerHp = closer.hp
   const farHp = far.hp
   for (let i = 0; i < 90; i++) {
@@ -2968,7 +3141,7 @@ function towerFiresOutToItsSight(): void {
   clearPad(state, foeSpot.tx - 1, foeSpot.ty - 1, foeEdge.tx, foeEdge.ty)
   clearPad(state, foeEdge.tx - 1, foeEdge.ty - 1, foeSpot.tx, foeSpot.ty)
   rebuildBlocked(state)
-  const victim = makeUnit(state, 0, 'porter', (foeEdge.tx + 0.5) * TILE, (foeEdge.ty + 0.5) * TILE)
+  const victim = makeUnit(state, 0, 'pike', (foeEdge.tx + 0.5) * TILE, (foeEdge.ty + 0.5) * TILE)
   const victimDist = Math.hypot(victim.x - foeOrigin.x, victim.y - foeOrigin.y)
   assert(victimDist > UNIT_STATS.pike.range && victimDist <= BUILDING_STATS.tower.sight, 'Dunmarch target is not at the sight edge')
   let foeDrop = 0

@@ -41,7 +41,10 @@ function noteOrder(state: MatchState, units: Unit[]): void {
 
 function depositOf(unit: Unit): number | null {
   const order = unit.order
-  if (order?.type === 'gather') return order.nodeId
+  if (order?.type === 'gather') {
+    if (order.binId != null) return null
+    return order.nodeId
+  }
   if (order?.type === 'attack' && order.kind === 'rock' && order.resumeNode != null) return order.resumeNode
   return null
 }
@@ -442,6 +445,52 @@ export function commandAttack(
   noteOrder(state, units)
 }
 
+/** Spend dumps, and draw the same amount out of Storage, richest pile first. */
+export function debitDumps(state: MatchState, owner: number, amount: number): void {
+  state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) - amount
+  let left = amount
+  const bins = state.buildings
+    .filter((building) => building.owner === owner && building.kind === 'silo' && building.hp > 0 && building.stock > 0)
+    .sort((a, b) => b.stock - a.stock)
+  for (const bin of bins) {
+    if (left <= 0) break
+    const take = Math.min(bin.stock, left)
+    bin.stock -= take
+    left -= take
+  }
+}
+
+/**
+ * Stalkers haul dumps out of an enemy Storage. Other selected units still attack it.
+ * Returns false when there is nothing to haul, so the caller can attack instead.
+ */
+export function commandHarvestOrAttack(state: MatchState, ids: number[], buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || building.kind !== 'silo' || building.stock <= 0) return false
+  const units = living(state, ids)
+  const porters = units.filter((unit) => unit.kind === 'porter' && unit.owner !== building.owner)
+  if (!porters.length) return false
+  const others = units.filter((unit) => !porters.includes(unit))
+  for (const unit of porters) {
+    noteProgress(unit)
+    unit.order = {
+      type: 'gather',
+      nodeId: -1,
+      phase: unit.cargo > 0 ? 'return' : 'approach',
+      binId: building.id,
+    }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    stopMoving(unit)
+  }
+  const center = buildingCenter(building)
+  state.pings.push({ x: center.x, y: center.y, life: 0.45, max: 0.45, color: '#e6c15a' })
+  noteOrder(state, porters)
+  if (others.length) commandAttack(state, others.map((unit) => unit.id), buildingId, 'building')
+  return true
+}
+
 export function commandGather(state: MatchState, ids: number[], nodeId: number): void {
   if (state.outcome || state.paused) return
   const node = state.ore.find((entry) => entry.id === nodeId && entry.amount > 0)
@@ -513,7 +562,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
     return 'Cells cap reached — raise a Storage'
   }
   if (building.queue.length >= 5) return 'Training queue is full'
-  state.oreHeld[building.owner] -= stats.cost
+  debitDumps(state, building.owner, stats.cost)
   building.queue.push({ kind, remaining: stats.trainTime, total: stats.trainTime })
   recomputeSupply(state)
   if (building.owner === 0) state.events.push({ type: 'build' })
@@ -585,7 +634,7 @@ export function tryPlace(
     crew = choices.slice(0, Math.min(2, choices.length))
   }
 
-  state.oreHeld[owner] -= stats.cost
+  debitDumps(state, owner, stats.cost)
   const building = makeBuilding(state, owner, kind, tx, ty, false)
   const center = buildingCenter(building)
   building.rallyX = center.x

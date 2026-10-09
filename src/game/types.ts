@@ -57,7 +57,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Stalker',
-    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch.',
+    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. One is captured only when it stands outside the sight of its own Silo, Flashers, and Gorillas.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -142,7 +142,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. If it falls, the field is lost.',
+    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -164,7 +164,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8.',
+    blurb: 'Raises the cells cap by 8. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
     w: 2,
     h: 2,
     hp: 400,
@@ -200,7 +200,7 @@ export type Order =
       focusKind: TargetKind | null
     }
   | { type: 'attack'; targetId: number; kind: TargetKind; resumeNode?: number }
-  | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return' }
+  | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return'; binId?: number }
   | { type: 'construct'; buildingId: number }
 
 export interface Unit {
@@ -268,6 +268,12 @@ export interface Building {
   /** Enemy the Tower is shooting. Kept until that enemy leaves sight or dies. */
   focusId: number | null
   focusKind: TargetKind | null
+  /** Dumps physically stored here. Spending draws the richest Storage down first. */
+  stock: number
+  /** Owner of the last hit. A fallen Silo is captured by this side when they still have one. */
+  struckBy: number | null
+  /** The killing blow was a Flasher or Gorilla, so a Storage leaves one dumps pile. */
+  dropDumps: boolean
 }
 
 export interface OreNode {

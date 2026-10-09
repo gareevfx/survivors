@@ -414,6 +414,7 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
+      ${building.kind === 'silo' ? `<p class="meta">${building.stock} dumps stored</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
@@ -437,7 +438,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
       <h2>New Ground</h2>
-      <p class="meta">${state.playerCount > 2 ? 'Destroy every enemy Silo.' : 'Destroy the enemy Silo.'} If your Silo falls, the field is lost. Stalkers mine the dumps beside your Silo first; after those run out they take the nearest patch a scout has revealed. Rocks, trees, and dumps block every ground unit. Trees have half the life of rock. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
+      <p class="meta">${state.playerCount > 2 ? 'Destroy every enemy Silo.' : 'Destroy the enemy Silo.'} The side that destroys a Silo takes that side's buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all the captured side is out and the fight goes on. If your Silo falls, the field is lost. Stalkers drop dumps at the nearest Silo or Storage, and they can haul dumps out of an enemy Storage. A Stalker cannot be destroyed. An enemy captures it only outside the sight of its own Silo, Flashers, and Gorillas. Rocks, trees, and dumps block every ground unit. Trees have half the life of rock. Passages are at least two tiles wide. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
     `
   }
   if (units.length === 1) {

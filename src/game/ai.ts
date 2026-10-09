@@ -326,6 +326,12 @@ function keepStands(state: MatchState, owner: PlayerId): boolean {
   return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
+/**
+ * Every computer side, and AI Control, shares this script.
+ * A side with no Silo is already eliminated, so it is skipped.
+ * Units and buildings captured with that Silo belong to the captor and are ordered here on the captor's turn.
+ * Covered Stalkers are not auto-targets; a hit captures one only outside its own Silo, Flasher, and Gorilla sight.
+ */
 export function updateAi(state: MatchState, dt: number): void {
   if (state.outcome) return
   state.aiAcc += dt
@@ -339,7 +345,7 @@ export function updateAi(state: MatchState, dt: number): void {
     state.sideAcc[owner] = 0
     if (!state.eliminated[owner] && keepStands(state, owner)) runSide(state, owner)
   }
-  if (!state.aiControl) return
+  if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0)) return
   state.playerAiAcc += dt
   if (state.playerAiAcc < 0.5) return
   state.playerAiAcc = 0
