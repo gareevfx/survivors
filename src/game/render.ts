@@ -572,9 +572,9 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   } else if (unit.kind === 'howler') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.36)'
     ctx.beginPath()
-    ctx.ellipse(2, 9, 16, 5.2, 0, 0, Math.PI * 2)
+    ctx.ellipse(1, 6, 9, 3.8, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.drawImage(gorillaSprite(unit), -36, -38)
+    ctx.drawImage(gorillaSprite(unit), -28, -30)
     if (unit.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
       ctx.beginPath()

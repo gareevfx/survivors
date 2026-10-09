@@ -2,21 +2,20 @@ import { facingBasis, facingDir } from './stalkerArt'
 import { PLAYER_COLOR, UNIT_STATS, type Unit } from './types'
 
 /**
- * Original Gorilla art: a tracked tank with a fixed turret.
- * The hull stays gray-olive. Team color is trim only. Sprites are cached.
+ * Original Gorilla art: a square tracked tank with a fixed turret.
+ * The hull is off-white. Team color is the secondary panels. Sprites are cached.
  * The gun is bolted to the hull facing and recoils after a shot.
  */
 
-const SIZE = 72
-const OX = 36
-const OY = 38
+const SIZE = 56
+const OX = 28
+const OY = 30
 
-const INK = '#14110e'
-const HULL = '#6d7264'
-const HULL_DARK = '#4c5148'
-const TRACK = '#2a2c28'
-const TRACK_SHOE = '#3c4038'
-const METAL = '#2e3330'
+const INK = '#2c3036'
+const WHITE = '#f4f1e8'
+const SHADE = '#d7d3c8'
+const TRACK = '#2a2c2a'
+const TRACK_SHOE = '#3a3e3a'
 
 const RECOIL_HOLD = 0.3
 const FLASH_HOLD = 0.12
@@ -71,7 +70,7 @@ export function gorillaPortraitUrl(owner: number): string {
   const ctx = canvas.getContext('2d')
   if (!ctx) return ''
   ctx.translate(20, 22)
-  ctx.scale(0.72, 0.72)
+  ctx.scale(1.15, 1.15)
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
   paintGorilla(ctx, 1, 0, false, false, teamColor(owner))
@@ -99,93 +98,87 @@ function paintGorilla(
 
   if (fy > 0) paintAntenna(ctx, at, frame, accent)
 
-  paintTrack(ctx, at, 6.4, frame, ang)
-  paintTrack(ctx, at, -6.4, frame, ang)
-
-  const hull = [
-    at(-8.4, 4.6),
-    at(5.6, 4.8),
-    at(10.2, 2.1),
-    at(10.2, -2.1),
-    at(5.6, -4.8),
-    at(-8.4, -4.6),
-  ]
+  const half = 6.8
+  const hull = [at(-half, -half), at(half, -half), at(half, half), at(-half, half)]
   trace(ctx, hull)
-  ctx.fillStyle = HULL
+  ctx.fillStyle = WHITE
   ctx.fill()
-  ctx.stroke()
-
-  const belly = [at(-6.2, 0.4), at(7.2, 0.2), at(8.4, 2.2), at(1.2, 3.4), at(-6.4, 2.6)]
-  trace(ctx, belly)
-  ctx.fillStyle = HULL_DARK
-  ctx.fill()
-
-  plate(ctx, at(-0.6, 5.15), 15.5, 1.55, ang, accent)
-  plate(ctx, at(-0.6, -5.15), 15.5, 1.55, ang, accent)
-
-  const stripeA = at(8.6, -2.4)
-  const stripeB = at(8.6, 2.4)
-  ctx.beginPath()
-  ctx.moveTo(stripeA.x, stripeA.y)
-  ctx.lineTo(stripeB.x, stripeB.y)
-  ctx.strokeStyle = accent
-  ctx.lineWidth = 2.2
-  ctx.stroke()
+  ctx.lineWidth = 1.5
   ctx.strokeStyle = INK
-  ctx.lineWidth = 1.15
   ctx.stroke()
 
-  plate(ctx, at(-5.8, 2.2), 3.4, 2.3, ang, accent)
-  const mark = at(-5.8, 2.2)
+  const shade = [at(-half, 0), at(half, 0), at(half, half), at(-half, half)]
+  trace(ctx, shade)
+  ctx.fillStyle = SHADE
+  ctx.fill()
+
+  paintTrack(ctx, at, half - 1.2, frame, ang, half * 2 - 1.4)
+  paintTrack(ctx, at, -(half - 1.2), frame, ang, half * 2 - 1.4)
+  trace(ctx, hull)
+  ctx.strokeStyle = INK
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+
   ctx.beginPath()
-  ctx.moveTo(mark.x - fx * 0.8, mark.y - fy * 0.8)
-  ctx.lineTo(mark.x + fx * 0.8, mark.y + fy * 0.8)
-  ctx.strokeStyle = '#1c201c'
+  const seamA = at(-half * 0.55, 0)
+  const seamB = at(half * 0.55, 0)
+  ctx.moveTo(seamA.x, seamA.y)
+  ctx.lineTo(seamB.x, seamB.y)
+  ctx.strokeStyle = '#5c6168'
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+
+  plate(ctx, at(0, half - 2.55), half * 1.7, 1.65, ang, accent)
+  plate(ctx, at(0, -(half - 2.55)), half * 1.7, 1.65, ang, accent)
+  plate(ctx, at(half - 1.2, 0), 2.15, half * 1.15, ang, accent)
+  plate(ctx, at(-half + 2.3, 0), 2.4, 2.4, ang, accent)
+
+  const turret = 3.15
+  const top = [at(-turret, -turret), at(turret, -turret), at(turret, turret), at(-turret, turret)]
+  trace(ctx, top)
+  ctx.fillStyle = WHITE
+  ctx.fill()
+  ctx.strokeStyle = INK
+  ctx.lineWidth = 1.35
+  ctx.stroke()
+  plate(ctx, at(0.15, 0), 1.55, turret * 2 - 0.4, ang, accent)
+  const hatch = at(-0.7, 0)
+  ctx.beginPath()
+  ctx.arc(hatch.x, hatch.y - 0.4, 1.15, 0, Math.PI * 2)
+  ctx.fillStyle = SHADE
+  ctx.fill()
+  ctx.strokeStyle = INK
   ctx.lineWidth = 1
   ctx.stroke()
 
-  const turret = [at(-3.4, 3.3), at(2.2, 3.5), at(4.4, 1.6), at(4.4, -1.6), at(2.2, -3.5), at(-3.4, -3.3)]
-  trace(ctx, turret)
-  ctx.fillStyle = '#5c6158'
-  ctx.fill()
-  ctx.strokeStyle = INK
-  ctx.lineWidth = 1.3
-  ctx.stroke()
-  const hatch = at(-0.4, 0)
-  ctx.beginPath()
-  ctx.arc(hatch.x, hatch.y - 0.6, 1.7, 0, Math.PI * 2)
-  ctx.fillStyle = '#3e433c'
-  ctx.fill()
-  ctx.stroke()
-
-  const recoil = firing ? -2.6 : 0
-  const breech = at(3.4 + recoil, 0)
-  const muzzle = at(15.2 + recoil, 0)
+  const recoil = firing ? -1.8 : 0
+  const breech = at(2.6 + recoil, 0)
+  const muzzle = at(10.4 + recoil, 0)
   ctx.beginPath()
   ctx.moveTo(breech.x, breech.y)
   ctx.lineTo(muzzle.x, muzzle.y)
-  ctx.strokeStyle = '#1c201c'
-  ctx.lineWidth = 3.5
+  ctx.strokeStyle = '#2a2e32'
+  ctx.lineWidth = 2.8
   ctx.stroke()
   ctx.strokeStyle = INK
-  ctx.lineWidth = 1
+  ctx.lineWidth = 0.9
   ctx.stroke()
-  const brakeA = at(13.4 + recoil, -1.45)
-  const brakeB = at(13.4 + recoil, 1.45)
+  const brakeA = at(9.2 + recoil, -1.15)
+  const brakeB = at(9.2 + recoil, 1.15)
   ctx.beginPath()
   ctx.moveTo(brakeA.x, brakeA.y)
   ctx.lineTo(brakeB.x, brakeB.y)
-  ctx.strokeStyle = '#141816'
-  ctx.lineWidth = 2.6
+  ctx.strokeStyle = '#24282c'
+  ctx.lineWidth = 2.2
   ctx.stroke()
   if (flash) {
-    const burst = at(16.6 + recoil, 0)
+    const burst = at(11.2 + recoil, 0)
     ctx.beginPath()
-    ctx.arc(burst.x, burst.y, 2.6, 0, Math.PI * 2)
+    ctx.arc(burst.x, burst.y, 2.15, 0, Math.PI * 2)
     ctx.fillStyle = '#fff6d0'
     ctx.fill()
     ctx.beginPath()
-    ctx.arc(burst.x + fx * 2.4, burst.y + fy * 2.4, 1.55, 0, Math.PI * 2)
+    ctx.arc(burst.x + fx * 2, burst.y + fy * 2, 1.3, 0, Math.PI * 2)
     ctx.fillStyle = '#ffb45c'
     ctx.fill()
   }
@@ -199,28 +192,27 @@ function paintTrack(
   side: number,
   frame: number,
   ang: number,
+  length: number,
 ): void {
-  plate(ctx, at(-0.2, side), 24.5, 5.5, ang, TRACK)
-  plate(ctx, at(-0.2, side), 22.2, 3.5, ang, TRACK_SHOE)
-  const shift = frame ? 2.05 : 0
-  for (let i = 0; i < 5; i++) {
-    const link = at(-8.2 + i * 4.15 + shift, side)
+  plate(ctx, at(0, side), length, 2.7, ang, TRACK)
+  plate(ctx, at(0, side), length - 1.2, 1.55, ang, TRACK_SHOE)
+  const shift = frame ? 1.45 : 0
+  const start = -length / 2 + 1.5
+  for (let i = 0; i < 4; i++) {
+    const link = at(start + i * 3.15 + shift, side)
     ctx.beginPath()
-    ctx.arc(link.x, link.y, 1.05, 0, Math.PI * 2)
-    ctx.fillStyle = '#171917'
+    ctx.arc(link.x, link.y, 0.75, 0, Math.PI * 2)
+    ctx.fillStyle = '#141614'
     ctx.fill()
-    ctx.strokeStyle = INK
-    ctx.lineWidth = 0.8
-    ctx.stroke()
   }
-  for (const forward of [-7.4, -2.4, 2.6, 7.4]) {
+  for (const forward of [-4.2, 0, 4.2]) {
     const wheel = at(forward, side)
     ctx.beginPath()
-    ctx.arc(wheel.x, wheel.y, 1.65, 0, Math.PI * 2)
-    ctx.fillStyle = '#8a8e86'
+    ctx.arc(wheel.x, wheel.y, 1.15, 0, Math.PI * 2)
+    ctx.fillStyle = '#8d918a'
     ctx.fill()
     ctx.strokeStyle = INK
-    ctx.lineWidth = 1
+    ctx.lineWidth = 0.9
     ctx.stroke()
   }
 }
@@ -231,12 +223,12 @@ function paintAntenna(
   frame: number,
   accent: string,
 ): void {
-  const sway = frame ? 2.1 : 0
-  const base = at(-4.2, 1.1)
-  const mid = at(-8.2, sway * 0.5)
-  const tip = at(-11.6, sway)
-  mid.y -= 3.1
-  tip.y -= 6.6
+  const sway = frame ? 1.6 : 0
+  const base = at(-3.4, 0.8)
+  const mid = at(-6.4, sway * 0.5)
+  const tip = at(-9.2, sway)
+  mid.y -= 2.4
+  tip.y -= 5.2
   ctx.beginPath()
   ctx.moveTo(base.x, base.y)
   ctx.quadraticCurveTo(mid.x, mid.y, tip.x, tip.y)
@@ -248,7 +240,7 @@ function paintAntenna(
   ctx.stroke()
   ctx.beginPath()
   ctx.arc(base.x, base.y, 1.05, 0, Math.PI * 2)
-  ctx.fillStyle = METAL
+  ctx.fillStyle = '#4a4e54'
   ctx.fill()
   ctx.strokeStyle = INK
   ctx.lineWidth = 1
