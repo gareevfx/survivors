@@ -4,7 +4,6 @@ import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { dumpsPortraitUrl } from '../game/terrainArt'
 import { buildingById, unitById } from '../game/state'
 import {
   BUILDING_STATS,
@@ -403,7 +402,7 @@ export function describeSelection(state: MatchState): string {
   if (ore && state.selectedUnits.length === 0) {
     return `
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
-      <h2>${dumpsPortraitUrl() ? `<img class="unit-icon" alt="" src="${dumpsPortraitUrl()}" />` : ''}Dumps</h2>
+      <h2>Dumps</h2>
       <p class="meta">${ore.amount} remaining</p>
     `
   }
