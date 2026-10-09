@@ -18,6 +18,7 @@ import {
   type MatchState,
   type UnitKind,
 } from '../game/types'
+import { loreBody } from './lore'
 
 export interface HudActions {
   armPlace: (kind: BuildingKind) => void
@@ -70,6 +71,8 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   if (supply) {
     supply.textContent = supplyText
     supply.classList.toggle('tight', state.supplyCap[0] - state.supplyUsed[0] <= 1)
+    const cells = supply.closest('.readout')
+    if (cells instanceof HTMLElement) cells.title = loreBody('Cells')
   }
   if (clock) clock.textContent = formatTime(state.time)
   const idleCount = state.units.filter(
@@ -399,8 +402,8 @@ export function describeSelection(state: MatchState): string {
       (unit) => unit.hp > 0 && unit.order?.type === 'construct' && unit.order.buildingId === building.id,
     )
     const status = !building.complete
-      ? `Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
-      : stats.blurb
+      ? ` · Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
+      : ''
     const portraitUrl =
       building.kind === 'keep'
         ? siloPortraitUrl(building.owner)
@@ -416,7 +419,8 @@ export function describeSelection(state: MatchState): string {
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
-      <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
+      <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
+      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} dumps stored</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
@@ -431,6 +435,7 @@ export function describeSelection(state: MatchState): string {
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
       <h2>Dumps</h2>
       <p class="meta">${ore.amount} remaining</p>
+      <p class="lore">${escapeHtml(loreBody('Dumps'))}</p>
     `
   }
 
@@ -441,7 +446,7 @@ export function describeSelection(state: MatchState): string {
     return `
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
       <h2>New Ground</h2>
-      <p class="meta">${state.playerCount > 2 ? 'Destroy every enemy Silo.' : 'Destroy the enemy Silo.'} The side that destroys a Silo takes that side's buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all the captured side is out and the fight goes on. If your Silo falls, the field is lost. Stalkers drop dumps at the nearest Silo or Storage, and they can haul dumps out of an enemy Storage. A Stalker cannot be destroyed. An enemy captures it only outside the sight of its own Silo, Flashers, and Gorillas. Rocks, trees, and dumps block every ground unit. Trees have half the life of rock. Passages are at least two tiles wide. Raise a Pillar inside Silo sight. It shoots the closest enemy in its own sight. Flashers and gorillas cannot break rock. A Hover flies and does not shoot.</p>
+      <p class="lore">${escapeHtml(loreBody('New Ground'))}</p>
     `
   }
   if (units.length === 1) {
@@ -465,7 +470,8 @@ export function describeSelection(state: MatchState): string {
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
-      <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp} · ${stats.blurb}</p>
+      <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
+      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `

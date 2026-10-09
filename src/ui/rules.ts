@@ -5,6 +5,7 @@ import {
   type BuildingKind,
   type UnitKind,
 } from '../game/types'
+import { LORE_ENTRIES } from './lore'
 
 const UNIT_ORDER: UnitKind[] = ['porter', 'drone', 'pike', 'howler']
 const BUILDING_ORDER: BuildingKind[] = ['keep', 'silo', 'yard', 'tower']
@@ -53,19 +54,7 @@ function buildingArticle(kind: BuildingKind): string {
   `
 }
 
-const LORE: Array<[string, string]> = [
-  ['New Ground', 'Uncharted territory; however, the remnants of old machinery and debris on the surface indicate that an advanced civilization once existed here.'],
-  ['Silo', 'A shelter housing people; it was clearly built a long time ago. This building serves as a training site for "Stalkers" and acts as a command center for construction operations.'],
-  ['Stalker', 'Shelter inhabitants retrained for surface operations. Their task is to scavenge valuable parts left over from the past from the piles of technical debris on the surface to use in future construction of machinery and buildings. Their lives are highly valued, and their protected status is widely recognized, though they can still be captured. They are also capable of traversing the terrain by clearing obstacles like rocks and trees from their path.'],
-  ['Dumps', 'The piles of technical debris found on the "New Ground" surface.'],
-  ['Cells', 'Storage units for processed, useful parts intended for future construction.'],
-  ['Storage', 'Buildings that house these storage cells. These can be placed near "Dumps" to facilitate rapid delivery by "Stalkers."'],
-  ['Pillar', 'A structure serving as both a wind turbine and a combat observation post. Its weapon-equipped tower helps fend off hostile intruders.'],
-  ['Factory', 'An automated facility for manufacturing combat and exploration robotics.'],
-  ['Flasher', 'A combat robot unit resembling an off-road motorcycle equipped with a cannon; its key feature is high-speed mobility.'],
-  ['Gorilla', 'A heavy combat robot (tank).'],
-  ['Hover', 'A flying robot primarily tasked with terrain exploration.'],
-]
+const LORE: Array<[string, string]> = LORE_ENTRIES.map((entry) => [entry.name, entry.body])
 
 function term(name: string): string {
   return `<b>"${escapeHtml(name)}"</b>`

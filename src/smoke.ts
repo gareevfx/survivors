@@ -893,7 +893,15 @@ function oreSelectionShowsAmount(): void {
   state.selectedUnits = [worker.id]
   const workerPanel = describeSelection(state)
   assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Stalker', 'selection does not say Stalker')
-  assert(workerPanel.includes('dumps'), 'stalker panel does not say dumps')
+  assert(workerPanel.includes('Shelter inhabitants retrained for surface operations'), 'stalker panel omitted its lore')
+  assert(workerPanel.includes(`${Math.ceil(worker.hp)} / ${UNIT_STATS.porter.hp}`), 'stalker panel dropped its health')
+  state.selectedUnits = []
+  state.selectedBuilding = null
+  state.selectedOre = null
+  const field = describeSelection(state)
+  assert(field.includes('<h2>New Ground</h2>'), 'empty panel lost the New Ground title')
+  assert(field.includes('Uncharted territory; however, the remnants of old machinery'), 'empty panel omitted the New Ground lore')
+  assert(!field.includes('Destroy the enemy Silo'), 'empty panel still shows the old rules paragraph')
   state.selectedUnits = []
   state.selectedOre = node.id
   node.amount = 80
