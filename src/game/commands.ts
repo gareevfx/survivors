@@ -456,7 +456,7 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
       y: (node.ty + 0.5) * TILE,
       life: 0.45,
       max: 0.45,
-      color: '#c6e24a',
+      color: '#e6c15a',
     })
     noteOrder(state, porters)
   }

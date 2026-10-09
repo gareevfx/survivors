@@ -579,7 +579,7 @@ function advanceGather(state: MatchState, dt: number): void {
       unit.nodeMemory = node.id
       unit.gatherTimer = 0
       if (node.amount <= 0) {
-        burst(state, (node.tx + 0.5) * TILE, (node.ty + 0.5) * TILE, '#c6e24a', 6)
+        burst(state, (node.tx + 0.5) * TILE, (node.ty + 0.5) * TILE, '#e6c15a', 6)
         if (state.selectedOre === node.id) state.selectedOre = null
         state.ore = state.ore.filter((entry) => entry.amount > 0)
         rebuildBlocked(state)
