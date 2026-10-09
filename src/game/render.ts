@@ -1,11 +1,12 @@
 import type { Camera } from './camera'
-import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
+import { buildingCenter, buildingRect, getTarget, placementAllowed, playerKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
+import { drawPillarSprite, pillarDamageStage } from './pillarArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -348,7 +349,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo') {
+  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo' && building.kind !== 'tower') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
     ctx.beginPath()
     ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
@@ -362,8 +363,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
 
   if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
   else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
-  else if (building.kind === 'tower')
-    drawTower(ctx, x, y, w, h, color, building.attackCd > UNIT_STATS.pike.cooldown - 0.18)
+  else if (building.kind === 'tower') drawTower(ctx, state, building, x, y, color)
   else drawStorage(ctx, state, building, x, y, color)
 
   if (building.hp < stats.hp) {
@@ -461,43 +461,33 @@ function drawYard(
 
 function drawTower(
   ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  building: Building,
   x: number,
   y: number,
-  w: number,
-  h: number,
   color: string,
-  firing: boolean,
 ): void {
-  ctx.fillStyle = '#4e4a43'
-  ctx.beginPath()
-  ctx.moveTo(x + 5, y + h - 4)
-  ctx.lineTo(x + w - 5, y + h - 4)
-  ctx.lineTo(x + w - 8, y + 14)
-  ctx.lineTo(x + 8, y + 14)
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillStyle = '#7a756c'
-  ctx.beginPath()
-  ctx.moveTo(x + 3, y + 16)
-  ctx.lineTo(x + w / 2, y + 3)
-  ctx.lineTo(x + w - 3, y + 16)
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillStyle = '#2a2723'
-  ctx.fillRect(x + w / 2 - 1, y + 11, 12, 3)
-  if (firing) {
-    ctx.fillStyle = '#ffe7a0'
-    ctx.beginPath()
-    ctx.arc(x + w / 2 + 12, y + 12, 3.2, 0, Math.PI * 2)
-    ctx.fill()
+  const stats = BUILDING_STATS.tower
+  const origin = buildingCenter(building)
+  let aim = Math.PI / 2
+  if (building.focusId != null && (building.focusKind === 'unit' || building.focusKind === 'building')) {
+    const target = getTarget(state, building.focusId, building.focusKind)
+    if (target) aim = Math.atan2(target.y - origin.y, target.x - origin.x)
   }
-  ctx.fillStyle = color
-  ctx.fillRect(x + w / 2 - 1, y + 1, 2, 8)
-  ctx.beginPath()
-  ctx.moveTo(x + w / 2 + 1, y + 1)
-  ctx.lineTo(x + w / 2 + 11, y + 4)
-  ctx.lineTo(x + w / 2 + 1, y + 7)
-  ctx.fill()
+  const cool = UNIT_STATS.pike.cooldown
+  const flash = building.complete && building.attackCd > cool - 0.18
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawPillarSprite(ctx, x, y, {
+    color,
+    stage: pillarDamageStage(building.hp, stats.hp),
+    spin: building.complete ? state.time * 2.6 : 0.4,
+    aim,
+    flash,
+  })
+  ctx.restore()
+  ctx.imageSmoothingEnabled = false
 }
 
 function drawStorage(
@@ -768,6 +758,18 @@ export function renderMinimap(
       ctx.lineWidth = Math.max(1, radius * 0.28)
       ctx.strokeStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.stroke()
+    } else if (building.kind === 'tower') {
+      const cx = ox + (building.tx + 0.5) * sx
+      const cy = oy + (building.ty + 0.5) * sy
+      const radius = Math.min(sx, sy) * 0.42
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+      ctx.fillStyle = '#8d939a'
+      ctx.fill()
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.beginPath()
+      ctx.arc(cx, cy, Math.max(0.8, radius * 0.38), 0, Math.PI * 2)
+      ctx.fill()
     } else {
       ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)

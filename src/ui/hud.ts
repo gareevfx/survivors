@@ -5,6 +5,7 @@ import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
 import { factoryPortraitUrl } from '../game/factoryArt'
 import { siloPortraitUrl } from '../game/siloArt'
+import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, unitById } from '../game/state'
@@ -340,7 +341,9 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
                 ? factoryPortraitUrl(0)
                 : cmd.id === 'place-silo'
                   ? storagePortraitUrl(0)
-                  : ''
+                  : cmd.id === 'place-tower'
+                    ? pillarPortraitUrl(0)
+                    : ''
     if (iconSrc) {
       const icon = document.createElement('img')
       icon.className = 'unit-icon'
@@ -402,7 +405,9 @@ export function describeSelection(state: MatchState): string {
           ? factoryPortraitUrl(building.owner)
           : building.kind === 'silo'
             ? storagePortraitUrl(building.owner)
-            : ''
+            : building.kind === 'tower'
+              ? pillarPortraitUrl(building.owner)
+              : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
