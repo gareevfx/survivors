@@ -1,5 +1,6 @@
 import type { Camera } from './camera'
 import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
+import { flasherSprite } from './flasherArt'
 import { stalkerSprite } from './stalkerArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -554,6 +555,19 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
       ctx.fill()
     }
     ctx.restore()
+  } else if (unit.kind === 'pike') {
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
+    ctx.beginPath()
+    ctx.ellipse(2, 8, 14, 4.6, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.drawImage(flasherSprite(unit), -32, -34)
+    if (unit.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
+      ctx.beginPath()
+      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
   } else {
   ctx.fillStyle = 'rgba(0,0,0,0.25)'
   ctx.beginPath()
@@ -563,25 +577,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   if (unit.kind === 'drone') ctx.translate(0, -8)
   ctx.rotate(unit.facing)
 
-  if (unit.kind === 'pike') {
-    ctx.strokeStyle = '#efe6cf'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(4, 0)
-    ctx.lineTo(16, 0)
-    ctx.stroke()
-    ctx.fillStyle = body
-    ctx.beginPath()
-    ctx.moveTo(10, 0)
-    ctx.lineTo(-8, -7)
-    ctx.lineTo(-5, 0)
-    ctx.lineTo(-8, 7)
-    ctx.closePath()
-    ctx.fill()
-    ctx.strokeStyle = ink
-    ctx.lineWidth = 1.3
-    ctx.stroke()
-  } else if (unit.kind === 'drone') {
+  if (unit.kind === 'drone') {
     ctx.strokeStyle = body
     ctx.lineWidth = 1.6
     ctx.beginPath()

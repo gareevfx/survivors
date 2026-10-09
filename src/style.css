@@ -382,7 +382,8 @@ button, canvas { font: inherit; }
 
 .cmd-label { display: block; font-size: 14px; }
 
-.stalker-icon {
+.stalker-icon,
+.unit-icon {
   width: 34px;
   height: 34px;
   display: inline-block;
@@ -390,7 +391,8 @@ button, canvas { font: inherit; }
   margin-right: 6px;
 }
 
-.cmd .stalker-icon {
+.cmd .stalker-icon,
+.cmd .unit-icon {
   float: left;
   margin: -2px 6px 2px 0;
 }

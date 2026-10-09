@@ -1,5 +1,6 @@
 import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/commands'
 import { toggleScanner } from '../game/scanner'
+import { flasherPortraitUrl } from '../game/flasherArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, unitById } from '../game/state'
 import {
@@ -321,11 +322,11 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'AI control is giving the orders' : cmd.title
-    if (cmd.id === 'train-porter') {
+    if (cmd.id === 'train-porter' || cmd.id === 'train-pike') {
       const icon = document.createElement('img')
-      icon.className = 'stalker-icon'
+      icon.className = 'unit-icon'
       icon.alt = ''
-      icon.src = stalkerPortraitUrl(0)
+      icon.src = cmd.id === 'train-pike' ? flasherPortraitUrl(0) : stalkerPortraitUrl(0)
       button.append(icon)
     }
     const label = document.createElement('span')
@@ -412,8 +413,9 @@ export function describeSelection(state: MatchState): string {
     const stats = UNIT_STATS[unit.kind]
     const pct = Math.max(0, unit.hp / stats.hp)
     const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} dumps.` : ''
-    const portraitUrl = unit.kind === 'porter' ? stalkerPortraitUrl(unit.owner) : ''
-    const portrait = portraitUrl ? `<img class="stalker-icon" alt="" src="${portraitUrl}" />` : ''
+    const portraitUrl =
+      unit.kind === 'porter' ? stalkerPortraitUrl(unit.owner) : unit.kind === 'pike' ? flasherPortraitUrl(unit.owner) : ''
+    const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
       <h2>${portrait}${stats.label}</h2>
@@ -427,8 +429,12 @@ export function describeSelection(state: MatchState): string {
   for (const unit of units) counts.set(UNIT_STATS[unit.kind].label, (counts.get(UNIT_STATS[unit.kind].label) ?? 0) + 1)
   const summary = [...counts.entries()].map(([label, count]) => `${count} ${label}${count > 1 ? 's' : ''}`).join(', ')
   const scanning = units.some((unit) => unit.scanning)
-  const groupPortrait = units.some((unit) => unit.kind === 'porter') ? stalkerPortraitUrl(0) : ''
-  const portrait = groupPortrait ? `<img class="stalker-icon" alt="" src="${groupPortrait}" />` : ''
+  const groupPortrait = units.some((unit) => unit.kind === 'porter')
+    ? stalkerPortraitUrl(0)
+    : units.some((unit) => unit.kind === 'pike')
+      ? flasherPortraitUrl(0)
+      : ''
+  const portrait = groupPortrait ? `<img class="unit-icon" alt="" src="${groupPortrait}" />` : ''
   return `
     <p class="eyebrow">${PLAYER_NAME[0]}</p>
     <h2>${portrait}${units.length} selected</h2>
