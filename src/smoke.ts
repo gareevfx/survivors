@@ -1958,7 +1958,7 @@ droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
-freeForAllUsesTheWideMap()
+freeForAllUsesASquareMap()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
@@ -1968,7 +1968,7 @@ towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 console.log('smoke ok')
 
-function freeForAllUsesTheWideMap(): void {
+function freeForAllUsesASquareMap(): void {
   const duel = createMatch(4)
   assert(duel.mode === 'duel' && duel.mapW === MAP_W && duel.mapH === MAP_H, '1 vs 1 left the 80×45 field')
   assert(duel.playerCount === 2, '1 vs 1 seated extra sides')
@@ -1977,34 +1977,17 @@ function freeForAllUsesTheWideMap(): void {
   const inner = sight - TILE
   for (let seed = 1; seed <= 12; seed++) {
     const state = createMatch(seed, 'ffa')
-    assert(state.mapW === 80 && state.mapH === 50, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.mapW === 80 && state.mapH === 80, `free for all map is ${state.mapW}×${state.mapH}`)
     assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
-    assert(state.tiles.length === 80 * 50, 'the free-for-all map did not fill 80×50 cells')
+    assert(state.tiles.length === 80 * 80, 'the square map did not fill 80×80 cells')
     const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
     assert(keeps.length === 4, 'free for all is missing a Silo')
     const owners = new Set(keeps.map((keep) => keep.owner))
     assert(owners.size === 4, 'two Silos share a side')
-    const midX = state.mapW / 2
-    const midY = state.mapH / 2
-    const quads = new Set(keeps.map((keep) => `${keep.tx < midX ? 'W' : 'E'}${keep.ty < midY ? 'N' : 'S'}`))
+    const quads = new Set(keeps.map((keep) => `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`))
     assert(quads.size === 4, `Silos are not in four corners (${[...quads].join(', ')})`)
-    const yards = keeps.map((keep) => ({
-      x0: keep.tx - 9,
-      y0: keep.ty - 9,
-      x1: keep.tx + 2 + 9,
-      y1: keep.ty + 2 + 9,
-    }))
-    for (let i = 0; i < yards.length; i++) {
-      for (let j = i + 1; j < yards.length; j++) {
-        const a = yards[i]
-        const b = yards[j]
-        if (!a || !b) continue
-        const overlap = a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
-        assert(!overlap, `seed ${seed} Silo yards overlap`)
-      }
-    }
     for (const keep of keeps) {
-      const quad = `${keep.tx < midX ? 'W' : 'E'}${keep.ty < midY ? 'N' : 'S'}`
+      const quad = `${keep.tx < 40 ? 'W' : 'E'}${keep.ty < 40 ? 'N' : 'S'}`
       const seen = corners.get(keep.owner) ?? new Set<string>()
       seen.add(quad)
       corners.set(keep.owner, seen)

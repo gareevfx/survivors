@@ -4,7 +4,7 @@ import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
-import { DUMPS_COLOR, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
+import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -89,26 +89,23 @@ export function renderWorld(
     b: cam.y + viewH / cam.zoom + 48,
   }
 
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
     if (!viewGroundShown(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    const full = rock.kind === 'tree' ? TREE_HP : ROCK_HP
-    const ratio = full > 0 ? rock.hp / full : 1
     if (rock.kind === 'tree') drawTreeSprite(ctx, rock.tx, rock.ty, state.seed)
-    else drawRockSprite(ctx, rock.tx, rock.ty, state.seed, ratio)
+    else drawRockSprite(ctx, rock.tx, rock.ty, state.seed)
     if (rock.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
       ctx.beginPath()
       ctx.arc(x, y - 1, 10, 0, Math.PI * 2)
       ctx.fill()
     }
+    const full = rock.kind === 'tree' ? TREE_HP : ROCK_HP
     if (rock.hp < full) {
-      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, ratio, hpColor(ratio))
+      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, rock.hp / full, hpColor(rock.hp / full))
     }
   }
 
@@ -119,7 +116,6 @@ export function renderWorld(
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
     drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
   }
-  ctx.imageSmoothingEnabled = false
 
   if (state.tutorial) drawOreHint(ctx, state)
 
@@ -757,7 +753,7 @@ export function renderMinimap(
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
-  ctx.fillStyle = DUMPS_COLOR
+  ctx.fillStyle = '#7ec8f0'
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
