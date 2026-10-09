@@ -1,6 +1,7 @@
 import type { Camera } from './camera'
 import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
 import { flasherSprite } from './flasherArt'
+import { gorillaSprite } from './gorillaArt'
 import { stalkerSprite } from './stalkerArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -561,6 +562,19 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.ellipse(2, 8, 14, 4.6, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.drawImage(flasherSprite(unit), -32, -34)
+    if (unit.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
+      ctx.beginPath()
+      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
+  } else if (unit.kind === 'howler') {
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.36)'
+    ctx.beginPath()
+    ctx.ellipse(2, 9, 16, 5.2, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.drawImage(gorillaSprite(unit), -36, -38)
     if (unit.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
       ctx.beginPath()
