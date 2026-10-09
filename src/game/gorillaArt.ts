@@ -3,7 +3,7 @@ import { PLAYER_COLOR, UNIT_STATS, type Unit } from './types'
 
 /**
  * Original Gorilla art: a tracked tank with a fixed turret.
- * The hull stays gray-olive. Team color is trim only. Sprites are cached.
+ * The hull is off-white. Team color is the secondary trim. Sprites are cached.
  * The gun is bolted to the hull facing and recoils after a shot.
  */
 
@@ -11,9 +11,9 @@ const SIZE = 72
 const OX = 36
 const OY = 38
 
-const INK = '#14110e'
-const HULL = '#6d7264'
-const HULL_DARK = '#4c5148'
+const INK = '#3a3f46'
+const HULL = '#f3f0e6'
+const HULL_DARK = '#d4d0c4'
 const TRACK = '#2a2c28'
 const TRACK_SHOE = '#3c4038'
 const METAL = '#2e3330'
@@ -120,6 +120,15 @@ function paintGorilla(
   ctx.fillStyle = HULL_DARK
   ctx.fill()
 
+  const seamA = at(-6.4, 0.2)
+  const seamB = at(7.4, 0.2)
+  ctx.beginPath()
+  ctx.moveTo(seamA.x, seamA.y)
+  ctx.lineTo(seamB.x, seamB.y)
+  ctx.strokeStyle = '#5c6168'
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+
   plate(ctx, at(-0.6, 5.15), 15.5, 1.55, ang, accent)
   plate(ctx, at(-0.6, -5.15), 15.5, 1.55, ang, accent)
 
@@ -146,15 +155,16 @@ function paintGorilla(
 
   const turret = [at(-3.4, 3.3), at(2.2, 3.5), at(4.4, 1.6), at(4.4, -1.6), at(2.2, -3.5), at(-3.4, -3.3)]
   trace(ctx, turret)
-  ctx.fillStyle = '#5c6158'
+  ctx.fillStyle = HULL
   ctx.fill()
   ctx.strokeStyle = INK
   ctx.lineWidth = 1.3
   ctx.stroke()
+  plate(ctx, at(0.3, 0), 1.55, 5.8, ang, accent)
   const hatch = at(-0.4, 0)
   ctx.beginPath()
   ctx.arc(hatch.x, hatch.y - 0.6, 1.7, 0, Math.PI * 2)
-  ctx.fillStyle = '#3e433c'
+  ctx.fillStyle = HULL_DARK
   ctx.fill()
   ctx.stroke()
 
