@@ -1,4 +1,3 @@
-import { facingBasis, facingDir } from './stalkerArt'
 import { PLAYER_COLOR, UNIT_STATS, type Unit } from './types'
 
 /**
@@ -37,6 +36,13 @@ function shade(hex: string, amount: number): string {
   const g = channel(8)
   const b = channel(0)
   return `rgb(${r}, ${g}, ${b})`
+}
+
+/** Eight facings, clockwise from east, matching canvas atan2. */
+function facingDir(facing: number): number {
+  const turn = Math.PI * 2
+  const angle = ((facing % turn) + turn) % turn
+  return Math.round(angle / (Math.PI / 4)) % 8
 }
 
 export function flasherSprite(unit: Unit): HTMLCanvasElement {
@@ -133,10 +139,15 @@ function paintFlasher(
   flash: boolean,
   color: string,
 ): void {
-  const { ang, fx, fy, sx, sy } = facingBasis(dir)
+  const ang = dir * (Math.PI / 4)
+  const fx = Math.cos(ang)
+  const fy = Math.sin(ang)
+  const sx = -Math.sin(ang)
+  const sy = Math.cos(ang)
+  const lean = frame ? 1.2 : 0
   const at = (forward: number, side: number) => ({
-    x: fx * forward + sx * side,
-    y: fy * forward + sy * side,
+    x: fx * forward + sx * (side + lean),
+    y: fy * forward + sy * (side + lean),
   })
 
   ctx.strokeStyle = INK
@@ -199,58 +210,41 @@ function paintFlasher(
     ctx.stroke()
   }
 
-  // Same overhead camera as the Stalker: the roof sits up the screen, and the nose still points with facing.
-  const facing = fy
-  const seat = at(0.4, 0)
-  const lift = -6.2
-  const bx = seat.x
-  const by = seat.y + lift
-  const canopyW = 4.6 + Math.abs(facing) * 2.1
-
+  const hip = at(-0.6, 0)
+  const helm = at(2.6, 0)
   ctx.beginPath()
-  ctx.ellipse(bx, by + 1.3, canopyW * 0.58, 2.15, 0, 0, Math.PI * 2)
+  ctx.ellipse(hip.x, hip.y, 3.2, 2.15, ang, 0, Math.PI * 2)
   ctx.fillStyle = '#24282e'
   ctx.fill()
   ctx.strokeStyle = INK
   ctx.lineWidth = 1.15
   ctx.stroke()
-
-  const hx = bx + fx * 0.7
-  const hy = by - 2.3
   ctx.beginPath()
-  ctx.arc(hx, hy, 2.45, 0, Math.PI * 2)
+  ctx.arc(helm.x, helm.y - 0.4, 2.25, 0, Math.PI * 2)
   ctx.fillStyle = '#17191d'
   ctx.fill()
   ctx.stroke()
-  if (facing > -0.4) {
-    ctx.beginPath()
-    ctx.ellipse(hx + fx * 1.15, hy + 0.35, 1.65, 0.72, ang * 0.2, 0, Math.PI * 2)
-    ctx.fillStyle = '#b7e4ff'
-    ctx.fill()
-  } else {
-    ctx.beginPath()
-    ctx.arc(hx - fx * 0.45, hy + 0.15, 1.25, 0, Math.PI * 2)
-    ctx.fillStyle = '#2c3138'
-    ctx.fill()
-    ctx.stroke()
-  }
-
   ctx.beginPath()
-  ctx.ellipse(bx, by - 0.3, canopyW, 3.9, 0, 0, Math.PI * 2)
+  ctx.ellipse(helm.x + fx * 1.15, helm.y - 0.15 + fy * 1.15, 1.45, 0.62, ang, 0, Math.PI * 2)
+  ctx.fillStyle = '#b7e4ff'
+  ctx.fill()
+
+  const canopy = at(1.1, 0)
+  ctx.beginPath()
+  ctx.ellipse(canopy.x, canopy.y - 1.6, 7.6, 4.5, ang, 0, Math.PI * 2)
   ctx.fillStyle = 'rgba(214, 236, 246, 0.2)'
   ctx.fill()
   ctx.strokeStyle = 'rgba(236, 248, 255, 0.95)'
   ctx.lineWidth = 1.35
   ctx.stroke()
   ctx.beginPath()
-  ctx.ellipse(bx - 1.5, by - 2.5, Math.min(3.1, canopyW * 0.55), 1.05, -0.4, 0, Math.PI * 2)
+  ctx.ellipse(canopy.x - 1.6, canopy.y - 3.2, 3.1, 1.05, -0.45, 0, Math.PI * 2)
   ctx.fillStyle = 'rgba(255, 255, 255, 0.62)'
   ctx.fill()
 
   if (firing) {
-    const pod = at(6.4, 2.3)
-    const root = { x: pod.x, y: pod.y + lift * 0.45 }
-    const tip = { x: root.x + fx * 9.2, y: root.y + fy * 9.2 }
+    const root = at(5.2, 2.5)
+    const tip = at(16.2, 2.7)
     ctx.beginPath()
     ctx.moveTo(root.x, root.y)
     ctx.lineTo(tip.x, tip.y)
@@ -268,13 +262,12 @@ function paintFlasher(
     ctx.lineWidth = 1.15
     ctx.stroke()
     if (flash) {
-      const burst = { x: tip.x + fx * 2.3, y: tip.y + fy * 2.3 }
       ctx.beginPath()
-      ctx.arc(tip.x, tip.y, 2.2, 0, Math.PI * 2)
+      ctx.arc(tip.x, tip.y, 2.5, 0, Math.PI * 2)
       ctx.fillStyle = '#fff6d2'
       ctx.fill()
       ctx.beginPath()
-      ctx.arc(burst.x, burst.y, 1.45, 0, Math.PI * 2)
+      ctx.arc(tip.x + fx * 2.4, tip.y + fy * 2.4, 1.55, 0, Math.PI * 2)
       ctx.fillStyle = '#ffb45c'
       ctx.fill()
     }
