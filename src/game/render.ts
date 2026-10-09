@@ -1,11 +1,12 @@
 import type { Camera } from './camera'
-import { hash2 } from './rng'
 import { buildingCenter, buildingRect, placementAllowed, playerKeep } from './state'
+import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
   MAP_H,
   MAP_W,
+  ORE_NODE_AMOUNT,
   PLAYER_COLOR,
   ROCK_HP,
   TILE,
@@ -21,8 +22,6 @@ export interface WorldOverlay {
   drag: { x: number; y: number; w: number; h: number } | null
   pointer: { x: number; y: number } | null
 }
-
-const GRASS = ['#66754c', '#6e7d52', '#5e6c46', '#758856', '#617048', '#6a784e']
 
 function teamColor(owner: number, first: string, second: string, third: string, fourth: string): string {
   if (owner === 0) return first
@@ -46,78 +45,8 @@ export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H): HTMLCanv
   canvas.height = mapH * TILE
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-
-  for (let ty = 0; ty < mapH; ty++) {
-    for (let tx = 0; tx < mapW; tx++) {
-      const n = hash2(tx, ty, seed)
-      const x = tx * TILE
-      const y = ty * TILE
-      ctx.fillStyle = GRASS[Math.floor(n * GRASS.length)] ?? GRASS[0]
-      ctx.fillRect(x, y, TILE, TILE)
-      if (n > 0.82) {
-        ctx.fillStyle = 'rgba(255,255,255,0.05)'
-        ctx.fillRect(x + 6, y + 18, 4, 2)
-      } else       if (n < 0.08) {
-        ctx.fillStyle = 'rgba(30,40,18,0.18)'
-        ctx.beginPath()
-        ctx.ellipse(x + 16, y + 20, 5, 2, 0, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  ctx.strokeStyle = 'rgba(20, 24, 14, 0.45)'
-  ctx.lineWidth = 4
-  ctx.strokeRect(2, 2, mapW * TILE - 4, mapH * TILE - 4)
+  paintTerrain(ctx, seed, mapW, mapH)
   return canvas
-}
-
-function drawTree(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const x = tx * TILE + TILE / 2
-  const y = ty * TILE + TILE / 2
-  const j = hash2(tx + 11, ty + 4, seed)
-  ctx.fillStyle = 'rgba(0,0,0,0.22)'
-  ctx.beginPath()
-  ctx.ellipse(x + 1, y + 9, 11, 4.2, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = j > 0.5 ? '#6b4423' : '#8a5a32'
-  ctx.fillRect(x - 2.2, y + 1, 4.4, 11)
-  ctx.fillStyle = j > 0.45 ? '#6d4a28' : '#3f6b32'
-  ctx.beginPath()
-  ctx.arc(x + 4, y - 1, 7.5, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = j > 0.5 ? '#3c8f38' : '#4ea24a'
-  ctx.beginPath()
-  ctx.arc(x - 2, y - 5, 9.2, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = j > 0.6 ? '#8d6230' : '#d2e07a'
-  ctx.beginPath()
-  ctx.arc(x - 5, y - 8, 3.1, 0, Math.PI * 2)
-  ctx.fill()
-}
-
-function drawRock(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const x = tx * TILE + TILE / 2
-  const y = ty * TILE + TILE / 2
-  const j = hash2(tx + 3, ty + 9, seed)
-  ctx.fillStyle = 'rgba(0,0,0,0.18)'
-  ctx.beginPath()
-  ctx.ellipse(x + 2, y + 6, 11, 5, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = j > 0.5 ? '#534e46' : '#5c574e'
-  ctx.beginPath()
-  ctx.moveTo(x - 11, y + 3)
-  ctx.lineTo(x - 5, y - 9)
-  ctx.lineTo(x + 3, y - 11)
-  ctx.lineTo(x + 11, y - 2)
-  ctx.lineTo(x + 6, y + 8)
-  ctx.lineTo(x - 7, y + 8)
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillStyle = 'rgba(255,255,255,0.12)'
-  ctx.beginPath()
-  ctx.arc(x - 2, y - 4, 3.2, 0, Math.PI * 2)
-  ctx.fill()
 }
 
 export function renderWorld(
@@ -145,8 +74,9 @@ export function renderWorld(
   ctx.fillRect(0, 0, viewW, viewH)
 
   ctx.setTransform(dpr * cam.zoom, 0, 0, dpr * cam.zoom, -cam.x * cam.zoom * dpr, -cam.y * cam.zoom * dpr)
-  ctx.imageSmoothingEnabled = false
+  ctx.imageSmoothingEnabled = true
   ctx.drawImage(terrain, 0, 0)
+  ctx.imageSmoothingEnabled = false
 
   const view = {
     l: cam.x - 48,
@@ -161,8 +91,8 @@ export function renderWorld(
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    if (rock.kind === 'tree') drawTree(ctx, rock.tx, rock.ty, state.seed)
-    else drawRock(ctx, rock.tx, rock.ty, state.seed)
+    if (rock.kind === 'tree') drawTreeSprite(ctx, rock.tx, rock.ty, state.seed)
+    else drawRockSprite(ctx, rock.tx, rock.ty, state.seed)
     if (rock.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
       ctx.beginPath()
@@ -180,7 +110,7 @@ export function renderWorld(
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    drawOre(ctx, x, y, state.selectedOre === node.id)
+    drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
   }
 
   if (state.tutorial) drawOreHint(ctx, state)
@@ -309,6 +239,13 @@ function drawBothSight(
   ctx.restore()
 }
 
+function fogSide(state: MatchState, tx: number, ty: number, black: boolean): number {
+  if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) return 0
+  if (viewTileVisible(state, tx, ty)) return 2
+  if (black && viewTileExplored(state, tx, ty)) return 1
+  return 0
+}
+
 function drawFog(
   ctx: CanvasRenderingContext2D,
   state: MatchState,
@@ -321,47 +258,17 @@ function drawFog(
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
       if (viewTileVisible(state, tx, ty)) continue
-      ctx.fillStyle = viewTileExplored(state, tx, ty) ? 'rgba(6, 8, 6, 0.58)' : '#070806'
-      ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE)
+      const black = !viewTileExplored(state, tx, ty)
+      const stamp = fogSprite(
+        black ? 'black' : 'shroud',
+        fogSide(state, tx, ty - 1, black),
+        fogSide(state, tx + 1, ty, black),
+        fogSide(state, tx, ty + 1, black),
+        fogSide(state, tx - 1, ty, black),
+      )
+      ctx.drawImage(stamp, tx * TILE, ty * TILE)
     }
   }
-}
-
-function drawOre(ctx: CanvasRenderingContext2D, x: number, y: number, selected = false): void {
-  if (selected) {
-    ctx.save()
-    ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
-    ctx.lineWidth = 1.6
-    ctx.beginPath()
-    ctx.ellipse(x, y + 4, 16, 9, 0, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.restore()
-  }
-  const crystals: Array<[number, number, number, string]> = [
-    [0, -6, 7, '#f0c857'],
-    [-7, 4, 5.5, '#d9a63a'],
-    [6, 5, 6, '#e8b84a'],
-  ]
-  for (const [ox, oy, r, color] of crystals) {
-    ctx.beginPath()
-    for (let i = 0; i < 6; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 3
-      const px = x + ox + Math.cos(a) * r
-      const py = y + oy + Math.sin(a) * r * 0.82
-      if (i === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
-    }
-    ctx.closePath()
-    ctx.fillStyle = color
-    ctx.fill()
-    ctx.strokeStyle = '#7a5414'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }
-  ctx.fillStyle = 'rgba(255, 244, 210, 0.9)'
-  ctx.beginPath()
-  ctx.arc(x - 1, y - 8, 1.7, 0, Math.PI * 2)
-  ctx.fill()
 }
 
 function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
@@ -434,9 +341,13 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  ctx.fillStyle = 'rgba(0,0,0,0.22)'
+  ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
   ctx.beginPath()
-  ctx.ellipse(x + w / 2 + 2, y + h / 2 + 8, w * 0.38, 8, 0, 0, Math.PI * 2)
+  ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
+  ctx.beginPath()
+  ctx.ellipse(x + w * 0.52 + 4, y + h * 0.78, w * 0.3, 5.5, 0, 0, Math.PI * 2)
   ctx.fill()
   if (!building.complete) ctx.globalAlpha = 0.45 + building.progress * 0.5
 
@@ -839,7 +750,9 @@ export function renderMinimap(
   for (let ty = 0; ty < state.mapH; ty++) {
     for (let tx = 0; tx < state.mapW; tx++) {
       if (!viewTileExplored(state, tx, ty)) continue
-      ctx.fillStyle = viewTileVisible(state, tx, ty) ? '#2a3324' : '#161b14'
+      ctx.fillStyle = viewTileVisible(state, tx, ty)
+        ? terrainCss(tx, ty, state.seed, state.mapW, state.mapH)
+        : '#12100c'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
@@ -848,11 +761,11 @@ export function renderMinimap(
       if (!viewTileExplored(state, tx, ty)) continue
       const tile = state.tiles[ty * state.mapW + tx]
       if (tile !== 1 && tile !== 3) continue
-      ctx.fillStyle = tile === 3 ? '#3d9a45' : '#3a3832'
+      ctx.fillStyle = tile === 3 ? '#3c6a34' : '#4a4338'
       ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
     }
   }
-  ctx.fillStyle = '#e6c15a'
+  ctx.fillStyle = '#7ec8f0'
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)

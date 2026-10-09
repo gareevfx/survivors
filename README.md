@@ -2,7 +2,7 @@
 
 A single-player real-time strategy skirmish in the browser. The menu offers **1 vs 1** (Silo_01 against Silo_02 on the wide 80×45 field) or **Free for all** (Silo_01, Silo_02, Silo_03, and Silo_04 on an 80×80 field, each against all the others). Gather the dumps beside your Silo, raise a Factory, Storages, and Pillars, train stalkers, flashers, gorillas, and hovers, and destroy the enemy Silos. If your own Silo falls, the field is lost. Trees have half the life of gray rock.
 
-The factions, names, and shapes are original. The map is drawn with canvas geometry — there is no borrowed art.
+The factions, names, and shapes are original. The map is drawn in code — there is no borrowed art and no image files. Ground is painted once per match from seeded noise: dirt, dry soil, gravel, and darker patches, with pebbles, cracks, and a top-left light. Rocks, trees, and the blue dumps are a few cached drawings. Silo yards are a worn patch of packed earth. Fog stays black until explored, then a gray shroud, with a soft edge.
 
 ## Run locally
 
