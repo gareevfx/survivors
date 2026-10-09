@@ -3,6 +3,7 @@ import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
+import { siloPortraitUrl } from '../game/siloArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, unitById } from '../game/state'
 import {
@@ -386,9 +387,11 @@ export function describeSelection(state: MatchState): string {
     const status = !building.complete
       ? `Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
       : stats.blurb
+    const portraitUrl = building.kind === 'keep' ? siloPortraitUrl(building.owner) : ''
+    const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
-      <h2>${stats.label}</h2>
+      <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp} · ${status}</p>
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}

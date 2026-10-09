@@ -1,4 +1,5 @@
 import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
+import { keepEntrance } from './siloArt'
 import { updateVision } from './vision'
 import {
   BUILDING_STATS,
@@ -278,6 +279,7 @@ export function makeBuilding(
   complete: boolean,
 ): Building {
   const stats = BUILDING_STATS[kind]
+  const mouth = kind === 'keep' ? keepEntrance({ tx, ty }) : null
   const building: Building = {
     id: state.nextId++,
     owner,
@@ -288,10 +290,12 @@ export function makeBuilding(
     progress: complete ? 1 : 0,
     complete,
     queue: [],
-    rallyX: (tx + stats.w / 2) * TILE,
-    rallyY: (ty + stats.h) * TILE + 18,
+    rallyX: mouth ? mouth.x : (tx + stats.w / 2) * TILE,
+    rallyY: mouth ? mouth.y : (ty + stats.h) * TILE + 18,
     hitFlash: 0,
     spawnN: 0,
+    hatch: 0,
+    dish: owner * 1.1,
     attackCd: 0,
     alert: 0,
     focusId: null,
@@ -422,7 +426,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     const keep = keeps[owner]
     if (!site || !keep) continue
     const aim = aimSite(site, sites)
-    aimRally(keep, aim)
+    aimRally(keep)
     for (const [tx, ty] of workerCamp(site, aim, field.ore, mapW, mapH)) {
       const unit = makeUnit(state, owner, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
       const dx = (aim.tx + 1.5) * TILE - unit.x
@@ -451,15 +455,10 @@ function aimSite(site: { tx: number; ty: number }, sites: Array<{ tx: number; ty
   return { tx: x / n, ty: y / n }
 }
 
-function aimRally(building: Building, toward: { tx: number; ty: number }): void {
-  const stats = BUILDING_STATS[building.kind]
-  const x = (building.tx + stats.w / 2) * TILE
-  const y = (building.ty + stats.h / 2) * TILE
-  const dx = (toward.tx + stats.w / 2) * TILE - x
-  const dy = (toward.ty + stats.h / 2) * TILE - y
-  const length = Math.hypot(dx, dy) || 1
-  building.rallyX = x + (dx / length) * 78
-  building.rallyY = y + (dy / length) * 78
+function aimRally(building: Building): void {
+  const mouth = keepEntrance(building)
+  building.rallyX = mouth.x
+  building.rallyY = mouth.y
 }
 
 export function playerKeep(state: MatchState): Building | undefined {

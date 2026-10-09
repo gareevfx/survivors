@@ -3,6 +3,7 @@ import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
+import { keepEntrance } from './siloArt'
 import { updateVision } from './vision'
 import {
   buildingById,
@@ -60,6 +61,11 @@ export function step(state: MatchState, dt: number): void {
   for (const building of state.buildings) {
     building.hitFlash = Math.max(0, building.hitFlash - dt)
     building.alert = Math.max(0, building.alert - dt)
+    if (building.hatch > 0) building.hatch = Math.max(0, building.hatch - dt)
+    if (building.kind === 'keep' && building.hp > 0) {
+      const busy = !building.complete || building.queue.length > 0
+      building.dish += dt * (busy ? 0.95 : 0.42)
+    }
     if (building.kind === 'tower') tryFireTower(state, building, dt)
   }
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
@@ -649,7 +655,30 @@ function advanceProduction(state: MatchState, dt: number): void {
   }
 }
 
+function entranceSpot(state: MatchState, building: Building): { x: number; y: number } {
+  const mouth = keepEntrance(building)
+  const side = ((building.spawnN % 3) - 1) * 8
+  building.spawnN += 1
+  let x = mouth.x + side
+  let y = mouth.y
+  const tx = Math.floor(x / TILE)
+  const ty = Math.floor(y / TILE)
+  if (!isWalkable(state, tx, ty)) {
+    const spot = nearestWalkable(state, mouth.x, mouth.y)
+    if (spot) {
+      x = (spot.tx + 0.5) * TILE
+      y = (spot.ty + 0.5) * TILE
+    }
+  }
+  building.hatch = 0.7
+  return { x, y }
+}
+
 function spawnTrained(state: MatchState, building: Building, kind: Unit['kind']): void {
+  if (building.kind === 'keep') {
+    placeTrained(state, building, kind, entranceSpot(state, building))
+    return
+  }
   const stats = BUILDING_STATS[building.kind]
   const spots: Array<{ x: number; y: number }> = []
   for (let y = building.ty - 1; y <= building.ty + stats.h; y++) {
@@ -672,6 +701,10 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     x: building.rallyX,
     y: building.rallyY,
   })
+  placeTrained(state, building, kind, spot)
+}
+
+function placeTrained(state: MatchState, building: Building, kind: Unit['kind'], spot: { x: number; y: number }): void {
   const unit: Unit = {
     id: state.nextId++,
     owner: building.owner,
@@ -679,7 +712,11 @@ function spawnTrained(state: MatchState, building: Building, kind: Unit['kind'])
     x: spot.x,
     y: spot.y,
     hp: UNIT_STATS[kind].hp,
-    facing: Math.atan2(building.rallyY - spot.y, building.rallyX - spot.x),
+    facing: (() => {
+      const dx = building.rallyX - spot.x
+      const dy = building.rallyY - spot.y
+      return Math.hypot(dx, dy) > 12 ? Math.atan2(dy, dx) : Math.PI / 2
+    })(),
     anim: 0,
     order: null,
     path: [],

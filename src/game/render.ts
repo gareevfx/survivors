@@ -4,6 +4,7 @@ import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
+import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
@@ -345,17 +346,19 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
-  ctx.beginPath()
-  ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
-  ctx.beginPath()
-  ctx.ellipse(x + w * 0.52 + 4, y + h * 0.78, w * 0.3, 5.5, 0, 0, Math.PI * 2)
-  ctx.fill()
+  if (building.kind !== 'keep') {
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
+    ctx.beginPath()
+    ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
+    ctx.beginPath()
+    ctx.ellipse(x + w * 0.52 + 4, y + h * 0.78, w * 0.3, 5.5, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
   if (!building.complete) ctx.globalAlpha = 0.45 + building.progress * 0.5
 
-  if (building.kind === 'keep') drawKeep(ctx, x, y, w, h, color)
+  if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
   else if (building.kind === 'yard') drawYard(ctx, x, y, w, h, color, state.time)
   else if (building.kind === 'tower')
     drawTower(ctx, x, y, w, h, color, building.attackCd > UNIT_STATS.pike.cooldown - 0.18)
@@ -395,38 +398,32 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   }
 }
 
-function drawKeep(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
-  ctx.fillStyle = '#6a655c'
-  roundRect(ctx, x + 8, y + 10, w - 16, h - 16, 5)
-  ctx.fill()
-  ctx.fillStyle = '#3f4a38'
-  ctx.fillRect(x + 24, y + 26, w - 48, h - 48)
-  const towers = [
-    [x + 12, y + 12],
-    [x + w - 30, y + 12],
-    [x + 12, y + h - 30],
-    [x + w - 30, y + h - 30],
-  ]
-  for (const [tx, ty] of towers) {
-    ctx.fillStyle = '#7a756b'
-    ctx.beginPath()
-    ctx.arc(tx + 9, ty + 9, 11, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = '#2e2b26'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.arc(tx + 9, ty + 9, 11, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.fillStyle = color
-    ctx.fillRect(tx + 8, ty - 4, 2, 8)
-    ctx.beginPath()
-    ctx.moveTo(tx + 10, ty - 4)
-    ctx.lineTo(tx + 20, ty)
-    ctx.lineTo(tx + 10, ty + 4)
-    ctx.fill()
-  }
-  ctx.fillStyle = '#241f1b'
-  ctx.fillRect(x + w / 2 - 7, y + h - 24, 14, 12)
+function drawKeep(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  building: Building,
+  x: number,
+  y: number,
+  color: string,
+): void {
+  const stats = BUILDING_STATS.keep
+  const job = building.queue[0]
+  const progress = job && job.total > 0 ? Math.max(0, Math.min(1, 1 - job.remaining / job.total)) : -1
+  const open = building.hatch > 0.28 ? 1 : Math.max(0, building.hatch / 0.28)
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawKeepSprite(ctx, x, y, {
+    color,
+    open,
+    lit: keepWindowCount(state.oreHeld[building.owner] ?? 0),
+    stage: keepDamageStage(building.hp, stats.hp),
+    dish: building.dish,
+    progress,
+    smoke: state.time,
+  })
+  ctx.restore()
+  ctx.imageSmoothingEnabled = false
 }
 
 function drawYard(
@@ -674,23 +671,6 @@ function hpColor(ratio: number): string {
   return '#e25b4a'
 }
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.arcTo(x + w, y, x + w, y + h, r)
-  ctx.arcTo(x + w, y + h, x, y + h, r)
-  ctx.arcTo(x, y + h, x, y, r)
-  ctx.arcTo(x, y, x + w, y, r)
-  ctx.closePath()
-}
-
 /** Fit the 16:9 map inside the minimap element without stretching it. */
 export function minimapFrame(
   cssW: number,
@@ -761,9 +741,16 @@ export function renderMinimap(
   for (const building of state.buildings) {
     if (!viewBuildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
-    ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
     ctx.globalAlpha = building.complete ? 1 : 0.55
-    ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+    if (building.kind === 'keep') {
+      ctx.fillStyle = '#c8c2b4'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + (building.tx + stats.w - 1) * sx, oy + building.ty * sy, sx, Math.max(1, sy))
+    } else {
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+    }
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {

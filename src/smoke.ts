@@ -4,6 +4,7 @@ import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConst
 import { CASTLE_YARD } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
+import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { BUILDING_STATS, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
@@ -1958,6 +1959,7 @@ droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
+stalkersLeaveByTheSiloDoor()
 freeForAllUsesASquareMap()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
@@ -2264,6 +2266,25 @@ function cancelLastStalkerRefundsTheQueue(): void {
   assert(state.supplyUsed[0] === cells, 'cancel did not free the cell for the Stalker in production')
   cancelTrain(state, silo.id)
   assert(state.oreHeld[0] === ore, 'an empty queue refunded dumps')
+}
+
+function stalkersLeaveByTheSiloDoor(): void {
+  const state = createMatch(41)
+  const silo = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'missing the Silo')
+  const mouth = keepEntrance(silo)
+  assert(Math.hypot(silo.rallyX - mouth.x, silo.rallyY - mouth.y) < 1, 'the Silo rally is not at the entrance')
+  const before = state.units.length
+  assert(tryTrain(state, silo.id, 'porter') === null, 'the Silo rejected a Stalker')
+  const job = silo.queue[0]
+  assert(job, 'the Stalker was not queued')
+  job.remaining = 0.02
+  step(state, 0.05)
+  assert(state.units.length === before + 1, 'the Stalker did not leave the Silo')
+  const born = state.units[state.units.length - 1]
+  assert(born && born.kind === 'porter' && born.owner === 0, 'the new unit is not a Stalker')
+  assert(Math.hypot(born.x - mouth.x, born.y - mouth.y) < 28, 'the Stalker did not emerge at the entrance')
+  assert(silo.hatch > 0, 'the Silo door did not open')
 }
 
 function scanningHoverRevealsBlackFog(): void {
