@@ -3,6 +3,7 @@ import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
+import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
 import { updateVision } from './vision'
 import {
@@ -655,8 +656,15 @@ function advanceProduction(state: MatchState, dt: number): void {
   }
 }
 
+function baySpot(state: MatchState, building: Building): { x: number; y: number } {
+  return mouthSpot(state, building, yardEntrance(building))
+}
+
 function entranceSpot(state: MatchState, building: Building): { x: number; y: number } {
-  const mouth = keepEntrance(building)
+  return mouthSpot(state, building, keepEntrance(building))
+}
+
+function mouthSpot(state: MatchState, building: Building, mouth: { x: number; y: number }): { x: number; y: number } {
   const side = ((building.spawnN % 3) - 1) * 8
   building.spawnN += 1
   let x = mouth.x + side
@@ -677,6 +685,10 @@ function entranceSpot(state: MatchState, building: Building): { x: number; y: nu
 function spawnTrained(state: MatchState, building: Building, kind: Unit['kind']): void {
   if (building.kind === 'keep') {
     placeTrained(state, building, kind, entranceSpot(state, building))
+    return
+  }
+  if (building.kind === 'yard') {
+    placeTrained(state, building, kind, baySpot(state, building))
     return
   }
   const stats = BUILDING_STATS[building.kind]

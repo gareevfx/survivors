@@ -258,7 +258,7 @@ export interface Building {
   rallyY: number
   hitFlash: number
   spawnN: number
-  /** Seconds the Silo door stays open after a unit steps out. */
+  /** Seconds the Silo or Factory door stays open after a unit steps out. */
   hatch: number
   /** Roof dish angle. Integrated so a change in speed does not jump. */
   dish: number

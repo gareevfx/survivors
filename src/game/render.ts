@@ -4,6 +4,7 @@ import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
+import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -346,7 +347,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  if (building.kind !== 'keep') {
+  if (building.kind !== 'keep' && building.kind !== 'yard') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
     ctx.beginPath()
     ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
@@ -359,7 +360,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   if (!building.complete) ctx.globalAlpha = 0.45 + building.progress * 0.5
 
   if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
-  else if (building.kind === 'yard') drawYard(ctx, x, y, w, h, color, state.time)
+  else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
   else if (building.kind === 'tower')
     drawTower(ctx, x, y, w, h, color, building.attackCd > UNIT_STATS.pike.cooldown - 0.18)
   else drawSilo(ctx, x, y, w, h, color)
@@ -428,32 +429,33 @@ function drawKeep(
 
 function drawYard(
   ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  building: Building,
   x: number,
   y: number,
-  w: number,
-  h: number,
   color: string,
-  time: number,
 ): void {
-  ctx.fillStyle = '#5c5348'
-  ctx.fillRect(x + 8, y + 18, w - 16, h - 26)
-  ctx.fillStyle = '#3e3832'
-  ctx.beginPath()
-  ctx.moveTo(x + 4, y + 20)
-  ctx.lineTo(x + w / 2, y + 4)
-  ctx.lineTo(x + w - 4, y + 20)
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillStyle = color
-  ctx.fillRect(x + w - 22, y + 8, 8, 6)
-  ctx.fillStyle = '#2a2622'
-  ctx.fillRect(x + 18, y + h - 22, 16, 14)
-  ctx.fillRect(x + w - 36, y + h - 22, 16, 14)
-  ctx.fillStyle = 'rgba(220,220,220,0.35)'
-  const puff = (time * 10) % 14
-  ctx.beginPath()
-  ctx.arc(x + w - 18, y + 4 - puff, 3 + puff * 0.15, 0, Math.PI * 2)
-  ctx.fill()
+  const stats = BUILDING_STATS.yard
+  const job = building.queue[0]
+  const producing = building.complete && job != null
+  const progress = job && job.total > 0 ? Math.max(0, Math.min(1, 1 - job.remaining / job.total)) : -1
+  const open = building.hatch > 0.28 ? 1 : Math.max(0, building.hatch / 0.28)
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawFactorySprite(ctx, x, y, {
+    color,
+    owner: building.owner,
+    open,
+    stage: factoryDamageStage(building.hp, stats.hp),
+    progress,
+    kind: producing && job ? job.kind : null,
+    busy: producing && building.hatch < 0.05,
+    time: state.time,
+    built: building.complete ? 1 : building.progress,
+  })
+  ctx.restore()
+  ctx.imageSmoothingEnabled = false
 }
 
 function drawTower(
@@ -747,6 +749,19 @@ export function renderMinimap(
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
       ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.fillRect(ox + (building.tx + stats.w - 1) * sx, oy + building.ty * sy, sx, Math.max(1, sy))
+    } else if (building.kind === 'yard') {
+      ctx.fillStyle = '#aeb4bc'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.fillStyle = '#2c3136'
+      const inset = Math.max(0.6, Math.min(sx, sy) * 0.35)
+      ctx.fillRect(
+        ox + building.tx * sx + inset,
+        oy + building.ty * sy + inset,
+        stats.w * sx - inset * 2,
+        stats.h * sy - inset * 2,
+      )
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + building.tx * sx, oy + (building.ty + stats.h) * sy - Math.max(1, sy * 0.35), stats.w * sx, Math.max(1, sy * 0.35))
     } else {
       ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)

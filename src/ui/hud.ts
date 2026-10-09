@@ -3,6 +3,7 @@ import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
+import { factoryPortraitUrl } from '../game/factoryArt'
 import { siloPortraitUrl } from '../game/siloArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, unitById } from '../game/state'
@@ -325,19 +326,23 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'AI control is giving the orders' : cmd.title
-    if (cmd.id === 'train-porter' || cmd.id === 'train-pike' || cmd.id === 'train-howler' || cmd.id === 'train-drone') {
+    const iconSrc =
+      cmd.id === 'train-drone'
+        ? hoverPortraitUrl(0)
+        : cmd.id === 'train-howler'
+          ? gorillaPortraitUrl(0)
+          : cmd.id === 'train-pike'
+            ? flasherPortraitUrl(0)
+            : cmd.id === 'train-porter'
+              ? stalkerPortraitUrl(0)
+              : cmd.id === 'place-yard'
+                ? factoryPortraitUrl(0)
+                : ''
+    if (iconSrc) {
       const icon = document.createElement('img')
       icon.className = 'unit-icon'
       icon.alt = ''
-      const src =
-        cmd.id === 'train-drone'
-          ? hoverPortraitUrl(0)
-          : cmd.id === 'train-howler'
-            ? gorillaPortraitUrl(0)
-            : cmd.id === 'train-pike'
-              ? flasherPortraitUrl(0)
-              : stalkerPortraitUrl(0)
-      icon.src = src
+      icon.src = iconSrc
       button.append(icon)
     }
     const label = document.createElement('span')
@@ -387,7 +392,12 @@ export function describeSelection(state: MatchState): string {
     const status = !building.complete
       ? `Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
       : stats.blurb
-    const portraitUrl = building.kind === 'keep' ? siloPortraitUrl(building.owner) : ''
+    const portraitUrl =
+      building.kind === 'keep'
+        ? siloPortraitUrl(building.owner)
+        : building.kind === 'yard'
+          ? factoryPortraitUrl(building.owner)
+          : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>

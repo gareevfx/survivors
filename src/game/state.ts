@@ -1,4 +1,5 @@
 import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
+import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
 import { updateVision } from './vision'
 import {
@@ -279,7 +280,7 @@ export function makeBuilding(
   complete: boolean,
 ): Building {
   const stats = BUILDING_STATS[kind]
-  const mouth = kind === 'keep' ? keepEntrance({ tx, ty }) : null
+  const mouth = kind === 'keep' ? keepEntrance({ tx, ty }) : kind === 'yard' ? yardEntrance({ tx, ty }) : null
   const building: Building = {
     id: state.nextId++,
     owner,

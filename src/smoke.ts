@@ -4,6 +4,7 @@ import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConst
 import { CASTLE_YARD } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
+import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
@@ -1964,6 +1965,7 @@ hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
 cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
+unitsLeaveByTheFactoryDoor()
 bothModesUseAnEightyByFiftyMap()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
@@ -2315,6 +2317,29 @@ function stalkersLeaveByTheSiloDoor(): void {
   assert(born && born.kind === 'porter' && born.owner === 0, 'the new unit is not a Stalker')
   assert(Math.hypot(born.x - mouth.x, born.y - mouth.y) < 28, 'the Stalker did not emerge at the entrance')
   assert(silo.hatch > 0, 'the Silo door did not open')
+}
+
+function unitsLeaveByTheFactoryDoor(): void {
+  const state = createMatch(16)
+  const yard = makeBuilding(state, 0, 'yard', 14, 30, true)
+  const mouth = yardEntrance(yard)
+  const mtx = Math.floor(mouth.x / TILE)
+  const mty = Math.floor(mouth.y / TILE)
+  state.rocks = state.rocks.filter((rock) => rock.tx !== mtx || rock.ty !== mty)
+  state.tiles[mty * state.mapW + mtx] = 0
+  rebuildBlocked(state)
+  assert(Math.hypot(yard.rallyX - mouth.x, yard.rallyY - mouth.y) < 1, 'the Factory rally is not at the bay door')
+  const before = state.units.length
+  assert(tryTrain(state, yard.id, 'pike') === null, 'the Factory rejected a Flasher')
+  const job = yard.queue[0]
+  assert(job, 'the Flasher was not queued')
+  job.remaining = 0.02
+  step(state, 0.05)
+  assert(state.units.length === before + 1, 'the Flasher did not leave the Factory')
+  const born = state.units[state.units.length - 1]
+  assert(born && born.kind === 'pike' && born.owner === 0, 'the new unit is not a Flasher')
+  assert(Math.hypot(born.x - mouth.x, born.y - mouth.y) < 28, 'the Flasher did not emerge at the bay door')
+  assert(yard.hatch > 0, 'the Factory door did not open')
 }
 
 function scanningHoverRevealsBlackFog(): void {
