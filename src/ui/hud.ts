@@ -109,7 +109,10 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
   }
 
   if (brand) {
-    brand.textContent = state.mode === 'ffa' ? 'Free for all · four Silos' : 'Silo_01 against Silo_02'
+    brand.textContent =
+      state.mode === 'ffa'
+        ? `Free for all · ${PLAYER_NAME.slice(0, state.playerCount).join(', ')}`
+        : `${PLAYER_NAME[0]} against ${PLAYER_NAME[1]}`
   }
   if (sides) {
     sides.innerHTML = Array.from({ length: state.playerCount }, (_, owner) => {
@@ -124,14 +127,14 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     overlay.classList.toggle('hidden', state.outcome == null)
     const others = PLAYER_NAME.slice(1, state.playerCount).join(', ')
     if (state.outcome === 'win') {
-      endKicker.textContent = PLAYER_NAME[0] ?? 'Silo_01'
+      endKicker.textContent = PLAYER_NAME[0] ?? 'Silo 01'
       endTitle.textContent = 'New Ground is yours'
       endCopy.textContent =
         state.playerCount > 2
           ? 'Every enemy Silo is rubble. Your banners stay on the field.'
           : `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
     } else if (state.outcome === 'lose') {
-      endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[1] ?? 'Silo_02')
+      endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[1] ?? 'Silo 02')
       endTitle.textContent = 'The silo has fallen'
       endCopy.textContent =
         state.playerCount > 2

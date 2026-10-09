@@ -6,8 +6,9 @@ import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
-import type { MatchMode, MatchState } from './game/types'
+import { MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
+import { rulesMarkup } from './ui/rules'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
 const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
@@ -19,7 +20,7 @@ const idle = document.querySelector<HTMLButtonElement>('#idle')
 const muteButton = document.querySelector<HTMLButtonElement>('#mute')
 
 if (!view || !minimap || !help) {
-  throw new Error('Ridgekeep failed to find its canvas.')
+  throw new Error('Survivors failed to find its canvas.')
 }
 
 const stage: HTMLCanvasElement = view
@@ -28,10 +29,20 @@ const helpPanel: HTMLElement = help
 const commandForm = document.querySelector<HTMLFormElement>('#console')
 const commandInput = document.querySelector<HTMLInputElement>('#console-input')
 if (!commandForm || !commandInput) {
-  throw new Error('Ridgekeep failed to find its command line.')
+  throw new Error('Survivors failed to find its command line.')
 }
 const commandBar = commandForm
 const commandField = commandInput
+const helpBody = document.querySelector<HTMLElement>('#help-body')
+if (helpBody) helpBody.innerHTML = rulesMarkup()
+const duelNote = document.querySelector<HTMLElement>('#menu-duel-note')
+if (duelNote) {
+  duelNote.textContent = `${PLAYER_NAME[0]} against ${PLAYER_NAME[1]} on the wide ${MAP_W}×${MAP_H} field.`
+}
+const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
+if (ffaNote) {
+  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on an ${MAP_W}×${MAP_H} field.`
+}
 
 const sfx = new Sfx()
 let commandArmedAt = 0
@@ -121,7 +132,7 @@ commandForm.addEventListener('submit', (event) => {
 const input = attachInput({
   canvas: stage,
   getState: () => {
-    if (!match) throw new Error('Ridgekeep has no match yet.')
+    if (!match) throw new Error('Survivors has no match yet.')
     return match
   },
   active: () => match != null && !menuOpen,

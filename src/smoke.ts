@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -27,6 +27,7 @@ import {
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
 import { describeSelection } from './ui/hud'
+import { rulesMarkup } from './ui/rules'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -1977,7 +1978,30 @@ towerFitsInsideCastleSightAndShoots()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
+rulesPanelListsRosterFromConfig()
 console.log('smoke ok')
+
+function rulesPanelListsRosterFromConfig(): void {
+  assert(PLAYER_NAME.join(',') === 'Silo 01,Silo 02,Silo 03,Silo 04', `side names are ${PLAYER_NAME.join(', ')}`)
+  const text = rulesMarkup()
+  assert(!text.includes('Silo_'), 'rules still use an underscore in a side name')
+  assert(!text.includes('Ridgekeep'), 'rules still name the game Ridgekeep')
+  for (const name of PLAYER_NAME) assert(text.includes(name), `rules omit ${name}`)
+  assert(text.includes('God Mode') && text.includes('Both Cam') && text.includes('AI Control') && text.includes('FOW'), 'rules omit a command')
+  assert(text.includes('capture') && text.includes('Storage'), 'rules omit capture or storage')
+  for (const stats of Object.values(UNIT_STATS)) {
+    assert(text.includes(stats.label), `rules omit ${stats.label}`)
+    assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
+    assert(text.includes(`health ${stats.hp}`), `rules omit the health of ${stats.label}`)
+  }
+  for (const stats of Object.values(BUILDING_STATS)) {
+    assert(text.includes(stats.label), `rules omit ${stats.label}`)
+    assert(text.includes(`health ${stats.hp}`), `rules omit the health of ${stats.label}`)
+    if (stats.cost > 0) assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
+  }
+  assert(text.includes(String(SUPPLY_MAX)), 'rules omit the cells cap')
+  assert(text.includes(String(TREE_HP)) && text.includes(String(ROCK_HP)), 'rules omit tree and rock life')
+}
 
 function captureHarvestAndPassages(): void {
   assert(TREE_HP === 28 && ROCK_HP === 56, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
@@ -2229,7 +2253,7 @@ function bothModesUseAnEightyByFiftyMap(): void {
       )
       assert(sideTileVisible(state, keep.owner, node.tx, node.ty), `seed ${seed} side ${keep.owner} cannot see its starting dumps`)
       if (keep.owner !== 0) {
-        assert(!tileVisible(state, keep.tx + 1, keep.ty + 1), 'Silo_01 can see another Silo at the start')
+        assert(!tileVisible(state, keep.tx + 1, keep.ty + 1), 'Silo 01 can see another Silo at the start')
       }
     }
     const tree = state.rocks.find((rock) => rock.kind === 'tree')
@@ -2265,7 +2289,7 @@ function aisAttackEachOther(): void {
     if (order.type === 'move' || order.type === 'attackMove') return Math.hypot(order.x - home3.x, order.y - home3.y) < 80
     return false
   })
-  assert(mover, 'Silo_03 did not march on Silo_04')
+  assert(mover, 'Silo 03 did not march on Silo 04')
   const tower = makeBuilding(state, 2, 'tower', keep2.tx + 4, keep2.ty, true)
   const foe = makeUnit(state, 3, 'pike', (tower.tx + 0.5) * TILE + 36, (tower.ty + 0.5) * TILE)
   foe.order = null
@@ -2289,11 +2313,11 @@ function eliminatingASideRemovesIt(): void {
   victim.hp = 0
   step(state, 1 / 60)
   assert(state.outcome == null, 'one fallen Silo ended the free-for-all')
-  assert(state.eliminated[2], 'Silo_03 was not marked eliminated')
+  assert(state.eliminated[2], 'Silo 03 was not marked eliminated')
   assert(!state.units.some((unit) => unit.owner === 2), 'eliminated units remained')
   assert(!state.buildings.some((building) => building.owner === 2), 'eliminated buildings remained')
   assert(
-    state.toasts.some((toast) => toast.text.includes('Silo_03') && toast.text.includes('eliminated')),
+    state.toasts.some((toast) => toast.text.includes(PLAYER_NAME[2] ?? '') && toast.text.includes('eliminated')),
     'no elimination toast',
   )
   assert(state.buildings.some((building) => building.id === other.id && building.hp > 0), 'another side was removed')

@@ -478,7 +478,29 @@ button, canvas { font: inherit; }
   font-size: 12px;
 }
 
-.help-card { width: min(640px, 100%); }
+.help-card {
+  width: min(720px, 100%);
+  max-height: calc(100% - 8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.help-scroll {
+  overflow: auto;
+  min-height: 0;
+  padding-right: 8px;
+}
+
+.help-card h3 {
+  margin: 16px 0 4px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.help-card p { margin: 6px 0; line-height: 1.4; }
 
 .help-card ul {
   margin: 8px 0 0;
@@ -486,9 +508,20 @@ button, canvas { font: inherit; }
   color: var(--text);
 }
 
-.help-card li { margin: 6px 0; line-height: 1.35; }
+.help-card li { margin: 6px 0; line-height: 1.4; }
 
-.help-card li b { color: var(--paper); }
+.help-card li b,
+.roster h4 { color: var(--paper); }
+
+.roster article {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #3d4a34;
+}
+
+.roster h4 { margin: 0; font-size: 16px; font-weight: 600; }
+
+.help-card #help-close { flex: none; align-self: flex-start; }
 
 @media (max-width: 800px) {
   #topbar { flex-wrap: wrap; gap: 8px; }

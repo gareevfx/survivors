@@ -187,7 +187,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
 }
 
-export const PLAYER_NAME: readonly string[] = ['Silo_01', 'Silo_02', 'Silo_03', 'Silo_04']
+export const PLAYER_NAME: readonly string[] = ['Silo 01', 'Silo 02', 'Silo 03', 'Silo 04']
 export const PLAYER_COLOR: readonly string[] = ['#5ec8ff', '#ff5d4e', '#7dff6a', '#c58bff']
 
 export type Order =
@@ -354,15 +354,15 @@ export interface MatchState {
   eliminated: boolean[]
   tiles: Uint8Array
   blocked: Uint8Array
-  /** Tiles Silo_01 has ever seen. Stays revealed after units leave. */
+  /** Tiles Silo 01 has ever seen. Stays revealed after units leave. */
   explored: Uint8Array
-  /** Tiles currently inside Silo_01 sight. Rebuilt each step. */
+  /** Tiles currently inside Silo 01 sight. Rebuilt each step. */
   visible: Uint8Array
-  /** Match time when Silo_01 last saw each tile. Zero until that tile is seen. */
+  /** Match time when Silo 01 last saw each tile. Zero until that tile is seen. */
   seenAt: Float32Array
-  /** Tiles Silo_02 has scouted. Same array as sideExplored[1]. */
+  /** Tiles Silo 02 has scouted. Same array as sideExplored[1]. */
   aiExplored: Uint8Array
-  /** Tiles currently inside Silo_02 sight. Same array as sideVisible[1]. */
+  /** Tiles currently inside Silo 02 sight. Same array as sideVisible[1]. */
   aiVisible: Uint8Array
   /** Explored ground for every side, indexed by owner. */
   sideExplored: Uint8Array[]
@@ -370,9 +370,9 @@ export interface MatchState {
   sideVisible: Uint8Array[]
   /** Enemy buildings each side has seen. */
   sideSpotted: Array<Array<{ id: number; x: number; y: number }>>
-  /** Player buildings Silo_02 has seen. Same array as sideSpotted[1]. */
+  /** Player buildings Silo 02 has seen. Same array as sideSpotted[1]. */
   aiSpotted: Array<{ id: number; x: number; y: number }>
-  /** Enemy buildings Silo_01 has seen. Same array as sideSpotted[0]. */
+  /** Enemy buildings Silo 01 has seen. Same array as sideSpotted[0]. */
   playerSpotted: Array<{ id: number; x: number; y: number }>
   /** Drone, bike, or spare worker currently scouting fog for minerals and the enemy. */
   aiScout: number
@@ -413,7 +413,7 @@ export interface MatchState {
   aiAcc: number
   aiAttacking: boolean
   aiNext: 'pike' | 'howler'
-  /** Think timers for sides other than Silo_02, which still uses aiAcc. */
+  /** Think timers for sides other than Silo 02, which still uses aiAcc. */
   sideAcc: number[]
   sideAttacking: boolean[]
   sideNext: Array<'pike' | 'howler'>
