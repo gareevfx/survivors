@@ -97,7 +97,7 @@ export function runCommand(state: MatchState, raw: string): boolean {
   }
   if (text === 'ai control') {
     if (state.aiControl) {
-      pushToast(state, 'AI control is already on.')
+      pushToast(state, 'SiloAI is already on.')
       return true
     }
     state.aiControl = true
@@ -105,12 +105,12 @@ export function runCommand(state: MatchState, raw: string): boolean {
     state.attackMoveArmed = false
     state.moveArmed = false
     state.playerAiAcc = 0.5
-    pushToast(state, 'AI control is on.')
+    pushToast(state, 'SiloAI is on.')
     return true
   }
   if (text === 'off ai control') {
     if (!state.aiControl) {
-      pushToast(state, 'AI control is already off.')
+      pushToast(state, 'SiloAI is already off.')
       return true
     }
     state.aiControl = false
@@ -118,7 +118,7 @@ export function runCommand(state: MatchState, raw: string): boolean {
       if (unit.owner !== 0 || unit.order != null || unit.nodeMemory !== 0) continue
       unit.nodeMemory = -1
     }
-    pushToast(state, 'AI control is off.')
+    pushToast(state, 'SiloAI is off.')
     return true
   }
   pushToast(state, 'Unknown command.')

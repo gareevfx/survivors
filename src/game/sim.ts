@@ -1,4 +1,4 @@
-import { sideKnowsEnemyKeep, updateAi } from './ai'
+import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
@@ -42,7 +42,7 @@ import {
 export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
   state.time += dt
-  updateAi(state, dt)
+  updateSiloAi(state, dt)
 
   for (const unit of state.units) refreshUnit(state, unit, dt)
   releaseFromTerrain(state)

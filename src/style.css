@@ -259,6 +259,11 @@ button, canvas { font: inherit; }
   top: 52px;
 }
 
+#ai-badge {
+  text-transform: none;
+  letter-spacing: 0.06em;
+}
+
 #modeflag {
   position: absolute;
   left: 12px;
@@ -437,6 +442,14 @@ button, canvas { font: inherit; }
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.cmd-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #f6e7b0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
 }
 
 #overlay {

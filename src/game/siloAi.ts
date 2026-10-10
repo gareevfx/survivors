@@ -1,8 +1,17 @@
-import { aiPlaceNearKeep, assignMiners, commandAttack, commandMove, tryTrain } from './commands'
-import { nearestWalkable } from './nav'
+import { aiPlaceNearKeep, assignMiners, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
+import { findBuildSpotWithin, nearestWalkable } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, rockAt } from './state'
-import { BUILDING_STATS, TILE, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { BUILDING_STATS, TILE, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { depositKnown } from './vision'
+
+/**
+ * SiloAI plays one side from that side's own sight.
+ * Computer opponents in 1 vs 1 and free-for-all use it, and so does `ai control`.
+ */
+
+/** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
+export const SILO_AI_EXPANSION_REACH = 14
 
 /** Extra tiles of walking that justify stopping to break a rock for the army. */
 const ROCK_DETOUR = 12
@@ -326,13 +335,107 @@ function keepStands(state: MatchState, owner: PlayerId): boolean {
   return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
+function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
+  const dx = ox < tx ? tx - ox : ox > tx + w - 1 ? ox - (tx + w - 1) : 0
+  const dy = oy < ty ? ty - oy : oy > ty + h - 1 ? oy - (ty + h - 1) : 0
+  return Math.max(dx, dy)
+}
+
+/** Dumps still sitting in this side's Silo patch. Unknown heaps farther out do not count. */
+function homeDumpsRemain(state: MatchState, owner: PlayerId): boolean {
+  return state.ore.some((node) => node.amount > 0 && node.base === owner)
+}
+
+function storageNearDump(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
+  const stats = BUILDING_STATS.silo
+  for (const building of state.buildings) {
+    if (building.owner !== owner || building.hp <= 0 || building.kind !== 'silo') continue
+    if (footprintGap(building.tx, building.ty, stats.w, stats.h, tx, ty) <= SILO_AI_EXPANSION_REACH) return true
+  }
+  return false
+}
+
 /**
- * Every computer side, and AI Control, shares this script.
+ * When the Silo patch is mined out, raise one Storage beside the nearest
+ * Dumps heap this side has actually seen. The spot uses the same gap and
+ * lane rules as a base building, and it stays within reach of that heap.
+ */
+function placeExpansionStorage(state: MatchState, side: Brain): boolean {
+  if (homeDumpsRemain(state, side.owner)) return false
+  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.silo.cost) return false
+  const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
+  if (!keep) return false
+  const home = buildingCenter(keep)
+  const nodes = state.ore
+    .filter(
+      (node) =>
+        node.amount > 0 &&
+        node.base !== side.owner &&
+        depositKnown(state, side.owner, node.tx, node.ty) &&
+        !storageNearDump(state, side.owner, node.tx, node.ty),
+    )
+    .sort((a, b) => {
+      const da = Math.hypot((a.tx + 0.5) * TILE - home.x, (a.ty + 0.5) * TILE - home.y)
+      const db = Math.hypot((b.tx + 0.5) * TILE - home.x, (b.ty + 0.5) * TILE - home.y)
+      return da - db
+    })
+  for (const node of nodes) {
+    const spot = findBuildSpotWithin(state, 'silo', node.tx, node.ty, SILO_AI_EXPANSION_REACH)
+    if (!spot) continue
+    if (tryPlace(state, side.owner, 'silo', spot.tx, spot.ty, []) === null) return true
+  }
+  return false
+}
+
+function seesFootprint(state: MatchState, side: Brain, tx: number, ty: number, w: number, h: number): boolean {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (tileBit(state, side.visible, tx + x, ty + y)) return true
+    }
+  }
+  return false
+}
+
+/** One spare Stalker hauls dumps out of an enemy Storage this side can see. */
+function maybeRaidStorage(state: MatchState, side: Brain): void {
+  const waiting = state.units.filter(
+    (unit) =>
+      unit.owner === side.owner &&
+      unit.kind === 'porter' &&
+      unit.hp > 0 &&
+      unit.cargo <= 0 &&
+      unit.order == null &&
+      unit.id !== side.scout,
+  )
+  if (!waiting.length) return
+  let bestUnit: Unit | null = null
+  let bestBin: Building | null = null
+  let bestD = Infinity
+  for (const building of state.buildings) {
+    if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'silo' || building.stock <= 0) continue
+    const stats = BUILDING_STATS.silo
+    if (!seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)) continue
+    const center = buildingCenter(building)
+    for (const unit of waiting) {
+      const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
+      if (distance < bestD) {
+        bestD = distance
+        bestUnit = unit
+        bestBin = building
+      }
+    }
+  }
+  if (!bestUnit || !bestBin) return
+  commandHarvestOrAttack(state, [bestUnit.id], bestBin.id)
+}
+
+/**
+ * Every computer side, and `ai control`, shares SiloAI.
  * A side with no Silo is already eliminated, so it is skipped.
  * Units and buildings captured with that Silo belong to the captor and are ordered here on the captor's turn.
  * Covered Stalkers are not auto-targets; a hit captures one only outside its own Silo, Flasher, and Gorilla sight.
  */
-export function updateAi(state: MatchState, dt: number): void {
+export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
   state.aiAcc += dt
   if (state.aiAcc >= 0.5) {
@@ -411,6 +514,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
     ).length
     if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
       aiPlaceNearKeep(state, 'silo', side.owner)
+    } else if (placeExpansionStorage(state, side)) {
+      // A Storage now stands beside a Dumps heap this side has seen.
     } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
       aiPlaceNearKeep(state, 'yard', side.owner)
     } else if (towers < 3 && ore >= BUILDING_STATS.tower.cost) {
@@ -437,6 +542,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
     if (tryTrain(state, readyYard.id, first) === null) side.next = second
     else tryTrain(state, readyYard.id, second)
   }
+
+  maybeRaidStorage(state, side)
 
   const army = state.units.filter(
     (unit) => unit.owner === side.owner && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0,

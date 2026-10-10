@@ -1,4 +1,4 @@
-import { DRONE_BIKE_AVOID, scoutArea, updateAi } from './game/ai'
+import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
@@ -181,10 +181,10 @@ function northmarkPlaysItself(): void {
   assert(!state.aiControl, 'a partial line changed AI control')
   assert(runCommand(state, 'AI Control'), 'AI Control was rejected')
   assert(state.aiControl, 'AI Control did not turn on')
-  assert(state.toasts[state.toasts.length - 1]?.text === 'AI control is on.', 'AI control did not announce itself')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'SiloAI is on.', 'SiloAI did not announce itself')
   assert(runCommand(state, 'ai control'), 'repeating AI control was rejected')
   assert(state.aiControl, 'repeating AI control turned it off')
-  assert(state.toasts[state.toasts.length - 1]?.text === 'AI control is already on.', 'the repeat used the wrong notice')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'SiloAI is already on.', 'the repeat used the wrong notice')
 
   const watcher = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   assert(watcher, 'missing a Northmark worker')
@@ -271,7 +271,7 @@ function northmarkPlaysItself(): void {
   assert(!fresh.aiControl, 'a new match kept AI control')
   assert(runCommand(fresh, 'OFF AI CONTROL'), 'off ai control was rejected while already off')
   assert(!fresh.aiControl, 'the off command turned AI control on')
-  assert(fresh.toasts[fresh.toasts.length - 1]?.text === 'AI control is already off.', 'the off notice was wrong')
+  assert(fresh.toasts[fresh.toasts.length - 1]?.text === 'SiloAI is already off.', 'the off notice was wrong')
 }
 
 function castleYardsStayOpen(): void {
@@ -1985,6 +1985,7 @@ towerFitsInsideCastleSightAndShoots()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
+siloAiRaisesStorageAtRemoteDumps()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2140,7 +2141,7 @@ function captureHarvestAndPassages(): void {
     sideTileVisible(ffa, 1, Math.floor(sample.x / TILE), Math.floor(sample.y / TILE)),
     'the captor cannot see a unit it just took',
   )
-  updateAi(ffa, 0.5)
+  updateSiloAi(ffa, 0.5)
   assert(ffa.eliminated[2] && unitById(ffa, capturedId)?.owner === 1, 'AI gave the captured side back')
 
   const duel = createMatch(2)
@@ -2265,7 +2266,7 @@ function aisAttackEachOther(): void {
     makeUnit(state, 2, 'pike', home2.x + 30 + n * 18, home2.y + 36)
     makeUnit(state, 3, 'pike', home3.x + 30 + n * 18, home3.y + 36)
   }
-  updateAi(state, 0.5)
+  updateSiloAi(state, 0.5)
   const mover = state.units.find((unit) => {
     if (unit.owner !== 2 || unit.kind !== 'pike' || !unit.order) return false
     const order = unit.order
@@ -3226,4 +3227,97 @@ function workersMineCastleMineralsThenTheNearestPatch(): void {
   const foe = makeUnit(field, 1, 'porter', 10.5 * TILE, 10.5 * TILE)
   assignMiners(field, [foe], null)
   assert(assignedDeposit(foe) === openPatch.id, 'Dunmarch skipped the nearest revealed patch')
+}
+
+function siloAiRaisesStorageAtRemoteDumps(): void {
+  const state = createMatch(7)
+  state.aiControl = true
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const player = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep && player, 'missing a Silo for SiloAI')
+  const cx = 40
+  const cy = 24
+  const radius = 12
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      state.tiles[y * state.mapW + x] = 0
+    }
+  }
+  state.rocks = state.rocks.filter((rock) => Math.max(Math.abs(rock.tx - cx), Math.abs(rock.ty - cy)) > radius)
+  for (const node of state.ore) {
+    if (node.base === 1) node.amount = 0
+    else if (Math.max(Math.abs(node.tx - cx), Math.abs(node.ty - cy)) <= radius + 4) node.amount = 0
+  }
+  const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
+  state.ore.push(remote)
+  state.aiExplored[cy * state.mapW + cx] = 1
+  rebuildBlocked(state)
+  state.oreHeld[1] = 500
+  const before = new Set(state.buildings.map((building) => building.id))
+  updateSiloAi(state, 0.5)
+
+  const built = state.buildings.find(
+    (building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id),
+  )
+  assert(built, 'SiloAI did not raise a Storage at the remote Dumps heap')
+  const stats = BUILDING_STATS.silo
+  const gap = footprintGap(built.tx, built.ty, stats.w, stats.h, remote.tx, remote.ty)
+  assert(
+    gap >= AI_MINERAL_KEEP && gap <= SILO_AI_EXPANSION_REACH,
+    `remote Storage is ${gap} tiles from the Dumps heap`,
+  )
+  const home = buildingCenter(keep)
+  const dumpX = (remote.tx + 0.5) * TILE
+  const dumpY = (remote.ty + 0.5) * TILE
+  const store = buildingCenter(built)
+  assert(
+    Math.hypot(store.x - dumpX, store.y - dumpY) < Math.hypot(home.x - dumpX, home.y - dumpY),
+    'the remote Storage is farther from the heap than the Silo',
+  )
+  for (let y = built.ty - AI_BUILD_GAP; y <= built.ty + stats.h - 1 + AI_BUILD_GAP; y++) {
+    for (let x = built.tx - AI_BUILD_GAP; x <= built.tx + stats.w - 1 + AI_BUILD_GAP; x++) {
+      const inside = x >= built.tx && x < built.tx + stats.w && y >= built.ty && y < built.ty + stats.h
+      if (inside) continue
+      assert(isWalkable(state, x, y), `remote Storage has no free cell at ${x},${y}`)
+    }
+  }
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    const nodeGap = footprintGap(built.tx, built.ty, stats.w, stats.h, node.tx, node.ty)
+    assert(nodeGap >= AI_MINERAL_KEEP, `remote Storage is ${nodeGap} tiles from Dumps`)
+  }
+  const hauling = state.units.some((unit) => {
+    if (unit.owner !== 1 || unit.kind !== 'porter' || unit.hp <= 0) return false
+    return unit.order?.type === 'gather' && unit.order.nodeId === remote.id
+  })
+  assert(hauling, 'SiloAI did not send a Stalker to the remote Dumps heap')
+  const playerMining = state.units.some((unit) => {
+    if (unit.owner !== 0 || unit.kind !== 'porter' || unit.hp <= 0) return false
+    const order = unit.order
+    return order?.type === 'gather' || (order?.type === 'attack' && order.resumeNode != null)
+  })
+  assert(playerMining, 'SiloAI did not gather for the player side')
+
+  const raid = createMatch(11)
+  const foeKeep = raid.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const aiKeep = raid.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(foeKeep && aiKeep, 'missing Silos for the raid')
+  for (const node of raid.ore) node.amount = 0
+  raid.oreHeld[1] = 0
+  const binTx = Math.min(Math.max(4, foeKeep.tx - 6), raid.mapW - BUILDING_STATS.silo.w - 1)
+  const binTy = Math.min(Math.max(4, foeKeep.ty), raid.mapH - BUILDING_STATS.silo.h - 1)
+  const bin = makeBuilding(raid, 0, 'silo', binTx, binTy, true)
+  bin.stock = 40
+  for (let y = 0; y < BUILDING_STATS.silo.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.silo.w; x++) {
+      raid.aiVisible[(bin.ty + y) * raid.mapW + (bin.tx + x)] = 1
+    }
+  }
+  makeUnit(raid, 1, 'drone', (aiKeep.tx + 1.5) * TILE, (aiKeep.ty + 1.5) * TILE)
+  updateSiloAi(raid, 0.5)
+  const raider = raid.units.find(
+    (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'gather' && unit.order.binId === bin.id,
+  )
+  assert(raider, 'SiloAI did not send a Stalker to raid the enemy Storage')
 }

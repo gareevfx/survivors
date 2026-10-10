@@ -386,7 +386,7 @@ export interface MatchState {
   bothCam: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean
-  /** When set, Dunmarch's build-and-fight loop plays Northmark from Northmark's own sight. */
+  /** When set, SiloAI plays Silo 01 from Silo 01's own sight. */
   aiControl: boolean
   ore: OreNode[]
   rocks: Rock[]

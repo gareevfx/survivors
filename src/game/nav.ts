@@ -272,6 +272,31 @@ export function findBuildSpot(
   return null
 }
 
+/**
+ * Same gap, dumps-lane, and footprint rules as a base building, searched around
+ * a dumps tile instead of a Silo. Stops at maxRadius so an expansion stays next
+ * to the heap it was chosen for.
+ */
+export function findBuildSpotWithin(
+  state: MatchState,
+  kind: 'yard' | 'silo' | 'tower',
+  anchorTx: number,
+  anchorTy: number,
+  maxRadius: number,
+): { tx: number; ty: number } | null {
+  const lanes = mineralLaneTiles(state, anchorTx, anchorTy)
+  const limit = Math.min(maxRadius, Math.max(state.mapW, state.mapH))
+  for (let r = AI_MINERAL_KEEP; r <= limit; r++) {
+    for (let y = anchorTy - r; y <= anchorTy + r; y++) {
+      for (let x = anchorTx - r; x <= anchorTx + r; x++) {
+        if (Math.abs(x - anchorTx) !== r && Math.abs(y - anchorTy) !== r) continue
+        if (aiMayBuild(state, kind, x, y, lanes)) return { tx: x, ty: y }
+      }
+    }
+  }
+  return null
+}
+
 function aiMayBuild(
   state: MatchState,
   kind: 'yard' | 'silo' | 'tower',

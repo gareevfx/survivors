@@ -316,6 +316,12 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
   const root = document.querySelector('#commands')
   if (!root) return
   root.innerHTML = ''
+  if (handsOff) {
+    const note = document.createElement('p')
+    note.className = 'cmd-note'
+    note.textContent = 'SiloAI'
+    root.append(note)
+  }
   if (!commands.length) {
     const empty = document.createElement('p')
     empty.className = 'cmd-empty'
@@ -329,7 +335,7 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
     button.className = 'cmd'
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
-    button.title = handsOff ? 'AI control is giving the orders' : cmd.title
+    button.title = handsOff ? 'SiloAI is giving the orders' : cmd.title
     const iconSrc =
       cmd.id === 'train-drone'
         ? hoverPortraitUrl(0)
