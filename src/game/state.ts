@@ -11,6 +11,7 @@ import {
   ORE_NODE_AMOUNT,
   ROCK_HP,
   STARTING_ORE,
+  SUPPLY_MAX,
   TILE,
   TREE_HP,
   UNIT_STATS,
@@ -64,7 +65,7 @@ export function recomputeSupply(state: MatchState): void {
     for (const job of building.queue) used[building.owner] = (used[building.owner] ?? 0) + UNIT_STATS[job.kind].supply
   }
   state.supplyUsed = used
-  state.supplyCap = cap
+  state.supplyCap = cap.map((value) => Math.min(SUPPLY_MAX, value))
 }
 
 export function pushToast(state: MatchState, text: string): void {

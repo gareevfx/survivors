@@ -1,9 +1,9 @@
-import { BUILDING_STATS, PLAYER_COLOR, STORAGE_FILL_REFERENCE } from './types'
+import { BUILDING_STATS, PLAYER_COLOR, SUPPLY_MAX } from './types'
 
 /**
  * Storage is a round warehouse of three stacked tiers. The whole drawing is
- * cached. A side's first Storage is empty. Further Cells from buildings fill the
- * bottom tier, then the middle, then the top, up to a Silo plus four Storages.
+ * cached. A side's first Storage is empty. Further Cells capacity fills the
+ * bottom tier, then the middle, then the top, up to the Cells maximum.
  */
 
 const W = 64
@@ -67,13 +67,12 @@ const bodies = new Map<string, HTMLCanvasElement>()
 const portraits = new Map<number, string>()
 
 /**
- * 0 when Cells are at or below a Silo plus one Storage.
- * 1 at a Silo plus four Storages. Past that the warehouse stays full.
+ * 0 when Cells are at or below a Silo plus one Storage. 1 at the Cells maximum.
  * The first finished Storage is an empty warehouse; later capacity fills it.
  */
 export function storageFill(cap: number): number {
   const emptyAt = BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply
-  const span = STORAGE_FILL_REFERENCE - emptyAt
+  const span = SUPPLY_MAX - emptyAt
   if (span <= 0 || cap <= emptyAt) return 0
   return Math.max(0, Math.min(1, (cap - emptyAt) / span))
 }

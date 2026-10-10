@@ -66,9 +66,10 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const sides = document.querySelector('#sides')
 
   if (ore) ore.textContent = String(state.oreHeld[0])
+  const supplyText = `${state.supplyUsed[0]} / ${state.supplyCap[0]}`
   if (supply) {
-    supply.textContent = String(state.supplyUsed[0])
-    supply.classList.remove('tight')
+    supply.textContent = supplyText
+    supply.classList.toggle('tight', state.supplyCap[0] - state.supplyUsed[0] <= 1)
     const cells = supply.closest('.readout')
     if (cells instanceof HTMLElement) cells.title = loreBody('Cells')
   }
@@ -337,14 +338,19 @@ function repairButton(state: MatchState): Cmd {
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
   const afford = state.oreHeld[0] >= stats.cost
-  const title = afford ? stats.blurb : `Need ${stats.cost} dumps`
+  const room = stats.supply === 0 || state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
+  let title = stats.blurb
+  if (!afford) title = `Need ${stats.cost} dumps`
+  else if (!room) title = 'Cells cap reached — raise a Storage'
+  const cells = stats.supply === 1 ? '1 cell' : `${stats.supply} cells`
+  const detail = stats.supply === 0 ? `${stats.cost} dumps · no cells` : `${stats.cost} dumps · ${cells}`
   return {
     id: `train-${kind}`,
     label: stats.label,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : 'H',
-    detail: `${stats.cost} dumps`,
+    detail,
     title,
-    disabled: !afford,
+    disabled: !afford || !room,
     run: () => {
       const error = tryTrain(state, buildingId, kind)
       if (error) state.toasts.push({ text: error, life: 3 })

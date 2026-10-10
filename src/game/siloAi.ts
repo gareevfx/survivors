@@ -10,6 +10,7 @@ import { depositKnown, sideTileExplored } from './vision'
  * Computer opponents in 1 vs 1 and free-for-all use it, and so does `ai control`.
  * Stalkers widen a corridor that pinches below two cells, then go back to the job.
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
+ * When two or fewer Cells are free, the next building is a Storage beside the Silo.
  * Gorillas are the siege share and shoot buildings; Flashers take units.
  * Combat units muster beside the Silo and leave in a wave, not one by one.
  * A remote Storage goes up only when that ground is already covered or no enemy
@@ -827,6 +828,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (building) => building.owner === side.owner && !building.complete && building.hp > 0,
   )
   if (!constructing) {
+    const supplyRoom = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
     const ore = state.oreHeld[side.owner]
     const yards = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'yard' && building.hp > 0,
@@ -834,7 +836,9 @@ function runSide(state: MatchState, owner: PlayerId): void {
     const towers = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
     ).length
-    if (placeExpansionStorage(state, side)) {
+    if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
+      placeChartedNearKeep(state, side, 'silo')
+    } else if (placeExpansionStorage(state, side)) {
       // A Storage now stands beside a Dumps heap this side has seen.
     } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')

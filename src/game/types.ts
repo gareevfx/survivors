@@ -23,11 +23,8 @@ export const ROCK_HP = 28
 /** Trees block like rock and take half as many hits. */
 export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
-/**
- * Storage art reads as full at a Silo plus four Storages.
- * Cells are counted for the HUD, and they do not limit training or building.
- */
-export const STORAGE_FILL_REFERENCE = 44
+/** Cells from buildings never rise above this. Training stops at the cap. */
+export const SUPPLY_MAX = 60
 export const INTERACT = 42
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
@@ -168,7 +165,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'A closer drop-off for dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
+    blurb: 'Raises the cells cap by 8. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
     w: 2,
     h: 2,
     hp: 400,

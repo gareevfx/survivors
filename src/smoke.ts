@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_FILL_REFERENCE, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1042,12 +1042,16 @@ function aiPlacesMoreFactoriesAndSilos(): void {
   const yards = state.buildings.filter((building) => building.owner === 1 && building.kind === 'yard')
   assert(yards.length >= 2, `Dunmarch stopped at ${yards.length} factories`)
   finishSites()
-  const beforeSilos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
-  packSupply()
-  state.oreHeld[1] = 4000
-  step(state, 0.5)
-  const afterSilos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
-  assert(afterSilos === beforeSilos, 'SiloAI raised Storage because Cells were full')
+  for (let n = 0; n < 5; n++) {
+    packSupply()
+    const before = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+    step(state, 0.5)
+    const after = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+    assert(after > before, `Dunmarch did not start silo ${n + 1} (have ${after})`)
+    finishSites()
+  }
+  const silos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  assert(silos >= 5, `Dunmarch stopped at ${silos} silos`)
 }
 
 function attacksBuildings(): void {
@@ -2018,7 +2022,7 @@ siloAiRefusesUnchartedGround()
 ruinedSiloCanBeRepaired()
 siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
-cellsDoNotCapTraining()
+cellsBlockTrainingUntilStorage()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2676,11 +2680,9 @@ function storageStartsEmptyAndFillsWithCells(): void {
   const first = BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply
   assert(storageFill(first) === 0, 'the first Storage is not empty')
   assert(storageFill(BUILDING_STATS.keep.supply) === 0, 'Silo Cells already fill a Storage')
-  assert(STORAGE_FILL_REFERENCE === BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply * 4, 'Storage fill reference drifted')
-  assert(storageFill(STORAGE_FILL_REFERENCE) === 1, 'a Silo plus four Storages does not fill Storage')
-  assert(storageFill(STORAGE_FILL_REFERENCE + 40) === 1, 'Cells past the reference overflowed Storage art')
-  const middle = storageFill((first + STORAGE_FILL_REFERENCE) / 2)
-  assert(middle > 0.4 && middle < 0.6, `a middle Cells total filled Storage by ${middle}`)
+  assert(storageFill(SUPPLY_MAX) === 1, 'the Cells maximum does not fill Storage')
+  const middle = storageFill((first + SUPPLY_MAX) / 2)
+  assert(middle > 0.4 && middle < 0.6, `a middle Cells cap filled Storage by ${middle}`)
 }
 
 function scanningHoverRevealsBlackFog(): void {
@@ -4405,17 +4407,47 @@ function siloAiKeepsStalkersWorking(): void {
   assert(working.length >= 4, `expected stalkers on dumps, got ${working.length}`)
 }
 
-function cellsDoNotCapTraining(): void {
+function cellsBlockTrainingUntilStorage(): void {
+  assert(SUPPLY_MAX === 60, `Cells maximum is ${SUPPLY_MAX}`)
   assert(BUILDING_STATS.tower.hp === 160, `Pillar health is ${BUILDING_STATS.tower.hp}`)
   assert(BUILDING_STATS.tower.buildTime === 7, `Pillar build time is ${BUILDING_STATS.tower.buildTime}`)
   const state = createMatch(3)
   const silo = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(silo, 'missing a Silo for Cells')
-  for (let i = 0; i < 70; i++) makeUnit(state, 0, 'pike', 40 + (i % 20) * 8, 40 + Math.floor(i / 20) * 8)
   recomputeSupply(state)
-  assert(state.supplyUsed[0] > 60, 'the old Cells maximum was not passed')
-  assert(state.supplyUsed[0] > state.supplyCap[0], 'spawned units stayed under the building Cells')
-  state.oreHeld[0] = UNIT_STATS.porter.cost
-  assert(tryTrain(state, silo.id, 'porter') === null, 'Cells stopped a Stalker from training')
-  assert(silo.queue.some((job) => job.kind === 'porter'), 'the Stalker was not queued past the old cap')
+  assert(state.supplyCap[0] === BUILDING_STATS.keep.supply, 'the Silo did not set the Cells cap')
+  let guard = 0
+  while (state.supplyUsed[0] < state.supplyCap[0] && guard++ < 80) {
+    makeUnit(state, 0, 'pike', 40 + (guard % 20) * 8, 40 + Math.floor(guard / 20) * 8)
+    recomputeSupply(state)
+  }
+  assert(state.supplyUsed[0] === state.supplyCap[0], 'Cells were not filled to the cap')
+  state.oreHeld[0] = UNIT_STATS.porter.cost * 4
+  const blocked = tryTrain(state, silo.id, 'porter')
+  assert(blocked === 'Cells cap reached — raise a Storage', `training at the cap returned ${blocked}`)
+  assert(!silo.queue.some((job) => job.kind === 'porter'), 'a Stalker was queued at the Cells cap')
+  const before = state.supplyCap[0]
+  makeBuilding(state, 0, 'silo', 20, 20, true)
+  recomputeSupply(state)
+  assert(state.supplyCap[0] === before + BUILDING_STATS.silo.supply, 'Storage did not raise Cells')
+  assert(tryTrain(state, silo.id, 'porter') === null, 'Storage did not unblock training')
+  assert(silo.queue.some((job) => job.kind === 'porter'), 'the Stalker was not queued after Storage')
+
+  const packed = createMatch(4)
+  const home = packed.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the Cells maximum')
+  for (let i = 0; i < 8; i++) makeBuilding(packed, 0, 'silo', 8 + (i % 4) * 4, 8 + Math.floor(i / 4) * 4, true)
+  recomputeSupply(packed)
+  assert(packed.supplyCap[0] === SUPPLY_MAX, `Cells stopped at ${packed.supplyCap[0]}, not ${SUPPLY_MAX}`)
+  guard = 0
+  while (packed.supplyUsed[0] < SUPPLY_MAX && guard++ < 80) {
+    makeUnit(packed, 0, 'pike', 48 + (guard % 20) * 8, 48)
+    recomputeSupply(packed)
+  }
+  packed.oreHeld[0] = UNIT_STATS.porter.cost
+  const still = tryTrain(packed, home.id, 'porter')
+  assert(still === 'Cells cap reached — raise a Storage', `the maximum still allowed training (${still})`)
+  makeBuilding(packed, 0, 'silo', 30, 16, true)
+  recomputeSupply(packed)
+  assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 60')
 }
