@@ -893,14 +893,14 @@ function oreSelectionShowsAmount(): void {
   state.selectedUnits = [worker.id]
   const workerPanel = describeSelection(state)
   assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Stalker', 'selection does not say Stalker')
-  assert(workerPanel.includes('Shelter inhabitants retrained for surface operations'), 'stalker panel omitted its lore')
+  assert(workerPanel.includes('Trained shelter residents;'), 'stalker panel omitted its lore')
   assert(workerPanel.includes(`${Math.ceil(worker.hp)} / ${UNIT_STATS.porter.hp}`), 'stalker panel dropped its health')
   state.selectedUnits = []
   state.selectedBuilding = null
   state.selectedOre = null
   const field = describeSelection(state)
-  assert(field.includes('<h2>New Ground</h2>'), 'empty panel lost the New Ground title')
-  assert(field.includes('Uncharted territory; however, the remnants of old machinery'), 'empty panel omitted the New Ground lore')
+  assert(field.includes('<h2>Surface</h2>'), 'empty panel lost the Surface title')
+  assert(field.includes('Uncharted territory;'), 'empty panel omitted the Surface lore')
   assert(!field.includes('Destroy the enemy Silo'), 'empty panel still shows the old rules paragraph')
   state.selectedUnits = []
   state.selectedOre = node.id
@@ -1994,21 +1994,23 @@ function rulesPanelListsRosterFromConfig(): void {
   const text = rulesMarkup()
   const plain = text.replace(/<[^>]+>/g, '')
   assert(!text.includes('Silo_'), 'rules still use an underscore in a side name')
-  assert(!text.includes('Ridgekeep'), 'rules still name the game Ridgekeep')
+  assert(!text.includes('Ridgekeep') && !text.includes('ridgekeep'), 'rules still name the game Ridgekeep')
+  assert(!text.includes('Alternativen'), 'rules still name the game Alternativen')
+  assert(!plain.includes('New Ground'), 'rules still say New Ground')
   assert(!plain.includes('Destroy an enemy Silo to capture it'), 'rules still open with the old match paragraph')
   assert(text.includes('God Mode') && text.includes('Both Cam') && text.includes('AI Control') && text.includes('FOW'), 'rules omit a command')
   const lore = [
-    '"New Ground": Uncharted territory; however, the remnants of old machinery and debris on the surface indicate that an advanced civilization once existed here.',
-    '"Silo": A shelter housing people; it was clearly built a long time ago. This building serves as a training site for "Stalkers" and acts as a command center for construction operations.',
-    '"Stalker": Shelter inhabitants retrained for surface operations. Their task is to scavenge valuable parts left over from the past from the piles of technical debris on the surface to use in future construction of machinery and buildings. Their lives are highly valued, and their protected status is widely recognized, though they can still be captured. They are also capable of traversing the terrain by clearing obstacles like rocks and trees from their path.',
-    '"Dumps": The piles of technical debris found on the "New Ground" surface.',
-    '"Cells": Storage units for processed, useful parts intended for future construction.',
-    '"Storage": Buildings that house these storage cells. These can be placed near "Dumps" to facilitate rapid delivery by "Stalkers."',
-    '"Pillar": A structure serving as both a wind turbine and a combat observation post. Its weapon-equipped tower helps fend off hostile intruders.',
-    '"Factory": An automated facility for manufacturing combat and exploration robotics.',
-    '"Flasher": A combat robot unit resembling an off-road motorcycle equipped with a cannon; its key feature is high-speed mobility.',
-    '"Gorilla": A heavy combat robot (tank).',
-    '"Hover": A flying robot primarily tasked with terrain exploration.',
+    '"Surface": Uncharted territory;',
+    '"Silo": A shelter housing people;',
+    '"Stalker": Trained shelter residents;',
+    '"Dumps": The piles of technical debris;',
+    '"Cells": Storage units;',
+    '"Storage": Storage for Cells;',
+    '"Pillar": Windmill with battle tower;',
+    '"Factory": Facility for manufacturing combat and exploration units;',
+    '"Flasher": Very fast unit;',
+    '"Gorilla": Tank;',
+    '"Hover": Surface explorer;',
   ]
   for (const line of lore) assert(plain.includes(line), `rules omit lore: ${line.slice(0, 48)}`)
   for (const stats of Object.values(UNIT_STATS)) {

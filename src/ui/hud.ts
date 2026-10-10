@@ -131,7 +131,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     const others = PLAYER_NAME.slice(1, state.playerCount).join(', ')
     if (state.outcome === 'win') {
       endKicker.textContent = PLAYER_NAME[0] ?? 'Silo 01'
-      endTitle.textContent = 'New Ground is yours'
+      endTitle.textContent = 'Surface is yours'
       endCopy.textContent =
         state.playerCount > 2
           ? 'Every enemy Silo is rubble. Your banners stay on the field.'
@@ -142,7 +142,7 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
       endCopy.textContent =
         state.playerCount > 2
           ? `Your Silo is gone. ${others} fight on without you.`
-          : `Your Silo is gone. ${PLAYER_NAME[1]} takes New Ground.`
+          : `Your Silo is gone. ${PLAYER_NAME[1]} takes Surface.`
     }
     endSeed.textContent = `Field ${state.seed}`
   }
@@ -445,8 +445,8 @@ export function describeSelection(state: MatchState): string {
   if (!units.length) {
     return `
       <p class="eyebrow">${PLAYER_NAME[0]}</p>
-      <h2>New Ground</h2>
-      <p class="lore">${escapeHtml(loreBody('New Ground'))}</p>
+      <h2>Surface</h2>
+      <p class="lore">${escapeHtml(loreBody('Surface'))}</p>
     `
   }
   if (units.length === 1) {
