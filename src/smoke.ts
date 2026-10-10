@@ -1790,7 +1790,7 @@ function dunmarchScoutsMineralsAndTheEnemy(): void {
 }
 
 function wideMapHidesObjectsAndMakesDunmarchScout(): void {
-  assert(MAP_W === 80 && MAP_H === 50, `map is ${MAP_W}x${MAP_H}, not 80×50`)
+  assert(MAP_W === 80 && MAP_H === 40, `1 vs 1 map is ${MAP_W}x${MAP_H}, not 80×40`)
   const state = createMatch(1)
   assert(state.ore.length >= 40, `expected more mineral patches, saw ${state.ore.length}`)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -1996,7 +1996,7 @@ cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
 storageStartsEmptyAndFillsWithCells()
-bothModesUseAnEightyByFiftyMap()
+bothModesUseTheirOwnMapSize()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
@@ -2032,6 +2032,8 @@ function captureHarvestAndPassages(): void {
   }
 
   const open = createMatch(4)
+  clearPad(open, 36, 20, 46, 32)
+  rebuildBlocked(open)
   const stalker = makeUnit(open, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
   const pike = makeUnit(open, 0, 'pike', stalker.x + 18, stalker.y)
   commandAttack(open, [pike.id], stalker.id, 'unit')
@@ -2052,6 +2054,8 @@ function captureHarvestAndPassages(): void {
   assert(still?.owner === 1 && still.hp === UNIT_STATS.porter.hp, `a covered stalker changed (${still?.owner}, ${still?.hp})`)
 
   const far = createMatch(4)
+  clearPad(far, 36, 20, 46, 32)
+  rebuildBlocked(far)
   const lone = makeUnit(far, 1, 'porter', 40.5 * TILE, 24.5 * TILE)
   makeUnit(far, 1, 'pike', lone.x + 40, lone.y)
   const foe = makeUnit(far, 0, 'pike', lone.x - 18, lone.y)
@@ -2066,7 +2070,9 @@ function captureHarvestAndPassages(): void {
     'the stalker tooltip no longer names Storage cover',
   )
   const sheltered = createMatch(4)
+  clearPad(sheltered, 30, 16, 50, 34)
   const shelterBin = makeBuilding(sheltered, 1, 'silo', 38, 24, true)
+  rebuildBlocked(sheltered)
   const binCenter = buildingCenter(shelterBin)
   const shelteredStalker = makeUnit(sheltered, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
   assert(
@@ -2091,7 +2097,9 @@ function captureHarvestAndPassages(): void {
   )
 
   const rising = createMatch(4)
+  clearPad(rising, 30, 16, 50, 34)
   const risingBin = makeBuilding(rising, 1, 'silo', 38, 24, false)
+  rebuildBlocked(rising)
   assert(!risingBin.complete && risingBin.hp > 0, 'the unfinished storage was not standing')
   const risingCenter = buildingCenter(risingBin)
   const risingStalker = makeUnit(rising, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
@@ -2117,7 +2125,9 @@ function captureHarvestAndPassages(): void {
   )
 
   const beyond = createMatch(4)
+  clearPad(beyond, 36, 20, 46, 32)
   const distantBin = makeBuilding(beyond, 1, 'silo', 8, 8, true)
+  rebuildBlocked(beyond)
   const distantCenter = buildingCenter(distantBin)
   const exposedStalker = makeUnit(beyond, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
   assert(
@@ -2131,7 +2141,9 @@ function captureHarvestAndPassages(): void {
   assert(exposedTaken?.owner === 0, `a stalker outside storage sight was not captured (${exposedTaken?.owner})`)
 
   const ai = createMatch(6)
+  clearPad(ai, 30, 16, 50, 34)
   const aiBin = makeBuilding(ai, 0, 'silo', 38, 24, true)
+  rebuildBlocked(ai)
   const aiCenter = buildingCenter(aiBin)
   const aiStalker = makeUnit(ai, 0, 'porter', aiCenter.x, aiCenter.y)
   const aiPike = makeUnit(ai, 1, 'pike', aiStalker.x + 30, aiStalker.y)
@@ -2156,7 +2168,9 @@ function captureHarvestAndPassages(): void {
   const worker = dump.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   const playerKeep = dump.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(worker && playerKeep, 'missing a stalker to drop dumps')
+  clearPad(dump, 16, 16, 28, 28)
   const bin = makeBuilding(dump, 0, 'silo', 20, 20, true)
+  rebuildBlocked(dump)
   worker.x = (bin.tx + 1) * TILE
   worker.y = (bin.ty + 2) * TILE + 8
   worker.cargo = 8
@@ -2173,7 +2187,9 @@ function captureHarvestAndPassages(): void {
 
   const raid = createMatch(3)
   raid.aiAcc = -10
+  clearPad(raid, 24, 16, 40, 32)
   const enemyBin = makeBuilding(raid, 1, 'silo', 30, 22, true)
+  rebuildBlocked(raid)
   enemyBin.stock = 20
   raid.oreHeld[1] = 100
   const thief = raid.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
@@ -2285,10 +2301,10 @@ function captureHarvestAndPassages(): void {
   for (const id of enemyIds) assert(unitById(duel, id)?.owner === 0, '1v1 capture left units with the loser')
 }
 
-function bothModesUseAnEightyByFiftyMap(): void {
+function bothModesUseTheirOwnMapSize(): void {
   const duel = createMatch(4)
-  assert(duel.mode === 'duel' && duel.mapW === 80 && duel.mapH === 50, `1 vs 1 map is ${duel.mapW}×${duel.mapH}`)
-  assert(duel.tiles.length === 80 * 50, '1 vs 1 did not fill 80×50 cells')
+  assert(duel.mode === 'duel' && duel.mapW === 80 && duel.mapH === 40, `1 vs 1 map is ${duel.mapW}×${duel.mapH}`)
+  assert(duel.tiles.length === 80 * 40, '1 vs 1 did not fill 80×40 cells')
   assert(duel.playerCount === 2, '1 vs 1 seated extra sides')
   const duelKeeps = duel.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
   assert(duelKeeps.length === 2, '1 vs 1 is missing a Silo')
@@ -2303,9 +2319,9 @@ function bothModesUseAnEightyByFiftyMap(): void {
   const inner = sight - TILE
   for (let seed = 1; seed <= 12; seed++) {
     const state = createMatch(seed, 'ffa')
-    assert(state.mapW === 80 && state.mapH === 50, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.mapW === 80 && state.mapH === 70, `free for all map is ${state.mapW}×${state.mapH}`)
     assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
-    assert(state.tiles.length === 80 * 50, 'the free-for-all map did not fill 80×50 cells')
+    assert(state.tiles.length === 80 * 70, 'the free-for-all map did not fill 80×70 cells')
     const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
     assert(keeps.length === 4, 'free for all is missing a Silo')
     const owners = new Set(keeps.map((keep) => keep.owner))

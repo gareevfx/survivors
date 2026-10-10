@@ -57,7 +57,7 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
 }
 
 /**
- * One Silo in each corner of the 80×50 field, then shuffled so any side can
+ * One Silo in each corner of the free-for-all field, then shuffled so any side can
  * start in any corner. Each site sits as far into its corner as the window allows.
  */
 export function pickFfaSites(seed: number): KeepSite[] {
@@ -341,9 +341,13 @@ export function narrowPassageCount(
   return count
 }
 
-/** Shared dump patches for the 80×50 field. The last row sits in the extra southern ground, clear of the corner yards. */
+/**
+ * Shared dump patches laid out on an 80×50 field. Rows scale with the live height
+ * so 1 vs 1 (80×40) and free-for-all (80×70) keep the same pattern, clear of the corner yards.
+ */
+const PATCH_REF_H = 50
 function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
-  const patches: Array<[number, number]> = [
+  const layout: Array<[number, number]> = [
     [24, 10],
     [36, 8],
     [48, 11],
@@ -357,6 +361,8 @@ function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
     [58, 16],
     [36, 39],
   ]
+  const scale = mapH / PATCH_REF_H
+  const patches = layout.map(([tx, ty]) => [tx, Math.round(ty * scale)] as [number, number])
   return patches.filter(([tx, ty]) => tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH)
 }
 

@@ -63,7 +63,6 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const endTitle = document.querySelector('#end-title')
   const endCopy = document.querySelector('#end-copy')
   const endSeed = document.querySelector('#end-seed')
-  const brand = document.querySelector('#brand-line')
   const sides = document.querySelector('#sides')
 
   if (ore) ore.textContent = String(state.oreHeld[0])
@@ -109,12 +108,6 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     toasts.innerHTML = state.toasts.map((toast) => `<div class="toast">${escapeHtml(toast.text)}</div>`).join('')
   }
 
-  if (brand) {
-    brand.textContent =
-      state.mode === 'ffa'
-        ? `Free for all · ${PLAYER_NAME.slice(0, state.playerCount).join(', ')}`
-        : `${PLAYER_NAME[0]} against ${PLAYER_NAME[1]}`
-  }
   if (sides) {
     sides.innerHTML = Array.from({ length: state.playerCount }, (_, owner) => {
       const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`

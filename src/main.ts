@@ -6,7 +6,7 @@ import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
-import { MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
+import { FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
@@ -34,7 +34,7 @@ if (duelNote) {
 }
 const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
 if (ffaNote) {
-  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on an ${MAP_W}×${MAP_H} field.`
+  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on an ${FFA_MAP_W}×${FFA_MAP_H} field.`
 }
 
 const sfx = new Sfx()

@@ -53,28 +53,11 @@ button, canvas { font: inherit; }
 }
 
 .brand strong {
-  display: block;
   font-family: Georgia, "Iowan Old Style", serif;
   font-weight: 500;
   letter-spacing: 0.08em;
   font-size: 18px;
-}
-
-.brand em {
-  display: block;
-  color: var(--muted);
-  font-style: normal;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-}
-
-.mark {
-  width: 16px;
-  height: 18px;
-  background:
-    linear-gradient(var(--blue), var(--blue)) 3px 0 / 3px 6px no-repeat,
-    linear-gradient(#6a655c, #6a655c) 0 6px / 16px 12px no-repeat;
-  border-radius: 1px;
+  line-height: 1;
 }
 
 .readout {

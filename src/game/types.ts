@@ -1,12 +1,12 @@
 export const TILE = 32
-/** Both match modes use an 80×50 field. */
+/** 1 vs 1 uses an 80×40 field. */
 export const MAP_W = 80
-export const MAP_H = 50
+export const MAP_H = 40
 export const MAP_PX_W = TILE * MAP_W
 export const MAP_PX_H = TILE * MAP_H
-/** Free-for-all uses the same 80×50 field as 1v1. */
+/** Free-for-all uses a taller 80×70 field. */
 export const FFA_MAP_W = 80
-export const FFA_MAP_H = 50
+export const FFA_MAP_H = 70
 
 export type MatchMode = 'duel' | 'ffa'
 
