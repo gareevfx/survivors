@@ -219,8 +219,11 @@ export function setUnitDestination(state: MatchState, unit: Unit, gx: number, gy
   return true
 }
 
-/** Walkable tiles kept around every side of an AI building, including corners. */
-export const AI_BUILD_GAP = 1
+/**
+ * Walkable tiles kept around every side of an AI building, including corners.
+ * Two open cells between SiloAI footprints. Human placement does not use this.
+ */
+export const AI_BUILD_GAP = 2
 /**
  * Chebyshev tiles between an AI footprint and any mineral tile.
  * A gap of 3 leaves two open tiles between the building and the patch.

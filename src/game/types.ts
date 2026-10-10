@@ -199,7 +199,7 @@ export type Order =
       focusId: number | null
       focusKind: TargetKind | null
     }
-  | { type: 'attack'; targetId: number; kind: TargetKind; resumeNode?: number }
+  | { type: 'attack'; targetId: number; kind: TargetKind; resumeNode?: number; resume?: Order }
   | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return'; binId?: number }
   | { type: 'construct'; buildingId: number }
 

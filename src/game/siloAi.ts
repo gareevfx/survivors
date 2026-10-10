@@ -1,13 +1,16 @@
 import { aiPlaceNearKeep, assignMiners, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
-import { findBuildSpotWithin, nearestWalkable } from './nav'
+import { findBuildSpotWithin, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
-import { buildingCenter, rockAt } from './state'
-import { BUILDING_STATS, TILE, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
+import { BUILDING_STATS, INTERACT, TILE, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { depositKnown } from './vision'
 
 /**
  * SiloAI plays one side from that side's own sight.
  * Computer opponents in 1 vs 1 and free-for-all use it, and so does `ai control`.
+ * Stalkers widen a corridor that pinches below two cells, then go back to the job.
+ * A Dumps heap far from this side's Silos and Storages gets its own Storage.
+ * Gorillas are the siege share and shoot buildings; Flashers take units.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -355,25 +358,48 @@ function storageNearDump(state: MatchState, owner: PlayerId, tx: number, ty: num
   return false
 }
 
+function farFromBuildings(
+  state: MatchState,
+  owner: PlayerId,
+  tx: number,
+  ty: number,
+  kinds: ReadonlyArray<'keep' | 'silo'>,
+): boolean {
+  for (const building of state.buildings) {
+    if (building.owner !== owner || building.hp <= 0) continue
+    if (!kinds.includes(building.kind as 'keep' | 'silo')) continue
+    const stats = BUILDING_STATS[building.kind]
+    if (footprintGap(building.tx, building.ty, stats.w, stats.h, tx, ty) <= SILO_AI_EXPANSION_REACH) return false
+  }
+  return true
+}
+
+/** True when no friendly Silo or Storage is close enough to take this heap's haul. */
+function farFromDropoffs(state: MatchState, owner: PlayerId, tx: number, ty: number): boolean {
+  return farFromBuildings(state, owner, tx, ty, ['keep', 'silo'])
+}
+
 /**
- * When the Silo patch is mined out, raise one Storage beside the nearest
- * Dumps heap this side has actually seen. The spot uses the same gap and
- * lane rules as a base building, and it stays within reach of that heap.
+ * Raise one Storage beside a Dumps heap this side has seen.
+ * The Silo patch running dry still sends them to the nearest known heap.
+ * A heap found while that patch remains gets a Storage too, when it sits
+ * farther than a haul from every Silo and Storage this side already has.
+ * The spot uses the same gap and lane rules as a base building.
  */
 function placeExpansionStorage(state: MatchState, side: Brain): boolean {
-  if (homeDumpsRemain(state, side.owner)) return false
   if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.silo.cost) return false
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
+  const homeGone = !homeDumpsRemain(state, side.owner)
   const home = buildingCenter(keep)
   const nodes = state.ore
-    .filter(
-      (node) =>
-        node.amount > 0 &&
-        node.base !== side.owner &&
-        depositKnown(state, side.owner, node.tx, node.ty) &&
-        !storageNearDump(state, side.owner, node.tx, node.ty),
-    )
+    .filter((node) => {
+      if (node.amount <= 0 || node.base === side.owner) return false
+      if (!depositKnown(state, side.owner, node.tx, node.ty)) return false
+      if (storageNearDump(state, side.owner, node.tx, node.ty)) return false
+      if (!homeGone && !farFromDropoffs(state, side.owner, node.tx, node.ty)) return false
+      return true
+    })
     .sort((a, b) => {
       const da = Math.hypot((a.tx + 0.5) * TILE - home.x, (a.ty + 0.5) * TILE - home.y)
       const db = Math.hypot((b.tx + 0.5) * TILE - home.x, (b.ty + 0.5) * TILE - home.y)
@@ -385,6 +411,43 @@ function placeExpansionStorage(state: MatchState, side: Brain): boolean {
     if (tryPlace(state, side.owner, 'silo', spot.tx, spot.ty, []) === null) return true
   }
   return false
+}
+
+/** One Stalker works each expansion heap that already has a Storage beside it. */
+function staffExpansionDumps(state: MatchState, side: Brain): void {
+  const homeGone = !homeDumpsRemain(state, side.owner)
+  for (const node of state.ore) {
+    if (node.amount <= 0 || node.base === side.owner) continue
+    if (!depositKnown(state, side.owner, node.tx, node.ty)) continue
+    if (!storageNearDump(state, side.owner, node.tx, node.ty)) continue
+    if (!homeGone && !farFromBuildings(state, side.owner, node.tx, node.ty, ['keep'])) continue
+    sendStalkerToDump(state, side, node.id)
+  }
+}
+
+function sendStalkerToDump(state: MatchState, side: Brain, nodeId: number): void {
+  const mining = state.units.some(
+    (unit) =>
+      unit.owner === side.owner &&
+      unit.kind === 'porter' &&
+      unit.hp > 0 &&
+      unit.order?.type === 'gather' &&
+      unit.order.nodeId === nodeId,
+  )
+  if (mining) return
+  const candidate = state.units.find((unit) => {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0) return false
+    if (unit.id === side.scout) return false
+    const order = unit.order
+    if (order?.type === 'construct') return false
+    if (order?.type === 'attack' && order.kind === 'rock' && order.resume) return false
+    return true
+  })
+  if (!candidate) return
+  candidate.order = { type: 'gather', nodeId, phase: 'approach' }
+  candidate.nodeMemory = nodeId
+  candidate.idleAcquire = false
+  stopMoving(candidate)
 }
 
 function seesFootprint(state: MatchState, side: Brain, tx: number, ty: number, w: number, h: number): boolean {
@@ -491,7 +554,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
 
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
   if (!keep?.complete) {
-    store(state, side)
+    finish(state, side)
     return
   }
 
@@ -537,8 +600,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
       dronesLeft -= 1
       continue
     }
-    const first = side.next
-    const second = first === 'pike' ? 'howler' : 'pike'
+    const first = siegeMix(state, side)
+    const second = first === 'howler' ? 'pike' : 'howler'
     if (tryTrain(state, readyYard.id, first) === null) side.next = second
     else tryTrain(state, readyYard.id, second)
   }
@@ -557,11 +620,11 @@ function runSide(state: MatchState, owner: PlayerId): void {
   const garrison = garrisonIds(army, keepPoint)
   if (homeAlert) {
     recallToCastle(state, army, keepPoint)
-    store(state, side)
+    finish(state, side)
     return
   }
   if (!side.attacking || !spotted) {
-    store(state, side)
+    finish(state, side)
     return
   }
   holdGarrison(state, army, garrison, keepPoint)
@@ -572,11 +635,23 @@ function runSide(state: MatchState, owner: PlayerId): void {
   if (blocker) assignRockBreakers(state, side.owner, blocker.rock, blocker.trapped)
   for (const unit of strikers) {
     const order = unit.order
-    if (castle && order?.type === 'attack' && order.kind === 'building' && order.targetId !== castle.id) {
+    if (
+      castle &&
+      unit.kind !== 'howler' &&
+      order?.type === 'attack' &&
+      order.kind === 'building' &&
+      order.targetId !== castle.id
+    ) {
       commandMove(state, [unit.id], dest.x, dest.y, true)
       continue
     }
-    if (castle && order?.type === 'attackMove' && order.focusKind === 'building' && order.focusId !== castle.id) {
+    if (
+      castle &&
+      unit.kind !== 'howler' &&
+      order?.type === 'attackMove' &&
+      order.focusKind === 'building' &&
+      order.focusId !== castle.id
+    ) {
       order.focusId = null
       order.focusKind = null
     }
@@ -585,7 +660,159 @@ function runSide(state: MatchState, owner: PlayerId): void {
     if (order?.type === 'attackMove' && Math.hypot(order.x - dest.x, order.y - dest.y) < 56) continue
     commandMove(state, [unit.id], dest.x, dest.y, true)
   }
+  finish(state, side)
+}
+
+function finish(state: MatchState, side: Brain): void {
+  staffExpansionDumps(state, side)
+  widenNarrowPassages(state, side)
   store(state, side)
+}
+
+/** Two Gorillas for each Flasher, so a siege has guns for buildings. */
+function siegeMix(state: MatchState, side: Brain): 'pike' | 'howler' {
+  let howlers = 0
+  let pikes = 0
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.hp <= 0) continue
+    if (unit.kind === 'howler') howlers += 1
+    if (unit.kind === 'pike') pikes += 1
+  }
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.hp <= 0) continue
+    for (const job of building.queue) {
+      if (job.kind === 'howler') howlers += 1
+      if (job.kind === 'pike') pikes += 1
+    }
+  }
+  return howlers < (pikes + 1) * 2 ? 'howler' : 'pike'
+}
+
+/**
+ * A moving Stalker that has entered a one-cell corridor, or is stuck on rock,
+ * tree, or dumps, clears the adjacent rock or tree until the gap is two cells.
+ * The job it left is stored on the swing and restored when the pinch is gone.
+ */
+function widenNarrowPassages(state: MatchState, side: Brain): void {
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    const order = unit.order
+    const widening = order?.type === 'attack' && order.kind === 'rock' && order.resume != null
+    const pinched = passageRock(state, unit)
+    if (widening && order?.type === 'attack') {
+      const rock = rockById(state, order.targetId)
+      if (rock && rock.hp > 0 && pinched) continue
+      if (!pinched) {
+        unit.order = order.resume ?? null
+        unit.idleAcquire = false
+        stopMoving(unit)
+        continue
+      }
+    }
+    if (!pinched) continue
+    if (!widening && !porterTraveling(state, unit)) continue
+    if (order?.type === 'attack' && order.kind === 'rock' && order.targetId === pinched.id) continue
+    const resume = order?.type === 'attack' ? order.resume : (order ?? undefined)
+    unit.order = { type: 'attack', targetId: pinched.id, kind: 'rock', resume }
+    unit.idleAcquire = false
+    stopMoving(unit)
+  }
+}
+
+function porterTraveling(state: MatchState, unit: Unit): boolean {
+  const order = unit.order
+  if (!order) return false
+  if (order.type === 'move' || order.type === 'attackMove') return true
+  if (order.type === 'gather' && order.phase !== 'mine') return true
+  if (order.type === 'construct') {
+    const building = state.buildings.find((entry) => entry.id === order.buildingId)
+    if (!building || building.hp <= 0) return false
+    return distToRect(unit.x, unit.y, buildingRect(building)) > INTERACT
+  }
+  return order.type === 'attack' && order.kind !== 'rock'
+}
+
+function passageRock(state: MatchState, unit: Unit): Rock | null {
+  const moving = unit.path.length > 0 || unit.goalX != null || unit.stuckT >= 0.35 || unit.stuckOrderT >= 0.8
+  if (!moving) return null
+  const seen = new Set<number>()
+  for (const cell of passageTiles(unit)) {
+    const key = cell.ty * state.mapW + cell.tx
+    if (seen.has(key)) continue
+    seen.add(key)
+    const rock = pinchRockAt(state, cell.tx, cell.ty)
+    if (rock) return rock
+  }
+  return rockSlowingPorter(state, unit)
+}
+
+function passageTiles(unit: Unit): Array<{ tx: number; ty: number }> {
+  const tiles: Array<{ tx: number; ty: number }> = []
+  const tx = Math.floor(unit.x / TILE)
+  const ty = Math.floor(unit.y / TILE)
+  tiles.push({ tx, ty })
+  const steps = unit.path.length > 0 ? unit.path.slice(0, 8) : []
+  for (const step of steps) {
+    tiles.push({ tx: Math.floor(step.x / TILE), ty: Math.floor(step.y / TILE) })
+  }
+  return tiles
+}
+
+/** A walkable cell with both sides closed. The rock or tree in that wall is the one to clear. */
+function pinchRockAt(state: MatchState, tx: number, ty: number): Rock | null {
+  if (!isWalkable(state, tx, ty)) return null
+  const blocked = (x: number, y: number) => !isWalkable(state, x, y)
+  const left = blocked(tx - 1, ty)
+  const right = blocked(tx + 1, ty)
+  const up = blocked(tx, ty - 1)
+  const down = blocked(tx, ty + 1)
+  const options: Array<[number, number]> = []
+  if (left && right && (!up || !down)) options.push([tx - 1, ty], [tx + 1, ty])
+  if (up && down && (!left || !right)) options.push([tx, ty - 1], [tx, ty + 1])
+  for (const [x, y] of options) {
+    const rock = rockAt(state, x, y)
+    if (rock && rock.hp > 0) return rock
+  }
+  return null
+}
+
+/** Stuck against a rock or tree, including when dumps close the other side of the step. */
+function rockSlowingPorter(state: MatchState, unit: Unit): Rock | null {
+  if (unit.stuckT < 0.35 && unit.stuckOrderT < 0.8) return null
+  const goal = travelGoal(unit)
+  if (!goal) return null
+  const tx = Math.floor(unit.x / TILE)
+  const ty = Math.floor(unit.y / TILE)
+  const dx = Math.sign(goal.x - unit.x)
+  const dy = Math.sign(goal.y - unit.y)
+  const steps: Array<[number, number]> = []
+  if (dx !== 0) steps.push([tx + dx, ty])
+  if (dy !== 0) steps.push([tx, ty + dy])
+  if (dx !== 0 && dy !== 0) steps.push([tx + dx, ty + dy])
+  for (const [x, y] of steps) {
+    const rock = rockAt(state, x, y)
+    if (rock && rock.hp > 0) return rock
+  }
+  for (const [sx, sy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    const rock = rockAt(state, tx + sx, ty + sy)
+    if (!rock || rock.hp <= 0) continue
+    if (!isWalkable(state, tx - sx, ty - sy)) return rock
+  }
+  return null
+}
+
+function travelGoal(unit: Unit): { x: number; y: number } | null {
+  if (unit.goalX != null && unit.goalY != null) return { x: unit.goalX, y: unit.goalY }
+  const order = unit.order
+  if (!order) return null
+  if (order.type === 'move' || order.type === 'attackMove') return { x: order.x, y: order.y }
+  if (order.type === 'attack' && order.resume) return travelGoal({ ...unit, order: order.resume })
+  return null
 }
 
 /** Combat units already beside the Castle stay there. Two is enough for a standing guard. */

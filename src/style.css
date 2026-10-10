@@ -299,18 +299,22 @@ button, canvas { font: inherit; }
 
 #dock {
   display: grid;
-  grid-template-columns: 168px minmax(180px, 1fr) minmax(240px, 320px);
-  gap: 10px;
+  grid-template-columns: 134px minmax(150px, 1fr) minmax(192px, 256px);
+  gap: 8px;
   align-items: stretch;
-  min-height: 148px;
-  padding: 10px;
+  height: 118px;
+  min-height: 118px;
+  max-height: 118px;
+  padding: 8px;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%), var(--panel);
   border-top: 1px solid var(--line);
 }
 
 #minimap {
   width: 100%;
-  height: 128px;
+  height: 100%;
+  min-height: 0;
   background: #141a12;
   border: 1px solid var(--line);
   cursor: pointer;
@@ -320,23 +324,23 @@ button, canvas { font: inherit; }
 #inspect {
   min-width: 0;
   min-height: 0;
-  max-height: min(320px, 42vh);
+  max-height: 100%;
   overflow-y: auto;
-  padding: 4px 8px 8px;
+  padding: 2px 6px 4px;
 }
 
 .lore {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 #inspect h2 {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-family: Georgia, "Iowan Old Style", serif;
   font-weight: 500;
-  font-size: 26px;
+  font-size: 22px;
   letter-spacing: 0.01em;
 }
 
@@ -349,10 +353,10 @@ button, canvas { font: inherit; }
 }
 
 .meta {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .meter {
@@ -371,15 +375,18 @@ button, canvas { font: inherit; }
 #commands {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
   align-content: start;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 .cmd {
   position: relative;
-  min-height: 58px;
+  min-height: 46px;
   text-align: left;
-  padding: 8px 8px 6px;
+  padding: 6px 6px 4px;
   background: #243024;
   color: var(--text);
   border: 1px solid #46563c;
@@ -396,12 +403,12 @@ button, canvas { font: inherit; }
   font-family: inherit;
 }
 
-.cmd-label { display: block; font-size: 14px; }
+.cmd-label { display: block; font-size: 13px; }
 
 .stalker-icon,
 .unit-icon {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   display: inline-block;
   vertical-align: middle;
   margin-right: 6px;
@@ -506,12 +513,16 @@ button, canvas { font: inherit; }
   #topbar { flex-wrap: wrap; gap: 8px; }
   .brand { width: 100%; }
   #dock {
-    grid-template-columns: 108px 1fr;
+    grid-template-columns: 86px 1fr;
     grid-template-rows: auto auto;
+    height: auto;
     min-height: 0;
+    max-height: none;
+    overflow: visible;
   }
-  #commands { grid-column: 1 / -1; }
-  #minimap { height: 96px; }
+  #commands { grid-column: 1 / -1; max-height: 92px; }
+  #inspect { max-height: 77px; }
+  #minimap { height: 77px; }
   .card h2 { font-size: 30px; }
   #hint { align-items: flex-start; }
 }

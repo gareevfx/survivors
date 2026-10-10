@@ -1986,6 +1986,10 @@ towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
 siloAiRaisesStorageAtRemoteDumps()
+siloAiWidensNarrowPassages()
+siloAiStoresAtNewDumpsWhileHomeRemains()
+siloAiAimsGorillasAtBuildings()
+humanPlacementIgnoresAiGap()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2392,6 +2396,7 @@ function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, 
 }
 
 function aiBuildingsLeaveAGapAndAvoidMinerals(): void {
+  assert(AI_BUILD_GAP === 2, 'SiloAI no longer leaves two cells between buildings')
   for (const seed of [1, 2, 5, 8]) {
     const state = createMatch(seed)
     state.oreHeld[1] = 8000
@@ -3386,4 +3391,280 @@ function siloAiRaisesStorageAtRemoteDumps(): void {
     (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'gather' && unit.order.binId === bin.id,
   )
   assert(raider, 'SiloAI did not send a Stalker to raid the enemy Storage')
+}
+
+function siloAiWidensNarrowPassages(): void {
+  const state = createMatch(8)
+  const open: Array<[number, number]> = []
+  for (let x = 8; x <= 28; x++) open.push([x, 20])
+  carveGround(state, open)
+  for (const node of state.ore) node.amount = 0
+  rebuildBlocked(state)
+  const porter = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(porter, 'missing a SiloAI Stalker')
+  parkOtherWorkers(state, porter.id)
+  porter.x = 8.5 * TILE
+  porter.y = 20.5 * TILE
+  commandMove(state, [porter.id], 28.5 * TILE, 20.5 * TILE, false)
+  assert((unitById(state, porter.id)?.path.length ?? 0) > 0, 'the Stalker has no path through the corridor')
+  state.oreHeld[1] = 0
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const order = unitById(state, porter.id)?.order
+  assert(
+    order?.type === 'attack' && order.kind === 'rock' && order.resume?.type === 'move',
+    'SiloAI Stalker did not stop to widen the one-cell corridor',
+  )
+  const wall = state.rocks.find((rock) => rock.id === order.targetId)
+  assert(wall && (wall.ty === 19 || wall.ty === 21), 'the Stalker swung at something other than the corridor wall')
+  wall.hp = 0
+  step(state, 1 / 60)
+  const resumed = unitById(state, porter.id)?.order
+  assert(resumed?.type === 'move', 'the Stalker did not resume the move after the passage opened')
+  assert(isWalkable(state, wall.tx, wall.ty), 'clearing the wall left the cell blocked')
+
+  const hands = createMatch(8)
+  const handsOpen: Array<[number, number]> = []
+  for (let x = 8; x <= 28; x++) handsOpen.push([x, 20])
+  carveGround(hands, handsOpen)
+  for (const node of hands.ore) node.amount = 0
+  rebuildBlocked(hands)
+  const human = hands.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(human, 'missing a player Stalker')
+  human.x = 8.5 * TILE
+  human.y = 20.5 * TILE
+  commandMove(hands, [human.id], 28.5 * TILE, 20.5 * TILE, false)
+  hands.aiControl = false
+  updateSiloAi(hands, 0.5)
+  assert(unitById(hands, human.id)?.order?.type === 'move', 'a player Stalker widened a passage on its own')
+
+  hands.aiControl = true
+  hands.playerAiAcc = 0
+  updateSiloAi(hands, 0.5)
+  const assisted = unitById(hands, human.id)?.order
+  assert(
+    assisted?.type === 'attack' && assisted.kind === 'rock' && assisted.resume?.type === 'move',
+    'ai control did not widen the passage for the player Stalker',
+  )
+
+  const pinched = createMatch(9)
+  const lane: Array<[number, number]> = []
+  for (let x = 8; x <= 24; x++) lane.push([x, 24])
+  carveGround(pinched, lane)
+  for (const node of pinched.ore) node.amount = 0
+  for (let x = 8; x <= 24; x++) {
+    pinched.tiles[23 * MAP_W + x] = 0
+    pinched.rocks = pinched.rocks.filter((rock) => rock.tx !== x || rock.ty !== 23)
+    pinched.ore.push({ id: pinched.nextId++, tx: x, ty: 23, amount: 420 })
+    const south = pinched.rocks.find((rock) => rock.tx === x && rock.ty === 25 && rock.hp > 0)
+    if (south) south.kind = 'tree'
+  }
+  rebuildBlocked(pinched)
+  const hauler = pinched.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(hauler, 'missing a Stalker for the dumps pinch')
+  parkOtherWorkers(pinched, hauler.id)
+  hauler.x = 8.5 * TILE
+  hauler.y = 24.5 * TILE
+  commandMove(pinched, [hauler.id], 24.5 * TILE, 24.5 * TILE, false)
+  pinched.oreHeld[1] = 0
+  pinched.aiAcc = 0
+  updateSiloAi(pinched, 0.5)
+  const treeOrder = unitById(pinched, hauler.id)?.order
+  assert(treeOrder?.type === 'attack' && treeOrder.kind === 'rock', 'SiloAI ignored a corridor closed by dumps and trees')
+  const tree = pinched.rocks.find((rock) => rock.id === treeOrder.targetId)
+  assert(tree?.kind === 'tree' && tree.ty === 25, 'the Stalker did not clear the tree wall beside the dumps')
+
+  const slowed = createMatch(10)
+  const wide: Array<[number, number]> = []
+  for (let x = 8; x <= 24; x++) {
+    wide.push([x, 30], [x, 31])
+  }
+  carveGround(slowed, wide)
+  for (const node of slowed.ore) node.amount = 0
+  slowed.tiles[30 * MAP_W + 16] = 1
+  slowed.rocks.push({ id: slowed.nextId++, tx: 16, ty: 30, hp: ROCK_HP, hitFlash: 0, kind: 'rock' })
+  rebuildBlocked(slowed)
+  const stuck = slowed.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(stuck, 'missing a Stalker for the slowed step')
+  parkOtherWorkers(slowed, stuck.id)
+  stuck.x = 15.5 * TILE
+  stuck.y = 30.5 * TILE
+  commandMove(slowed, [stuck.id], 22.5 * TILE, 30.5 * TILE, false)
+  stuck.stuckT = 0.6
+  slowed.oreHeld[1] = 0
+  slowed.aiAcc = 0
+  updateSiloAi(slowed, 0.5)
+  const stuckOrder = unitById(slowed, stuck.id)?.order
+  assert(
+    stuckOrder?.type === 'attack' && stuckOrder.kind === 'rock' && stuckOrder.resume?.type === 'move',
+    'a slowed SiloAI Stalker did not clear the rock in front of it',
+  )
+  const jammed = slowed.rocks.find((rock) => rock.id === stuckOrder.targetId)
+  assert(jammed?.tx === 16 && jammed.ty === 30, 'the slowed Stalker cleared the wrong cell')
+}
+
+function siloAiStoresAtNewDumpsWhileHomeRemains(): void {
+  const state = createMatch(7)
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing the Silo')
+  assert(
+    state.ore.some((node) => node.base === 1 && node.amount > 0),
+    'the near-Silo Dumps were already gone',
+  )
+  const cx = 40
+  const cy = 24
+  const homeGap = footprintGap(keep.tx, keep.ty, BUILDING_STATS.keep.w, BUILDING_STATS.keep.h, cx, cy)
+  assert(homeGap > SILO_AI_EXPANSION_REACH, `the new heap is only ${homeGap} tiles from the Silo`)
+  const radius = 12
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      state.tiles[y * state.mapW + x] = 0
+    }
+  }
+  state.rocks = state.rocks.filter((rock) => Math.max(Math.abs(rock.tx - cx), Math.abs(rock.ty - cy)) > radius)
+  for (const node of state.ore) {
+    if (node.base === 1) continue
+    if (Math.max(Math.abs(node.tx - cx), Math.abs(node.ty - cy)) <= radius + 2) node.amount = 0
+  }
+  const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
+  state.ore.push(remote)
+  state.aiExplored[cy * state.mapW + cx] = 1
+  rebuildBlocked(state)
+  state.oreHeld[1] = 800
+  state.aiAcc = 0
+  const before = new Set(state.buildings.map((building) => building.id))
+  updateSiloAi(state, 0.5)
+  const built = state.buildings.find(
+    (building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id),
+  )
+  assert(built, 'SiloAI did not raise a Storage at a newly found far Dumps heap')
+  const stats = BUILDING_STATS.silo
+  const gap = footprintGap(built.tx, built.ty, stats.w, stats.h, remote.tx, remote.ty)
+  assert(
+    gap >= AI_MINERAL_KEEP && gap <= SILO_AI_EXPANSION_REACH,
+    `the new Storage is ${gap} tiles from the Dumps heap`,
+  )
+  for (let y = built.ty - AI_BUILD_GAP; y <= built.ty + stats.h - 1 + AI_BUILD_GAP; y++) {
+    for (let x = built.tx - AI_BUILD_GAP; x <= built.tx + stats.w - 1 + AI_BUILD_GAP; x++) {
+      const inside = x >= built.tx && x < built.tx + stats.w && y >= built.ty && y < built.ty + stats.h
+      if (inside) continue
+      assert(isWalkable(state, x, y), `new Storage is missing the two-cell gap at ${x},${y}`)
+    }
+  }
+  assert(
+    state.ore.some((node) => node.base === 1 && node.amount > 0),
+    'SiloAI waited until the near-Silo Dumps were gone',
+  )
+  const hauling = state.units.some(
+    (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && unit.order?.type === 'gather' && unit.order.nodeId === remote.id,
+  )
+  assert(hauling, 'no Stalker went to mine the new Dumps heap')
+
+  built.complete = true
+  built.progress = 1
+  const miner = state.units.find(
+    (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'gather' && unit.order.nodeId === remote.id,
+  )
+  assert(miner, 'the miner disappeared')
+  miner.x = (remote.tx + 2.5) * TILE
+  miner.y = (remote.ty + 0.5) * TILE
+  miner.cargo = 8
+  miner.order = { type: 'gather', nodeId: remote.id, phase: 'return' }
+  miner.path = []
+  miner.goalX = null
+  miner.goalY = null
+  state.aiAcc = -10
+  step(state, 1 / 60)
+  const goalX = miner.goalX
+  const goalY = miner.goalY
+  assert(goalX != null && goalY != null, 'the loaded Stalker did not head for a drop-off')
+  const store = buildingCenter(built)
+  const home = buildingCenter(keep)
+  assert(
+    Math.hypot(goalX - store.x, goalY - store.y) < Math.hypot(goalX - home.x, goalY - home.y),
+    'the Stalker carried the new Dumps back to the Silo instead of the Storage',
+  )
+}
+
+function siloAiAimsGorillasAtBuildings(): void {
+  const state = createMatch(15)
+  const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(foe, 'missing the enemy Silo')
+  const center = buildingCenter(foe)
+  const gorilla = makeUnit(state, 1, 'howler', center.x + 110, center.y)
+  const flasher = makeUnit(state, 1, 'pike', center.x + 110, center.y + 20)
+  makeUnit(state, 0, 'pike', center.x + 70, center.y)
+  gorilla.order = { type: 'attackMove', x: center.x, y: center.y, focusId: null, focusKind: null }
+  flasher.order = { type: 'attackMove', x: center.x, y: center.y, focusId: null, focusKind: null }
+  step(state, 1 / 60)
+  const ape = unitById(state, gorilla.id)?.order
+  const bike = unitById(state, flasher.id)?.order
+  assert(ape?.type === 'attackMove' && ape.focusKind === 'building', 'the Gorilla did not aim at the enemy building')
+  assert(ape.focusId === foe.id, 'the Gorilla ignored the Silo for something else')
+  assert(bike?.type === 'attackMove' && bike.focusKind === 'unit', 'the Flasher aimed at a building while a unit was in reach')
+
+  const yard = makeBuilding(state, 0, 'yard', foe.tx + 6, foe.ty, true)
+  const alone = makeUnit(state, 1, 'howler', (yard.tx + 1.5) * TILE + 80, (yard.ty + 1) * TILE)
+  alone.order = { type: 'attackMove', x: (yard.tx + 1.5) * TILE, y: (yard.ty + 1) * TILE, focusId: null, focusKind: null }
+  step(state, 1 / 60)
+  const siege = unitById(state, alone.id)?.order
+  assert(
+    siege?.type === 'attackMove' && siege.focusKind === 'building' && siege.focusId === yard.id,
+    'the Gorilla did not aim at the Factory',
+  )
+
+  const train = createMatch(6)
+  for (const building of train.buildings) {
+    if (building.owner === 1 && building.kind === 'yard') building.complete = false
+  }
+  const home = train.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the Factory')
+  const factory = makeBuilding(train, 1, 'yard', home.tx + 6, home.ty - 6, true)
+  makeBuilding(train, 1, 'yard', home.tx + 6, home.ty + 6, false)
+  makeUnit(train, 1, 'drone', (home.tx + 1.5) * TILE, (home.ty + 1.5) * TILE)
+  makeUnit(train, 1, 'drone', (home.tx + 2.5) * TILE, (home.ty + 1.5) * TILE)
+  makeBuilding(train, 1, 'silo', 20, 20, true)
+  makeBuilding(train, 1, 'silo', 24, 20, true)
+  train.oreHeld[1] = 4000
+  recomputeSupply(train)
+  let howlers = 0
+  let pikes = 0
+  for (let n = 0; n < 6; n++) {
+    train.aiAcc = 0
+    updateSiloAi(train, 0.5)
+    const job = factory.queue.find((entry) => entry.kind === 'howler' || entry.kind === 'pike')
+    assert(job, `Factory train ${n + 1} was not a Gorilla or Flasher`)
+    if (job.kind === 'howler') howlers += 1
+    else pikes += 1
+    makeUnit(train, 1, job.kind, 90 + n * 12, 90)
+    factory.queue = factory.queue.filter((entry) => entry !== job)
+    train.oreHeld[1] = 4000
+    recomputeSupply(train)
+  }
+  assert(howlers === 4 && pikes === 2, `siege mix was ${howlers} Gorillas and ${pikes} Flashers`)
+}
+
+function humanPlacementIgnoresAiGap(): void {
+  const state = createMatch(2)
+  state.oreHeld[0] = 500
+  const stats = BUILDING_STATS.yard
+  let placed = false
+  for (let ty = 1; ty < MAP_H - stats.h - 1 && !placed; ty++) {
+    for (let tx = 1; tx < MAP_W - stats.w - 1 && !placed; tx++) {
+      if (!canPlace(state, 'yard', tx, ty)) continue
+      let tight = false
+      for (let y = ty - 1; y <= ty + stats.h; y++) {
+        for (let x = tx - 1; x <= tx + stats.w; x++) {
+          const inside = x >= tx && x < tx + stats.w && y >= ty && y < ty + stats.h
+          if (!inside && !isWalkable(state, x, y)) tight = true
+        }
+      }
+      if (!tight) continue
+      const error = tryPlace(state, 0, 'yard', tx, ty, [])
+      assert(error == null, `human placement refused a legal footprint (${error})`)
+      placed = true
+    }
+  }
+  assert(placed, 'no human footprint sat against rock, so the gap check could not run')
 }

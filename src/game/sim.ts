@@ -133,9 +133,13 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   if (order.type === 'attack') {
     const focus = getTarget(state, order.targetId, order.kind)
     if (!focus || !isAttackable(unit, focus)) {
+      const resumeOrder = order.kind === 'rock' ? order.resume : undefined
+      const resumeNode = order.kind === 'rock' ? order.resumeNode : undefined
       unit.order = null
       unit.idleAcquire = false
       stopMoving(unit)
+      if (resumeOrder && unit.kind === 'porter' && unit.hp > 0) unit.order = resumeOrder
+      else if (resumeNode != null && unit.kind === 'porter' && unit.hp > 0) resumeGather(state, unit, resumeNode)
       return
     }
     if (unit.idleAcquire && unit.leashX != null && unit.leashY != null) {
@@ -1042,7 +1046,37 @@ function pickFireTarget(state: MatchState, unit: Unit): Target | null {
   return nearestHostile(state, unit, stats.range + 40, order?.type === 'attackMove')
 }
 
+function siloControlled(state: MatchState, unit: Unit): boolean {
+  return unit.owner === 0 ? state.aiControl : unit.owner > 0
+}
+
+/** Gorillas on a SiloAI attack-move shoot buildings before units. */
+function nearestSiegeBuilding(state: MatchState, unit: Unit, radius: number): Target | null {
+  let best: Target | null = null
+  let bestD = radius
+  for (const building of state.buildings) {
+    if (building.owner === unit.owner || building.hp <= 0) continue
+    if (building.kind !== 'keep' && building.kind !== 'silo' && building.kind !== 'yard' && building.kind !== 'tower') continue
+    const center = buildingCenter(building)
+    const d = Math.hypot(center.x - unit.x, center.y - unit.y)
+    if (d < bestD) {
+      bestD = d
+      best = buildingTarget(building)
+    }
+  }
+  return best
+}
+
 function nearestHostile(state: MatchState, unit: Unit, radius: number, buildingsToo: boolean): Target | null {
+  if (
+    buildingsToo &&
+    unit.kind === 'howler' &&
+    unit.order?.type === 'attackMove' &&
+    siloControlled(state, unit)
+  ) {
+    const structure = nearestSiegeBuilding(state, unit, radius)
+    if (structure) return structure
+  }
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
@@ -1412,11 +1446,13 @@ function clearBrokenRocks(state: MatchState): void {
   rebuildBlocked(state)
   for (const unit of state.units) {
     if (unit.order?.type === 'attack' && unit.order.kind === 'rock' && deadIds.has(unit.order.targetId)) {
+      const resumeOrder = unit.order.resume
       const resume = unit.order.resumeNode
       unit.order = null
       unit.idleAcquire = false
       stopMoving(unit)
-      if (resume != null && unit.kind === 'porter' && unit.hp > 0) resumeGather(state, unit, resume)
+      if (resumeOrder && unit.kind === 'porter' && unit.hp > 0) unit.order = resumeOrder
+      else if (resume != null && unit.kind === 'porter' && unit.hp > 0) resumeGather(state, unit, resume)
     }
     if (
       unit.order?.type === 'attackMove' &&
