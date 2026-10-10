@@ -27,14 +27,14 @@ const RIM_MIN_R2 = Math.ceil(((KEEP_SIGHT - TILE) * (KEEP_SIGHT - TILE)) / (TILE
  * site of a random pair near that maximum, so each match shifts but the two Castles
  * stay as far apart as the corners allow.
  */
-export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite } {
+export function pickKeepSites(seed: number, mapW = MAP_W, mapH = MAP_H): { player: KeepSite; enemy: KeepSite } {
   const rng = mulberry32(seed + 0x51ed)
   const margin = 2
   const slack = 6
-  const southWest = window(margin, MAP_H - margin - KEEP_H - 8, margin + 10, MAP_H - margin - KEEP_H)
-  const southEast = window(MAP_W - margin - KEEP_W - 10, MAP_H - margin - KEEP_H - 8, MAP_W - margin - KEEP_W, MAP_H - margin - KEEP_H)
+  const southWest = window(margin, mapH - margin - KEEP_H - 8, margin + 10, mapH - margin - KEEP_H)
+  const southEast = window(mapW - margin - KEEP_W - 10, mapH - margin - KEEP_H - 8, mapW - margin - KEEP_W, mapH - margin - KEEP_H)
   const northWest = window(margin, margin, margin + 10, margin + 8)
-  const northEast = window(MAP_W - margin - KEEP_W - 10, margin, MAP_W - margin - KEEP_W, margin + 8)
+  const northEast = window(mapW - margin - KEEP_W - 10, margin, mapW - margin - KEEP_W, margin + 8)
   const pairings = [
     [southWest, northEast],
     [southEast, northWest],
@@ -52,7 +52,7 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
   }
   const far = pairs.filter((pair) => pair.distance >= max - slack)
   const pick = far[Math.floor(rng() * far.length)] ?? pairs[0]
-  if (!pick) return { player: { tx: margin, ty: MAP_H - margin - KEEP_H }, enemy: { tx: MAP_W - margin - KEEP_W, ty: margin } }
+  if (!pick) return { player: { tx: margin, ty: mapH - margin - KEEP_H }, enemy: { tx: mapW - margin - KEEP_W, ty: margin } }
   return { player: pick.player, enemy: pick.enemy }
 }
 
@@ -60,11 +60,11 @@ export function pickKeepSites(seed: number): { player: KeepSite; enemy: KeepSite
  * One Silo in each corner of the free-for-all field, then shuffled so any side can
  * start in any corner. Each site sits as far into its corner as the window allows.
  */
-export function pickFfaSites(seed: number): KeepSite[] {
+export function pickFfaSites(seed: number, mapW = FFA_MAP_W, mapH = FFA_MAP_H): KeepSite[] {
   const rng = mulberry32(seed + 0x51ed)
   const margin = 2
-  const south = FFA_MAP_H - margin - KEEP_H
-  const east = FFA_MAP_W - margin - KEEP_W
+  const south = mapH - margin - KEEP_H
+  const east = mapW - margin - KEEP_W
   const corners = [
     pickCorner(rng, window(margin, south - 8, margin + 10, south), (site) => site.ty * 100 - site.tx),
     pickCorner(rng, window(east - 10, south - 8, east, south), (site) => site.ty * 100 + site.tx),
@@ -160,7 +160,7 @@ export function generateBattlefield(
   const tiles = new Uint8Array(mapW * mapH)
   const guarded = (tx: number, ty: number) => sites.some((site) => inCamp(site, tx, ty))
   const at = (tx: number, ty: number) => ty * mapW + tx
-  // Density matches the old 80×45 field, so the taller map keeps the same clutter.
+  // Density matches the old 80×45 field, so a wider or taller map keeps the same clutter per cell.
   const blobs = Math.max(1, Math.round((96 * mapW * mapH) / (80 * 45)))
 
   for (let i = 0; i < blobs; i++) {
@@ -342,9 +342,11 @@ export function narrowPassageCount(
 }
 
 /**
- * Shared dump patches laid out on an 80×50 field. Rows scale with the live height
- * so 1 vs 1 (80×40) and free-for-all (80×70) keep the same pattern, clear of the corner yards.
+ * Shared dump patches laid out on an 80×50 field. Columns and rows scale with the
+ * live size so 1 vs 1 (80×40) and free-for-all (90×60) keep the same pattern,
+ * clear of the corner yards.
  */
+const PATCH_REF_W = 80
 const PATCH_REF_H = 50
 function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
   const layout: Array<[number, number]> = [
@@ -361,8 +363,9 @@ function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
     [58, 16],
     [36, 39],
   ]
-  const scale = mapH / PATCH_REF_H
-  const patches = layout.map(([tx, ty]) => [tx, Math.round(ty * scale)] as [number, number])
+  const scaleX = mapW / PATCH_REF_W
+  const scaleY = mapH / PATCH_REF_H
+  const patches = layout.map(([tx, ty]) => [Math.round(tx * scaleX), Math.round(ty * scaleY)] as [number, number])
   return patches.filter(([tx, ty]) => tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH)
 }
 

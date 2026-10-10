@@ -2323,9 +2323,9 @@ function bothModesUseTheirOwnMapSize(): void {
   const inner = sight - TILE
   for (let seed = 1; seed <= 12; seed++) {
     const state = createMatch(seed, 'ffa')
-    assert(state.mapW === 80 && state.mapH === 70, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.mapW === 90 && state.mapH === 60, `free for all map is ${state.mapW}×${state.mapH}`)
     assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
-    assert(state.tiles.length === 80 * 70, 'the free-for-all map did not fill 80×70 cells')
+    assert(state.tiles.length === 90 * 60, 'the free-for-all map did not fill 90×60 cells')
     const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
     assert(keeps.length === 4, 'free for all is missing a Silo')
     const owners = new Set(keeps.map((keep) => keep.owner))

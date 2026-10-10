@@ -34,7 +34,7 @@ if (duelNote) {
 }
 const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
 if (ffaNote) {
-  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on an ${FFA_MAP_W}×${FFA_MAP_H} field.`
+  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on a ${FFA_MAP_W}×${FFA_MAP_H} field.`
 }
 
 const sfx = new Sfx()

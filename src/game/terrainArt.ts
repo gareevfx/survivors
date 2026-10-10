@@ -85,7 +85,7 @@ function yardsFor(seed: number, mapW: number, mapH: number, ffa: boolean): Uint8
   const key = `${seed}:${mapW}x${mapH}:${ffa ? 'ffa' : 'duel'}`
   if (yardMask && yardKey === key) return yardMask
   const mask = new Uint8Array(mapW * mapH)
-  const sites = ffa ? pickFfaSites(seed) : [pickKeepSites(seed).player, pickKeepSites(seed).enemy]
+  const sites = ffa ? pickFfaSites(seed, mapW, mapH) : [pickKeepSites(seed, mapW, mapH).player, pickKeepSites(seed, mapW, mapH).enemy]
   const footprintW = BUILDING_STATS.keep.w
   const footprintH = BUILDING_STATS.keep.h
   for (const site of sites) {
