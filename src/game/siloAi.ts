@@ -1,8 +1,8 @@
-import { aiPlaceNearKeep, assignMiners, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
 import { findBuildSpotWithin, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, INTERACT, TILE, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { BUILDING_STATS, INTERACT, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { depositKnown } from './vision'
 
 /**
@@ -12,6 +12,9 @@ import { depositKnown } from './vision'
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
  * Gorillas are the siege share and shoot buildings; Flashers take units.
  * Combat units muster beside the Silo and leave in a wave, not one by one.
+ * A remote Storage goes up only when that ground is already covered or no enemy
+ * has been seen there. Spare Flashers and Gorillas walk there first. An unfinished
+ * Storage does not protect the builder, so a capture or a close enemy pulls the other Stalkers off it.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -380,17 +383,123 @@ function farFromDropoffs(state: MatchState, owner: PlayerId, tx: number, ty: num
   return farFromBuildings(state, owner, tx, ty, ['keep', 'silo'])
 }
 
+/** An enemy this close to a remote Storage site can reach a builder before the Storage is finished. */
+const EXPANSION_THREAT = 8 * TILE
+
+type ExpansionPlan =
+  | { kind: 'none' }
+  | { kind: 'wait'; x: number; y: number }
+  | { kind: 'escort'; x: number; y: number }
+  | { kind: 'build'; tx: number; ty: number }
+
+function ownKeep(state: MatchState, owner: PlayerId): Building | undefined {
+  return state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+}
+
+/** True when this point sits outside the Silo's own sight, so an unfinished Storage there leaves Stalkers open. */
+function remoteFromKeep(state: MatchState, owner: PlayerId, x: number, y: number): boolean {
+  const keep = ownKeep(state, owner)
+  if (!keep) return false
+  const home = buildingCenter(keep)
+  return Math.hypot(x - home.x, y - home.y) > BUILDING_STATS.keep.sight
+}
+
+function spotCenter(tx: number, ty: number): { x: number; y: number } {
+  const stats = BUILDING_STATS.silo
+  return { x: (tx + stats.w / 2) * TILE, y: (ty + stats.h / 2) * TILE }
+}
+
+/** Silo, Flasher, or Gorilla sight already reaches this ground. An unfinished Storage does not count. */
+function siteCovered(state: MatchState, owner: PlayerId, x: number, y: number): boolean {
+  for (const building of state.buildings) {
+    if (building.owner !== owner || building.hp <= 0 || building.kind !== 'keep') continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - x, center.y - y) <= BUILDING_STATS.keep.sight) return true
+  }
+  for (const ally of state.units) {
+    if (ally.owner !== owner || ally.hp <= 0) continue
+    if (ally.kind !== 'pike' && ally.kind !== 'howler') continue
+    if (Math.hypot(ally.x - x, ally.y - y) <= UNIT_STATS[ally.kind].sight) return true
+  }
+  return false
+}
+
+/** Hostile units and buildings this side can see right now, close to the site. */
+function knownEnemyNear(state: MatchState, side: Brain, x: number, y: number): boolean {
+  for (const unit of state.units) {
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (Math.hypot(unit.x - x, unit.y - y) <= EXPANSION_THREAT) return true
+  }
+  for (const building of state.buildings) {
+    if (building.owner === side.owner || building.hp <= 0) continue
+    const stats = BUILDING_STATS[building.kind]
+    if (!seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)) continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - x, center.y - y) <= EXPANSION_THREAT) return true
+  }
+  return false
+}
+
+/** Combat units that are not the Silo guard and are not already out with a wave. Two is a small escort. */
+function spareEscorts(state: MatchState, side: Brain, x: number, y: number): Unit[] {
+  if (side.attacking) return []
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return []
+  const keepPoint = buildingCenter(keep)
+  const army = state.units.filter(
+    (unit) => unit.owner === side.owner && unit.hp > 0 && (unit.kind === 'pike' || unit.kind === 'howler'),
+  )
+  const garrison = garrisonIds(army, keepPoint)
+  return army
+    .filter((unit) => !garrison.has(unit.id))
+    .sort((a, b) => {
+      const rank = (unit: Unit) => (unit.kind === 'howler' ? 0 : 1)
+      const byKind = rank(a) - rank(b)
+      if (byKind !== 0) return byKind
+      return Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y)
+    })
+    .slice(0, 2)
+}
+
+function escortsStuck(escorts: Unit[], x: number, y: number): boolean {
+  if (!escorts.length) return false
+  return escorts.every((unit) => {
+    const order = unit.order
+    const aimed =
+      (order?.type === 'attackMove' || order?.type === 'move') && Math.hypot(order.x - x, order.y - y) < 80
+    const far = Math.hypot(unit.x - x, unit.y - y) > UNIT_STATS[unit.kind].sight
+    const idle = unit.path.length === 0 && (unit.goalX == null || unit.stuckT > 1)
+    return aimed && far && idle
+  })
+}
+
+function builderOf(unit: Unit, buildingId: number): boolean {
+  const order = unit.order
+  if (!order) return false
+  if (order.type === 'construct' && order.buildingId === buildingId) return true
+  return order.type === 'attack' && order.resume?.type === 'construct' && order.resume.buildingId === buildingId
+}
+
+function livingBuilder(state: MatchState, owner: PlayerId, buildingId: number): Unit | undefined {
+  return state.units.find(
+    (unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && builderOf(unit, buildingId),
+  )
+}
+
 /**
  * Raise one Storage beside a Dumps heap this side has seen.
  * The Silo patch running dry still sends them to the nearest known heap.
  * A heap found while that patch remains gets a Storage too, when it sits
  * farther than a haul from every Silo and Storage this side already has.
+ * The builder goes only when the site is inside Silo, Flasher, or Gorilla sight,
+ * or when no enemy has been seen nearby. Spare combat walks there first.
  * The spot uses the same gap and lane rules as a base building.
  */
-function placeExpansionStorage(state: MatchState, side: Brain): boolean {
-  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.silo.cost) return false
-  const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
-  if (!keep) return false
+function expansionPlan(state: MatchState, side: Brain): ExpansionPlan {
+  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.silo.cost) return { kind: 'none' }
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return { kind: 'none' }
   const homeGone = !homeDumpsRemain(state, side.owner)
   const home = buildingCenter(keep)
   const nodes = state.ore
@@ -406,12 +515,113 @@ function placeExpansionStorage(state: MatchState, side: Brain): boolean {
       const db = Math.hypot((b.tx + 0.5) * TILE - home.x, (b.ty + 0.5) * TILE - home.y)
       return da - db
     })
+  let escort: { x: number; y: number } | null = null
   for (const node of nodes) {
     const spot = findBuildSpotWithin(state, 'silo', node.tx, node.ty, SILO_AI_EXPANSION_REACH)
     if (!spot) continue
-    if (tryPlace(state, side.owner, 'silo', spot.tx, spot.ty, []) === null) return true
+    const center = spotCenter(spot.tx, spot.ty)
+    const covered = siteCovered(state, side.owner, center.x, center.y)
+    const enemies = knownEnemyNear(state, side, center.x, center.y)
+    const escorts = spareEscorts(state, side, center.x, center.y)
+    if (enemies && !covered) {
+      if (escorts.length && !escortsStuck(escorts, center.x, center.y) && !escort) escort = center
+      continue
+    }
+    if (!covered && escorts.length > 0 && !escortsStuck(escorts, center.x, center.y)) {
+      return { kind: 'wait', x: center.x, y: center.y }
+    }
+    return { kind: 'build', tx: spot.tx, ty: spot.ty }
   }
-  return false
+  if (escort) return { kind: 'escort', x: escort.x, y: escort.y }
+  return { kind: 'none' }
+}
+
+function placeExpansionStorage(state: MatchState, side: Brain): boolean {
+  const plan = expansionPlan(state, side)
+  if (plan.kind === 'build') return tryPlace(state, side.owner, 'silo', plan.tx, plan.ty, []) === null
+  return plan.kind === 'wait'
+}
+
+function storageBeside(state: MatchState, owner: PlayerId, tx: number, ty: number): Building | null {
+  const stats = BUILDING_STATS.silo
+  for (const building of state.buildings) {
+    if (building.owner !== owner || building.hp <= 0 || building.kind !== 'silo') continue
+    if (footprintGap(building.tx, building.ty, stats.w, stats.h, tx, ty) <= SILO_AI_EXPANSION_REACH) return building
+  }
+  return null
+}
+
+function dumpsBeside(state: MatchState, building: Building): number[] {
+  const stats = BUILDING_STATS.silo
+  const ids: number[] = []
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    if (footprintGap(building.tx, building.ty, stats.w, stats.h, node.tx, node.ty) <= SILO_AI_EXPANSION_REACH) ids.push(node.id)
+  }
+  return ids
+}
+
+/**
+ * A builder who was captured, or an enemy who showed up beside an unfinished remote Storage,
+ * is a reason to stop. Other Stalkers head home instead of walking into the same ground.
+ * The building comes down when the builder is gone or the site is still uncovered.
+ */
+function abortThreatenedExpansion(state: MatchState, side: Brain): void {
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return
+  const home = buildingCenter(keep)
+  for (const building of [...state.buildings]) {
+    if (building.owner !== side.owner || building.kind !== 'silo' || building.hp <= 0 || building.complete) continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - home.x, center.y - home.y) <= BUILDING_STATS.keep.sight) continue
+    const enemies = knownEnemyNear(state, side, center.x, center.y)
+    const builder = livingBuilder(state, side.owner, building.id)
+    if (!enemies && builder) continue
+    const covered = siteCovered(state, side.owner, center.x, center.y)
+    const pullBuilder = !builder || !covered
+    const nodes = new Set(dumpsBeside(state, building))
+    const fleeing: number[] = []
+    for (const unit of state.units) {
+      if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+      const onBuild = builderOf(unit, building.id)
+      const gathering = unit.order?.type === 'gather' && nodes.has(unit.order.nodeId)
+      if (onBuild && !pullBuilder) continue
+      if (!onBuild && !gathering) continue
+      fleeing.push(unit.id)
+    }
+    if (pullBuilder) cancelBuilding(state, building.id)
+    if (fleeing.length) commandMove(state, fleeing, home.x, home.y, false)
+  }
+}
+
+/** Keep a small escort on the way to a remote site until that Storage is finished or the ground is given up. */
+function sendExpansionEscort(state: MatchState, side: Brain): void {
+  let point: { x: number; y: number } | null = null
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.kind !== 'silo' || building.hp <= 0 || building.complete) continue
+    const center = buildingCenter(building)
+    if (!remoteFromKeep(state, side.owner, center.x, center.y)) continue
+    point = center
+    break
+  }
+  if (!point) {
+    const plan = expansionPlan(state, side)
+    if (plan.kind === 'wait' || plan.kind === 'escort') point = { x: plan.x, y: plan.y }
+  }
+  if (!point) return
+  const ids: number[] = []
+  for (const unit of spareEscorts(state, side, point.x, point.y)) {
+    if (unit.order?.type === 'attack') continue
+    const order = unit.order
+    if (
+      (order?.type === 'attackMove' || order?.type === 'move') &&
+      Math.hypot(order.x - point.x, order.y - point.y) < 48
+    ) {
+      continue
+    }
+    ids.push(unit.id)
+  }
+  if (ids.length) commandMove(state, ids, point.x, point.y, true)
 }
 
 /** One Stalker works each expansion heap that already has a Storage beside it. */
@@ -420,7 +630,13 @@ function staffExpansionDumps(state: MatchState, side: Brain): void {
   for (const node of state.ore) {
     if (node.amount <= 0 || node.base === side.owner) continue
     if (!depositKnown(state, side.owner, node.tx, node.ty)) continue
-    if (!storageNearDump(state, side.owner, node.tx, node.ty)) continue
+    const bin = storageBeside(state, side.owner, node.tx, node.ty)
+    if (!bin) continue
+    if (!bin.complete) {
+      const center = buildingCenter(bin)
+      const open = remoteFromKeep(state, side.owner, center.x, center.y)
+      if (open && (knownEnemyNear(state, side, center.x, center.y) || !livingBuilder(state, side.owner, bin.id))) continue
+    }
     if (!homeGone && !farFromBuildings(state, side.owner, node.tx, node.ty, ['keep'])) continue
     sendStalkerToDump(state, side, node.id)
   }
@@ -497,7 +713,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  * Every computer side, and `ai control`, shares SiloAI.
  * A side with no Silo is already eliminated, so it is skipped.
  * Units and buildings captured with that Silo belong to the captor and are ordered here on the captor's turn.
- * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, Storage, Flasher, and Gorilla sight.
+ * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, finished Storage, Flasher, and Gorilla sight.
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
@@ -654,6 +870,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
 }
 
 function finish(state: MatchState, side: Brain): void {
+  abortThreatenedExpansion(state, side)
+  sendExpansionEscort(state, side)
   staffExpansionDumps(state, side)
   widenNarrowPassages(state, side)
   store(state, side)

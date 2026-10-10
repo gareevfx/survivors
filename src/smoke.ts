@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2011,6 +2011,7 @@ siloAiStoresAtNewDumpsWhileHomeRemains()
 siloAiAimsGorillasAtBuildings()
 humanPlacementIgnoresAiGap()
 siloAiAttacksInWaves()
+siloAiLeavesUnfinishedStorageExposed()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2080,6 +2081,32 @@ function captureHarvestAndPassages(): void {
   assert(
     shelteredStill?.owner === 1 && shelteredStill.hp === UNIT_STATS.porter.hp,
     `storage sight did not keep the stalker (${shelteredStill?.owner}, ${shelteredStill?.hp})`,
+  )
+
+  const rising = createMatch(4)
+  const risingBin = makeBuilding(rising, 1, 'silo', 38, 24, false)
+  assert(!risingBin.complete && risingBin.hp > 0, 'the unfinished storage was not standing')
+  const risingCenter = buildingCenter(risingBin)
+  const risingStalker = makeUnit(rising, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  assert(
+    Math.hypot(risingStalker.x - risingCenter.x, risingStalker.y - risingCenter.y) <= BUILDING_STATS.silo.sight,
+    'the builder is outside the unfinished storage sight',
+  )
+  for (const keep of rising.buildings) {
+    if (keep.kind !== 'keep') continue
+    const keepCenter = buildingCenter(keep)
+    assert(
+      Math.hypot(keepCenter.x - risingStalker.x, keepCenter.y - risingStalker.y) > BUILDING_STATS.keep.sight,
+      'the unfinished-storage stalker is also inside a silo',
+    )
+  }
+  const risingShooter = makeUnit(rising, 0, 'pike', risingStalker.x + 18, risingStalker.y)
+  commandAttack(rising, [risingShooter.id], risingStalker.id, 'unit')
+  for (let i = 0; i < 40; i++) step(rising, 1 / 60)
+  const risingTaken = unitById(rising, risingStalker.id)
+  assert(
+    risingTaken?.owner === 0 && risingTaken.hp === UNIT_STATS.porter.hp,
+    `an unfinished storage protected the stalker (${risingTaken?.owner}, ${risingTaken?.hp})`,
   )
 
   const beyond = createMatch(4)
@@ -3772,4 +3799,128 @@ function siloAiAttacksInWaves(): void {
   assert(survivor && survivor.hp > 0, 'the last fighter was removed')
   assert(!aimsAt(survivor, foePoint, 120), 'a wiped wave kept marching')
   assert(aimsAt(survivor, rally, 100) || aimsAt(survivor, home, 120), 'the survivor did not regroup')
+}
+
+function headingHome(unit: Unit | undefined, home: { x: number; y: number }, site: { x: number; y: number }): boolean {
+  const order = unit?.order
+  const move = order?.type === 'move' ? order : order?.type === 'attack' && order.resume?.type === 'move' ? order.resume : null
+  if (!move) return false
+  return Math.hypot(move.x - home.x, move.y - home.y) < Math.hypot(move.x - site.x, site.y - move.y)
+}
+
+/** Open ground and a known Dumps heap far from Silo 01, matching the remote-storage setup. */
+function carveRemoteDump(state: MatchState, owner: PlayerId): { tx: number; ty: number; id: number } {
+  const cx = 40
+  const cy = 24
+  const radius = 12
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      state.tiles[y * state.mapW + x] = 0
+    }
+  }
+  state.rocks = state.rocks.filter((rock) => Math.max(Math.abs(rock.tx - cx), Math.abs(rock.ty - cy)) > radius)
+  for (const node of state.ore) {
+    if (node.base === owner) node.amount = 0
+    else if (Math.max(Math.abs(node.tx - cx), Math.abs(node.ty - cy)) <= radius + 4) node.amount = 0
+  }
+  const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
+  state.ore.push(remote)
+  const grid = owner === 0 ? state.explored : owner === 1 ? state.aiExplored : state.sideExplored[owner]
+  if (grid) grid[cy * state.mapW + cx] = 1
+  rebuildBlocked(state)
+  return remote
+}
+
+function siloAiLeavesUnfinishedStorageExposed(): void {
+  const threatened = createMatch(7)
+  const remote = carveRemoteDump(threatened, 1)
+  threatened.oreHeld[1] = 500
+  const foe = makeUnit(threatened, 0, 'pike', (remote.tx + 0.5) * TILE, (remote.ty + 0.5) * TILE)
+  threatened.aiVisible[remote.ty * threatened.mapW + remote.tx] = 1
+  const before = new Set(threatened.buildings.map((building) => building.id))
+  updateSiloAi(threatened, 0.5)
+  assert(
+    !threatened.buildings.some((building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id)),
+    'SiloAI raised a Storage beside a known enemy',
+  )
+  assert(unitById(threatened, foe.id)?.owner === 0, 'the watching flasher was removed')
+
+  const quiet = createMatch(7)
+  const heap = carveRemoteDump(quiet, 1)
+  quiet.oreHeld[1] = 500
+  const keep = quiet.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep, 'missing a Silo for the escort')
+  const rally = siloRallyPoint(quiet, 1)
+  assert(rally, 'missing the escort rally')
+  const escort = makeUnit(quiet, 1, 'pike', rally.x, rally.y)
+  updateSiloAi(quiet, 0.5)
+  assert(
+    !quiet.buildings.some((building) => building.owner === 1 && building.kind === 'silo'),
+    'SiloAI sent a builder before the escort reached the site',
+  )
+  const escortOrder = unitById(quiet, escort.id)?.order
+  const dumpX = (heap.tx + 0.5) * TILE
+  const dumpY = (heap.ty + 0.5) * TILE
+  const home = buildingCenter(keep)
+  assert(
+    escortOrder?.type === 'attackMove' &&
+      Math.hypot(escortOrder.x - dumpX, escortOrder.y - dumpY) < Math.hypot(escortOrder.x - home.x, escortOrder.y - home.y),
+    'the spare Flasher was not sent to the remote site first',
+  )
+  escort.x = escortOrder.x
+  escort.y = escortOrder.y
+  quiet.aiAcc = 0
+  updateSiloAi(quiet, 0.5)
+  const raised = quiet.buildings.find((building) => building.owner === 1 && building.kind === 'silo' && !building.complete)
+  assert(raised, 'SiloAI did not raise the Storage once a Flasher covered the site')
+  assert(
+    quiet.units.some((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'construct' && unit.order.buildingId === raised.id),
+    'no Stalker stayed to build the covered Storage',
+  )
+
+  const hot = createMatch(4)
+  const hotKeep = hot.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(hotKeep, 'missing a Silo for the retreat')
+  const hotHome = buildingCenter(hotKeep)
+  const site = makeBuilding(hot, 1, 'silo', 38, 24, false)
+  const sitePoint = buildingCenter(site)
+  assert(
+    Math.hypot(sitePoint.x - hotHome.x, sitePoint.y - hotHome.y) > BUILDING_STATS.keep.sight,
+    'the construction site is inside Silo sight',
+  )
+  const node = { id: hot.nextId++, tx: 41, ty: 25, amount: 200, base: null }
+  hot.ore.push(node)
+  const builder = makeUnit(hot, 1, 'porter', sitePoint.x, sitePoint.y + 40)
+  builder.order = { type: 'construct', buildingId: site.id }
+  const extra = makeUnit(hot, 1, 'porter', sitePoint.x + 36, sitePoint.y + 36)
+  extra.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
+  const raider = makeUnit(hot, 0, 'pike', sitePoint.x + 48, sitePoint.y)
+  hot.aiVisible[Math.floor(raider.y / TILE) * hot.mapW + Math.floor(raider.x / TILE)] = 1
+  hot.oreHeld[1] = 0
+  updateSiloAi(hot, 0.5)
+  assert(!hot.buildings.some((building) => building.id === site.id), 'SiloAI left the unfinished Storage up beside an enemy')
+  assert(headingHome(unitById(hot, builder.id), hotHome, sitePoint), 'the builder was not pulled off the open site')
+  assert(headingHome(unitById(hot, extra.id), hotHome, sitePoint), 'a second Stalker was fed into the open site')
+  assert(
+    unitById(hot, extra.id)?.order?.type !== 'gather',
+    'the extra Stalker kept mining beside the unfinished Storage',
+  )
+
+  const lost = createMatch(4)
+  const lostKeep = lost.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(lostKeep, 'missing a Silo after a capture')
+  const lostHome = buildingCenter(lostKeep)
+  const shell = makeBuilding(lost, 1, 'silo', 38, 24, false)
+  const shellPoint = buildingCenter(shell)
+  const captured = makeUnit(lost, 0, 'porter', shellPoint.x, shellPoint.y + 30)
+  const hauler = makeUnit(lost, 1, 'porter', shellPoint.x + 28, shellPoint.y + 28)
+  const lostNode = { id: lost.nextId++, tx: 41, ty: 25, amount: 200, base: null }
+  lost.ore.push(lostNode)
+  hauler.order = { type: 'gather', nodeId: lostNode.id, phase: 'approach' }
+  lost.oreHeld[1] = 0
+  updateSiloAi(lost, 0.5)
+  assert(!lost.buildings.some((building) => building.id === shell.id), 'SiloAI kept building after the builder was captured')
+  assert(headingHome(unitById(lost, hauler.id), lostHome, shellPoint), 'SiloAI left another Stalker at the captured build')
+  assert(unitById(lost, captured.id)?.owner === 0, 'the captured builder was handed back')
 }

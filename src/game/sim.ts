@@ -1244,13 +1244,14 @@ function sideTone(owner: number, first: string, second: string, third: string, f
 }
 
 /**
- * A Stalker inside the sight of its own Silo, Storage, a Flasher, or a Gorilla cannot be captured.
- * Storage uses its own sight (150), the same circle that reveals ground around it.
+ * A Stalker inside the sight of its own Silo, a finished Storage, a Flasher, or a Gorilla cannot be captured.
+ * Storage uses its own sight (150). A Storage that is still under construction gives no cover.
  */
 function stalkerCovered(state: MatchState, unit: Unit): boolean {
   for (const building of state.buildings) {
     if (building.owner !== unit.owner || building.hp <= 0) continue
     if (building.kind !== 'keep' && building.kind !== 'silo') continue
+    if (building.kind === 'silo' && !building.complete) continue
     const center = buildingCenter(building)
     if (Math.hypot(center.x - unit.x, center.y - unit.y) <= BUILDING_STATS[building.kind].sight) return true
   }
