@@ -27,7 +27,6 @@ import {
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
 import { describeSelection } from './ui/hud'
-import { rulesMarkup } from './ui/rules'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -1986,44 +1985,7 @@ towerFitsInsideCastleSightAndShoots()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
-rulesPanelListsRosterFromConfig()
 console.log('smoke ok')
-
-function rulesPanelListsRosterFromConfig(): void {
-  assert(PLAYER_NAME.join(',') === 'Silo 01,Silo 02,Silo 03,Silo 04', `side names are ${PLAYER_NAME.join(', ')}`)
-  const text = rulesMarkup()
-  const plain = text.replace(/<[^>]+>/g, '')
-  assert(!text.includes('Silo_'), 'rules still use an underscore in a side name')
-  assert(!text.includes('Ridgekeep') && !text.includes('ridgekeep'), 'rules still name the game Ridgekeep')
-  assert(!text.includes('Alternativen'), 'rules still name the game Alternativen')
-  assert(!plain.includes('New Ground'), 'rules still say New Ground')
-  assert(!plain.includes('Destroy an enemy Silo to capture it'), 'rules still open with the old match paragraph')
-  assert(text.includes('God Mode') && text.includes('Both Cam') && text.includes('AI Control') && text.includes('FOW'), 'rules omit a command')
-  const lore = [
-    '"Surface": Uncharted territory;',
-    '"Silo": A shelter housing people;',
-    '"Stalker": Trained shelter residents;',
-    '"Dumps": The piles of technical debris;',
-    '"Cells": Storage units;',
-    '"Storage": Storage for Cells;',
-    '"Pillar": Windmill with battle tower;',
-    '"Factory": Facility for manufacturing combat and exploration units;',
-    '"Flasher": Very fast unit;',
-    '"Gorilla": Tank;',
-    '"Hover": Surface explorer;',
-  ]
-  for (const line of lore) assert(plain.includes(line), `rules omit lore: ${line.slice(0, 48)}`)
-  for (const stats of Object.values(UNIT_STATS)) {
-    assert(text.includes(stats.label), `rules omit ${stats.label}`)
-    assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
-    assert(text.includes(`health ${stats.hp}`), `rules omit the health of ${stats.label}`)
-  }
-  for (const stats of Object.values(BUILDING_STATS)) {
-    assert(text.includes(stats.label), `rules omit ${stats.label}`)
-    assert(text.includes(`health ${stats.hp}`), `rules omit the health of ${stats.label}`)
-    if (stats.cost > 0) assert(text.includes(`${stats.cost} dumps`), `rules omit the cost of ${stats.label}`)
-  }
-}
 
 function captureHarvestAndPassages(): void {
   assert(TREE_HP === 28 && ROCK_HP === 56, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)

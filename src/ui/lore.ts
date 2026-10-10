@@ -1,4 +1,4 @@
-/** Descriptions for the Rules list and the info panel. The panel title already names the subject. */
+/** Descriptions for the info panel. The panel title already names the subject. */
 export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Surface', body: 'Uncharted territory;' },
   { name: 'Silo', body: 'A shelter housing people;' },

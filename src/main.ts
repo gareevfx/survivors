@@ -8,24 +8,19 @@ import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
 import { MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
-import { rulesMarkup } from './ui/rules'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
 const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
-const help = document.querySelector<HTMLElement>('#help')
-const helpButton = document.querySelector<HTMLButtonElement>('#help-btn')
 const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
 const again = document.querySelector<HTMLButtonElement>('#again')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
-const muteButton = document.querySelector<HTMLButtonElement>('#mute')
 
-if (!view || !minimap || !help) {
+if (!view || !minimap) {
   throw new Error('Survivors failed to find its canvas.')
 }
 
 const stage: HTMLCanvasElement = view
 const mini: HTMLCanvasElement = minimap
-const helpPanel: HTMLElement = help
 const commandForm = document.querySelector<HTMLFormElement>('#console')
 const commandInput = document.querySelector<HTMLInputElement>('#console-input')
 if (!commandForm || !commandInput) {
@@ -33,8 +28,6 @@ if (!commandForm || !commandInput) {
 }
 const commandBar = commandForm
 const commandField = commandInput
-const helpBody = document.querySelector<HTMLElement>('#help-body')
-if (helpBody) helpBody.innerHTML = rulesMarkup()
 const duelNote = document.querySelector<HTMLElement>('#menu-duel-note')
 if (duelNote) {
   duelNote.textContent = `${PLAYER_NAME[0]} against ${PLAYER_NAME[1]} on the wide ${MAP_W}×${MAP_H} field.`
@@ -141,9 +134,6 @@ const input = attachInput({
     sfx.unlock()
     sfx.toggle()
   },
-  onHelp: () => helpPanel.classList.toggle('hidden'),
-  closeHelp: () => helpPanel.classList.add('hidden'),
-  helpOpen: () => !helpPanel.classList.contains('hidden'),
   commandOpen: () => !commandBar.classList.contains('hidden'),
   openCommand,
   closeCommand,
@@ -172,7 +162,6 @@ function selectIdlePorters(): void {
 hintClose?.addEventListener('click', () => {
   if (match) match.tutorial = false
 })
-helpButton?.addEventListener('click', () => helpPanel.classList.toggle('hidden'))
 document.querySelector('#pause')?.addEventListener('click', () => {
   if (!match || menuOpen) return
   match.paused = !match.paused
@@ -187,15 +176,10 @@ menuResume?.addEventListener('click', () => {
   match.paused = false
 })
 document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
-document.querySelector('#help-close')?.addEventListener('click', () => helpPanel.classList.add('hidden'))
 again?.addEventListener('click', () => boot())
 idle?.addEventListener('click', () => {
   sfx.unlock()
   selectIdlePorters()
-})
-muteButton?.addEventListener('click', () => {
-  sfx.unlock()
-  sfx.toggle()
 })
 
 let miniDrag = false
@@ -245,7 +229,7 @@ function loop(now: number): void {
       pointer: input.pointerWorld(),
     })
     renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
-    syncHud(live, sfx.muted, {
+    syncHud(live, {
       armPlace: (kind) => {
         if (live.paused || live.aiControl) return
         live.placement = live.placement === kind ? null : kind
@@ -268,8 +252,6 @@ function loop(now: number): void {
         live.tutorial = false
       },
       selectIdle: () => selectIdlePorters(),
-      toggleHelp: () => helpPanel.classList.toggle('hidden'),
-      toggleMute: () => sfx.toggle(),
       restart: () => boot(),
     })
     const events = live.events.splice(0, live.events.length)

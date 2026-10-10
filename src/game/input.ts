@@ -53,9 +53,6 @@ export function attachInput(opts: {
   getState: () => MatchState
   getCamera: () => Camera
   onMute: () => void
-  onHelp: () => void
-  closeHelp: () => void
-  helpOpen: () => boolean
   commandOpen: () => boolean
   openCommand: () => void
   closeCommand: () => void
@@ -468,14 +465,9 @@ function clearSelection(state: MatchState): void {
     }
     if (event.repeat) return
     const state = opts.getState()
-    if (event.code === 'F1' || (event.code === 'Slash' && event.shiftKey)) {
-      event.preventDefault()
-      opts.onHelp()
-      return
-    }
     if (event.code === 'Enter' || event.code === 'NumpadEnter') {
       event.preventDefault()
-      if (!opts.helpOpen()) opts.openCommand()
+      opts.openCommand()
       return
     }
     if (event.code === 'Pause') {
@@ -486,10 +478,6 @@ function clearSelection(state: MatchState): void {
     if (event.code === 'Escape') {
       if (opts.commandOpen()) {
         opts.closeCommand()
-        return
-      }
-      if (opts.helpOpen()) {
-        opts.closeHelp()
         return
       }
       state.placement = null
@@ -654,7 +642,7 @@ function clearSelection(state: MatchState): void {
       if (held('KeyS') || held('ArrowDown')) dy += 1
       if (held('KeyA') || held('ArrowLeft')) dx -= 1
       if (held('KeyD') || held('ArrowRight')) dx += 1
-      if (pointer?.over && !drag?.panning && !opts.helpOpen() && !opts.commandOpen()) {
+      if (pointer?.over && !drag?.panning && !opts.commandOpen()) {
         const margin = 8
         if (pointer.sx < margin) dx -= 1
         if (pointer.sx > box.w - margin) dx += 1

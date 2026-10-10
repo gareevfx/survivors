@@ -35,7 +35,7 @@ You start with a Silo, four stalkers, and a small store of dumps — not enough 
 7. Right-click enemies to attack, or press **Q** and left-click for attack-move. Shots stop at gray rock and trees. Right-click gray rock or a tree with stalkers to break it — flashers and gorillas cannot — and the tile stops blocking once it shatters. Left-click a dumps patch to see how much is left. Stalkers sent to a sealed patch break the rocks in the way, then haul. A stalker who cannot move for about 4 seconds leaves that job for the next dumps patch or unfinished building.
 8. In 1 vs 1, destroy the Silo 02 Silo to win. In a free-for-all, destroy every other Silo. The destroyer takes the fallen side's buildings, units, and dumps. If your Silo falls, the skirmish is lost. Each computer side, and AI Control, keeps fighters and Pillars at its Silo, and pulls the army home when that Silo or a nearby building is under attack. A captured side is no longer given orders. Stalkers are not destroyed by shots: a hit captures one only when its own Silo, Flashers, and Gorillas cannot see it, and a covered Stalker is left alone by auto-targeting. Trees take half as many hits as gray rock. Narrow passages are opened to two tiles on both maps.
 
-## Rules and controls
+## Controls
 
 | Action | Input |
 | --- | --- |
@@ -62,10 +62,9 @@ You start with a Silo, four stalkers, and a small store of dumps — not enough 
 | Idle stalkers | `F` or the Idle button |
 | Control groups | `Ctrl+1`–`9` to save, `1`–`9` to recall. Tap the number again to center. |
 | Command line | `Enter`. The box says “write here”. `Off FOW` reveals the map, and `FOW` hides it again except what you can see. `God Mode` makes your units and buildings invulnerable, and `Off God Mode` turns that off. `Show Enemy Cam` draws what every other side can see, and `Off Enemy Cam` returns to your own sight. `Both Cam` draws whatever any side can see, and `Off Both Cam` returns to your own sight. `AI Control` plays Silo 01 with that same sight, and `Off AI Control` returns the orders. Escape cancels. |
-| Pause | Pause button (beside Rules), or the Pause key. The match clock stops. Resume continues from that moment. |
+| Pause | Pause button, or the Pause key. The match clock stops. Resume continues from that moment. |
 | Menu | Menu button, or Main menu after a win or loss. The match does not run on the menu. Menu also pauses a match in progress. Resume continues it. 1 vs 1 or Free for all starts a new field. |
 | Mute | `M` |
-| Rules | `?` or `F1`, or the Rules button. The panel lists the match rules, the commands, and every unit and building with the costs and stats from the match config. |
 
 Touch: drag pans the map, a tap selects, a tap on open ground moves the selection, and a tap on an enemy attacks.
 

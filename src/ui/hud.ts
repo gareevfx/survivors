@@ -26,8 +26,6 @@ export interface HudActions {
   armAttack: () => void
   dismissHint: () => void
   selectIdle: () => void
-  toggleHelp: () => void
-  toggleMute: () => void
   restart: () => void
 }
 
@@ -44,12 +42,11 @@ interface Cmd {
 
 let commandKey = ''
 
-export function syncHud(state: MatchState, muted: boolean, actions: HudActions): void {
+export function syncHud(state: MatchState, actions: HudActions): void {
   const ore = document.querySelector('#ore')
   const supply = document.querySelector('#supply')
   const clock = document.querySelector('#clock')
   const idle = document.querySelector('#idle')
-  const mute = document.querySelector('#mute')
   const hint = document.querySelector('#hint')
   const mode = document.querySelector('#modeflag')
   const pause = document.querySelector<HTMLButtonElement>('#pause')
@@ -79,7 +76,6 @@ export function syncHud(state: MatchState, muted: boolean, actions: HudActions):
     (unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
-  if (mute) mute.textContent = muted ? 'Sound off' : 'Sound'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
   if (pause) {
     pause.textContent = state.paused ? 'Resume' : 'Pause'
