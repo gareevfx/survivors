@@ -343,7 +343,7 @@ export function narrowPassageCount(
 
 /**
  * Shared dump patches laid out on an 80×50 field. Columns and rows scale with the
- * live size so 1 vs 1 (80×40) and free-for-all (90×60) keep the same pattern,
+ * live size so 1 vs 1 (80×40) and free-for-all (90×50) keep the same pattern,
  * clear of the corner yards.
  */
 const PATCH_REF_W = 80

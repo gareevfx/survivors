@@ -4,9 +4,9 @@ export const MAP_W = 80
 export const MAP_H = 40
 export const MAP_PX_W = TILE * MAP_W
 export const MAP_PX_H = TILE * MAP_H
-/** Free-for-all uses a 90×60 field. */
+/** Free-for-all uses a 90×50 field. */
 export const FFA_MAP_W = 90
-export const FFA_MAP_H = 60
+export const FFA_MAP_H = 50
 
 export type MatchMode = 'duel' | 'ffa'
 

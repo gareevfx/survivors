@@ -1768,12 +1768,9 @@ function dunmarchScoutsMineralsAndTheEnemy(): void {
   const rally = siloRallyPoint(live, 1)
   const homePoint = buildingCenter(enemy)
   assert(rally, 'missing the rally beside the Silo')
-  const tankX = tankOrder?.type === 'attackMove' || tankOrder?.type === 'move' ? tankOrder.x : null
-  const tankY = tankOrder?.type === 'attackMove' || tankOrder?.type === 'move' ? tankOrder.y : null
+  assert(homePoint, 'missing the Silo the Gorilla should guard')
   assert(
-    tankX != null &&
-      tankY != null &&
-      (Math.hypot(tankX - rally.x, tankY - rally.y) < 100 || Math.hypot(tankX - homePoint.x, tankY - homePoint.y) < 120),
+    tankOrder?.type === 'attackMove' || tankOrder?.type === 'attack',
     'the Gorilla left the Silo to scout',
   )
   for (let i = 0; i < 8 * 30; i++) step(live, 1 / 30)
@@ -2015,6 +2012,7 @@ siloAiStoresAtNewDumpsWhileHomeRemains()
 siloAiAimsGorillasAtBuildings()
 humanPlacementIgnoresAiGap()
 siloAiAttacksInWaves()
+combatUnitsGuardWhileTheWaveGathers()
 siloAiLeavesUnfinishedStorageExposed()
 pillarCapturesAnUncoveredStalker()
 siloAiPillarsWatchMinesAndAvoidEnemyPillars()
@@ -2324,9 +2322,9 @@ function bothModesUseTheirOwnMapSize(): void {
   const inner = sight - TILE
   for (let seed = 1; seed <= 12; seed++) {
     const state = createMatch(seed, 'ffa')
-    assert(state.mapW === 90 && state.mapH === 60, `free for all map is ${state.mapW}×${state.mapH}`)
+    assert(state.mapW === 90 && state.mapH === 50, `free for all map is ${state.mapW}×${state.mapH}`)
     assert(state.playerCount === 4 && state.mode === 'ffa', 'free for all did not seat four sides')
-    assert(state.tiles.length === 90 * 60, 'the free-for-all map did not fill 90×60 cells')
+    assert(state.tiles.length === 90 * 50, 'the free-for-all map did not fill 90×50 cells')
     const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
     assert(keeps.length === 4, 'free for all is missing a Silo')
     const owners = new Set(keeps.map((keep) => keep.owner))
@@ -3798,7 +3796,8 @@ function siloAiAttacksInWaves(): void {
   for (const unit of short) {
     const now = unitById(state, unit.id)
     assert(!aimsAt(now, foePoint, 120), 'a short group was sent at the enemy Silo')
-    assert(aimsAt(now, rally, 100), 'a short group did not stay at the rally')
+    assert(now?.order?.type === 'attackMove' || now?.order?.type === 'attack', 'a short group stood idle')
+    assert(!aimsAt(now, rally, 80), 'a short group stood at the rally')
   }
 
   const wave: Unit[] = [...short]
@@ -3821,7 +3820,7 @@ function siloAiAttacksInWaves(): void {
   updateSiloAi(state, 0.5)
   const held = unitById(state, newbie.id)
   assert(!aimsAt(held, foePoint, 120), 'a new Flasher joined the wave alone')
-  assert(aimsAt(held, rally, 100), 'a new Flasher did not gather for the next wave')
+  assert(held?.order?.type === 'attackMove' || held?.order?.type === 'attack', 'a new Flasher stood idle while the wave was out')
   for (const unit of wave) {
     assert(aimsAt(unitById(state, unit.id), foePoint, 120), 'the first wave turned back before it was wiped out')
   }
@@ -3832,7 +3831,10 @@ function siloAiAttacksInWaves(): void {
   const survivor = unitById(state, wave[0]?.id ?? -1)
   assert(survivor && survivor.hp > 0, 'the last fighter was removed')
   assert(!aimsAt(survivor, foePoint, 120), 'a wiped wave kept marching')
-  assert(aimsAt(survivor, rally, 100) || aimsAt(survivor, home, 120), 'the survivor did not regroup')
+  assert(
+    survivor.order?.type === 'attackMove' || survivor.order?.type === 'move' || survivor.order?.type === 'attack',
+    'the survivor stood idle',
+  )
 }
 
 function headingHome(unit: Unit | undefined, home: { x: number; y: number }, site: { x: number; y: number }): boolean {
@@ -4345,13 +4347,73 @@ function attacksAttacker(unit: Unit | undefined, targetId: number): boolean {
   return order?.type === 'attack' && order.kind === 'unit' && order.targetId === targetId
 }
 
+function combatUnitsGuardWhileTheWaveGathers(): void {
+  const state = createMatch(5)
+  state.time = 20
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep && foe, 'missing a Silo for the guard patrol')
+  const foePoint = buildingCenter(foe)
+  state.aiSpotted.push({ id: foe.id, x: foePoint.x, y: foePoint.y })
+  for (const unit of state.units) if (unit.owner === 0) unit.hp = 0
+  state.oreHeld[1] = 0
+  const rally = siloRallyPoint(state, 1)
+  assert(rally, 'missing a rally for the waiting wave')
+  const need = siloWaveNeed(state)
+  const remote = { id: state.nextId++, tx: 40, ty: 22, amount: 420, base: null }
+  state.ore.push(remote)
+  const bin = makeBuilding(state, 1, 'silo', 44, 22, true)
+  const binPoint = buildingCenter(bin)
+  const miner = makeUnit(state, 1, 'porter', (remote.tx + 0.5) * TILE, (remote.ty + 0.5) * TILE)
+  miner.order = { type: 'gather', nodeId: remote.id, phase: 'approach' }
+  miner.nodeMemory = remote.id
+  const waiting: Unit[] = [
+    makeUnit(state, 1, 'howler', rally.x, rally.y),
+    makeUnit(state, 1, 'pike', rally.x + 12, rally.y),
+    makeUnit(state, 1, 'pike', rally.x - 12, rally.y),
+  ]
+  assert(waiting.length < need.count, 'the guard patrol already filled a wave')
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(!state.aiAttacking, 'a short patrol marched as a wave')
+  const orderedNearBin = waiting.some((unit) => {
+    const order = unitById(state, unit.id)?.order
+    if (order?.type !== 'attackMove' && order?.type !== 'move') return false
+    return Math.hypot(order.x - binPoint.x, order.y - binPoint.y) < Math.hypot(order.x - rally.x, order.y - rally.y)
+  })
+  assert(orderedNearBin, 'no combat unit guarded the remote Storage')
+  const idleFor = new Map<number, number>()
+  for (let i = 0; i < 6 * 60; i++) {
+    step(state, 1 / 60)
+    assert(!state.aiAttacking, 'the waiting patrol launched a short wave')
+    for (const unit of waiting) {
+      const now = unitById(state, unit.id)
+      assert(now && now.hp > 0, 'a waiting fighter died on patrol')
+      const idle = now.order == null
+      const acc = idle ? (idleFor.get(unit.id) ?? 0) + 1 / 60 : 0
+      idleFor.set(unit.id, acc)
+      assert(acc <= 1.5, `a combat unit stood idle for ${acc.toFixed(2)}s while the wave gathered`)
+    }
+  }
+  const raider = makeUnit(state, 0, 'pike', binPoint.x + 20, binPoint.y)
+  const tx = Math.floor(raider.x / TILE)
+  const ty = Math.floor(raider.y / TILE)
+  if (tx >= 0 && ty >= 0 && tx < state.mapW && ty < state.mapH) state.aiVisible[ty * state.mapW + tx] = 1
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(!state.aiAttacking, 'answering a raider launched the wave')
+  assert(
+    waiting.some((unit) => attacksAttacker(unitById(state, unit.id), raider.id)),
+    'no combat unit attacked the raider beside the Storage',
+  )
+}
+
 function siloAiDefendsItsSilo(): void {
   const state = createMatch(5)
   state.time = 20
   const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
   const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
   assert(keep && foe, 'missing a Silo for the defense')
-  const home = buildingCenter(keep)
   const foePoint = buildingCenter(foe)
   state.aiSpotted.push({ id: foe.id, x: foePoint.x, y: foePoint.y })
   const rally = siloRallyPoint(state, 1)
@@ -4387,7 +4449,8 @@ function siloAiDefendsItsSilo(): void {
   for (const unit of [far, rallyPike, gorilla]) {
     const now = unitById(state, unit.id)
     assert(now?.order?.type !== 'attack', 'the army kept chasing after the attack ended')
-    assert(aimsAt(now, rally, 180) || aimsAt(now, home, 180), 'the army did not return to the rally')
+    assert(now?.order?.type === 'attackMove' || now?.order?.type === 'move', 'the army stood idle after the attack')
+    assert(!aimsAt(now, foePoint, 120), 'the army kept marching on the enemy Silo')
   }
 }
 
