@@ -2012,6 +2012,8 @@ siloAiAimsGorillasAtBuildings()
 humanPlacementIgnoresAiGap()
 siloAiAttacksInWaves()
 siloAiLeavesUnfinishedStorageExposed()
+pillarCapturesAnUncoveredStalker()
+siloAiPillarsWatchMinesAndAvoidEnemyPillars()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -3923,4 +3925,102 @@ function siloAiLeavesUnfinishedStorageExposed(): void {
   assert(!lost.buildings.some((building) => building.id === shell.id), 'SiloAI kept building after the builder was captured')
   assert(headingHome(unitById(lost, hauler.id), lostHome, shellPoint), 'SiloAI left another Stalker at the captured build')
   assert(unitById(lost, captured.id)?.owner === 0, 'the captured builder was handed back')
+}
+
+function pillarCapturesAnUncoveredStalker(): void {
+  assert(UNIT_STATS.porter.blurb.includes('Pillar'), 'the Stalker tooltip does not name a Pillar')
+  assert(BUILDING_STATS.tower.blurb.toLowerCase().includes('captured'), 'the Pillar tooltip does not say it captures')
+
+  const open = createMatch(4)
+  open.aiAcc = -10
+  const stalker = makeUnit(open, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  clearPad(open, 36, 22, 44, 30)
+  rebuildBlocked(open)
+  const tower = makeBuilding(open, 0, 'tower', 41, 26, true)
+  const origin = buildingCenter(tower)
+  assert(Math.hypot(stalker.x - origin.x, stalker.y - origin.y) <= BUILDING_STATS.tower.sight, 'the uncovered stalker is outside Pillar sight')
+  for (const keep of open.buildings) {
+    if (keep.kind !== 'keep') continue
+    const center = buildingCenter(keep)
+    assert(Math.hypot(center.x - stalker.x, center.y - stalker.y) > BUILDING_STATS.keep.sight, 'the uncovered stalker is inside a Silo')
+  }
+  for (let i = 0; i < 180; i++) {
+    pin(stalker)
+    step(open, 1 / 60)
+    if (unitById(open, stalker.id)?.owner === 0) break
+  }
+  const taken = unitById(open, stalker.id)
+  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
+
+  const sheltered = createMatch(4)
+  sheltered.aiAcc = -10
+  const shelter = makeBuilding(sheltered, 1, 'silo', 38, 24, true)
+  const guarded = makeUnit(sheltered, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  clearPad(sheltered, 36, 22, 44, 30)
+  rebuildBlocked(sheltered)
+  makeBuilding(sheltered, 0, 'tower', 41, 26, true)
+  assert(
+    Math.hypot(guarded.x - buildingCenter(shelter).x, guarded.y - buildingCenter(shelter).y) <= BUILDING_STATS.silo.sight,
+    'the sheltered stalker is outside finished Storage sight',
+  )
+  for (let i = 0; i < 90; i++) {
+    pin(guarded)
+    step(sheltered, 1 / 60)
+  }
+  const safe = unitById(sheltered, guarded.id)
+  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, `a Pillar captured a Stalker inside finished Storage (${safe?.owner}, ${safe?.hp})`)
+}
+
+function siloAiPillarsWatchMinesAndAvoidEnemyPillars(): void {
+  const state = createMatch(9)
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing a Silo for the Pillar')
+  makeBuilding(state, 1, 'yard', 4, 4, true)
+  makeBuilding(state, 1, 'yard', 8, 4, true)
+  state.oreHeld[1] = 500
+  updateSiloAi(state, 0.5)
+  const tower = state.buildings.find((building) => building.owner === 1 && building.kind === 'tower' && building.hp > 0)
+  assert(tower, 'SiloAI did not raise a Pillar')
+  const home = buildingCenter(keep)
+  let watch: { tx: number; ty: number } | null = null
+  let nearest = Infinity
+  for (const node of state.ore) {
+    if (node.amount <= 0 || node.base !== 1) continue
+    const distance = Math.hypot((node.tx + 0.5) * TILE - home.x, (node.ty + 0.5) * TILE - home.y)
+    if (distance < nearest) {
+      nearest = distance
+      watch = node
+    }
+  }
+  assert(watch, 'Silo 02 has no Dumps to watch')
+  const center = buildingCenter(tower)
+  const towardX = (watch.tx + 0.5) * TILE - home.x
+  const towardY = (watch.ty + 0.5) * TILE - home.y
+  const placedX = center.x - home.x
+  const placedY = center.y - home.y
+  assert(towardX * placedX + towardY * placedY > 0, 'the Pillar was not built toward the Dumps')
+  assert(
+    Math.hypot(center.x - (watch.tx + 0.5) * TILE, center.y - (watch.ty + 0.5) * TILE) <= BUILDING_STATS.tower.sight,
+    'the Pillar cannot see the Dumps',
+  )
+
+  const hot = createMatch(7)
+  const remote = carveRemoteDump(hot, 1)
+  hot.oreHeld[1] = 500
+  const enemy = makeBuilding(hot, 0, 'tower', remote.tx + 2, remote.ty, true)
+  hot.aiVisible[enemy.ty * hot.mapW + enemy.tx] = 1
+  const before = new Set(hot.buildings.map((building) => building.id))
+  const miner = makeUnit(hot, 1, 'porter', (remote.tx + 4.5) * TILE, (remote.ty + 0.5) * TILE)
+  miner.order = { type: 'gather', nodeId: remote.id, phase: 'approach' }
+  const hotKeep = hot.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(hotKeep, 'missing a Silo for the retreat')
+  updateSiloAi(hot, 0.5)
+  assert(
+    !hot.buildings.some((building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id)),
+    'SiloAI raised a Storage inside an enemy Pillar sight',
+  )
+  assert(
+    headingHome(unitById(hot, miner.id), buildingCenter(hotKeep), buildingCenter(enemy)),
+    'SiloAI left a Stalker where an enemy Pillar can capture it',
+  )
 }

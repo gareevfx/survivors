@@ -1,5 +1,5 @@
 import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
-import { findBuildSpotWithin, nearestWalkable, stopMoving } from './nav'
+import { findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
 import { BUILDING_STATS, INTERACT, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
@@ -15,6 +15,8 @@ import { depositKnown } from './vision'
  * A remote Storage goes up only when that ground is already covered or no enemy
  * has been seen there. Spare Flashers and Gorillas walk there first. An unfinished
  * Storage does not protect the builder, so a capture or a close enemy pulls the other Stalkers off it.
+ * Pillars watch Dumps and Storage so they can capture an uncovered enemy Stalker.
+ * A known enemy Pillar is treated as that same capture risk.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -409,12 +411,17 @@ function spotCenter(tx: number, ty: number): { x: number; y: number } {
   return { x: (tx + stats.w / 2) * TILE, y: (ty + stats.h / 2) * TILE }
 }
 
-/** Silo, Flasher, or Gorilla sight already reaches this ground. An unfinished Storage does not count. */
+/** Silo, finished Storage, Flasher, or Gorilla sight already reaches this ground. An unfinished Storage does not count. */
 function siteCovered(state: MatchState, owner: PlayerId, x: number, y: number): boolean {
   for (const building of state.buildings) {
-    if (building.owner !== owner || building.hp <= 0 || building.kind !== 'keep') continue
-    const center = buildingCenter(building)
-    if (Math.hypot(center.x - x, center.y - y) <= BUILDING_STATS.keep.sight) return true
+    if (building.owner !== owner || building.hp <= 0) continue
+    if (building.kind === 'keep') {
+      const center = buildingCenter(building)
+      if (Math.hypot(center.x - x, center.y - y) <= BUILDING_STATS.keep.sight) return true
+    } else if (building.kind === 'silo' && building.complete) {
+      const center = buildingCenter(building)
+      if (Math.hypot(center.x - x, center.y - y) <= BUILDING_STATS.silo.sight) return true
+    }
   }
   for (const ally of state.units) {
     if (ally.owner !== owner || ally.hp <= 0) continue
@@ -424,15 +431,30 @@ function siteCovered(state: MatchState, owner: PlayerId, x: number, y: number): 
   return false
 }
 
-/** Hostile units and buildings this side can see right now, close to the site. */
+/** A finished enemy Pillar this side has seen, close enough that its shot would capture a Stalker here. */
+function knownPillarReaches(state: MatchState, side: Brain, x: number, y: number): boolean {
+  const reach = BUILDING_STATS.tower.sight
+  for (const building of state.buildings) {
+    if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'tower' || !building.complete) continue
+    const seen =
+      seesFootprint(state, side, building.tx, building.ty, 1, 1) || side.spotted.some((spot) => spot.id === building.id)
+    if (!seen) continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - x, center.y - y) <= reach) return true
+  }
+  return false
+}
+
+/** Hostile units and buildings this side can see right now, close to the site. A known Pillar counts out to its own sight. */
 function knownEnemyNear(state: MatchState, side: Brain, x: number, y: number): boolean {
+  if (knownPillarReaches(state, side, x, y)) return true
   for (const unit of state.units) {
     if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
     if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
     if (Math.hypot(unit.x - x, unit.y - y) <= EXPANSION_THREAT) return true
   }
   for (const building of state.buildings) {
-    if (building.owner === side.owner || building.hp <= 0) continue
+    if (building.owner === side.owner || building.hp <= 0 || building.kind === 'tower') continue
     const stats = BUILDING_STATS[building.kind]
     if (!seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)) continue
     const center = buildingCenter(building)
@@ -632,6 +654,9 @@ function staffExpansionDumps(state: MatchState, side: Brain): void {
     if (!depositKnown(state, side.owner, node.tx, node.ty)) continue
     const bin = storageBeside(state, side.owner, node.tx, node.ty)
     if (!bin) continue
+    const nodeX = (node.tx + 0.5) * TILE
+    const nodeY = (node.ty + 0.5) * TILE
+    if (knownPillarReaches(state, side, nodeX, nodeY) && !siteCovered(state, side.owner, nodeX, nodeY)) continue
     if (!bin.complete) {
       const center = buildingCenter(bin)
       const open = remoteFromKeep(state, side.owner, center.x, center.y)
@@ -799,7 +824,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
     } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
       aiPlaceNearKeep(state, 'yard', side.owner)
     } else if (towers < 3 && ore >= BUILDING_STATS.tower.cost) {
-      if (!aiPlaceNearKeep(state, 'tower', side.owner) && ore >= BUILDING_STATS.yard.cost) {
+      if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
         aiPlaceNearKeep(state, 'yard', side.owner)
       }
     } else if (ore >= BUILDING_STATS.yard.cost) {
@@ -871,10 +896,77 @@ function runSide(state: MatchState, owner: PlayerId): void {
 
 function finish(state: MatchState, side: Brain): void {
   abortThreatenedExpansion(state, side)
+  retreatFromEnemyPillars(state, side)
   sendExpansionEscort(state, side)
   staffExpansionDumps(state, side)
   widenNarrowPassages(state, side)
   store(state, side)
+}
+
+/**
+ * Put the next Pillar where it can see a Dumps heap or a Storage, still inside Silo sight.
+ * That is the ground where an enemy Stalker would be captured. Extra Pillars fall back beside the Silo.
+ */
+function placeWatchPillar(state: MatchState, side: Brain): boolean {
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return false
+  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.tower.cost) return false
+  const towers = state.buildings.filter(
+    (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
+  )
+  const home = buildingCenter(keep)
+  const watches: Array<{ x: number; y: number }> = []
+  for (const node of state.ore) {
+    if (node.amount <= 0 || node.base !== side.owner) continue
+    watches.push({ x: (node.tx + 0.5) * TILE, y: (node.ty + 0.5) * TILE })
+  }
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.hp <= 0 || building.kind !== 'silo') continue
+    watches.push(buildingCenter(building))
+  }
+  const sight = BUILDING_STATS.tower.sight
+  const open = watches.filter(
+    (point) => !towers.some((tower) => Math.hypot(buildingCenter(tower).x - point.x, buildingCenter(tower).y - point.y) <= sight),
+  )
+  open.sort((a, b) => Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y))
+  for (const point of open) {
+    const spot = findTowerWatchSpot(state, keep.tx, keep.ty, point.x, point.y)
+    if (!spot) continue
+    const centerX = (spot.tx + BUILDING_STATS.tower.w / 2) * TILE
+    const centerY = (spot.ty + BUILDING_STATS.tower.h / 2) * TILE
+    if (Math.hypot(centerX - point.x, centerY - point.y) > sight) continue
+    if (tryPlace(state, side.owner, 'tower', spot.tx, spot.ty, []) === null) return true
+  }
+  return aiPlaceNearKeep(state, 'tower', side.owner)
+}
+
+/** Stalkers outside their own cover walk home when a known enemy Pillar can reach them or their job. */
+function retreatFromEnemyPillars(state: MatchState, side: Brain): void {
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return
+  const home = buildingCenter(keep)
+  const fleeing: number[] = []
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (siteCovered(state, side.owner, unit.x, unit.y)) continue
+    let threatened = knownPillarReaches(state, side, unit.x, unit.y)
+    const order = unit.order
+    if (!threatened && order?.type === 'gather') {
+      const node = state.ore.find((entry) => entry.id === order.nodeId)
+      if (node) threatened = knownPillarReaches(state, side, (node.tx + 0.5) * TILE, (node.ty + 0.5) * TILE)
+    }
+    if (!threatened && order?.type === 'construct') {
+      const building = state.buildings.find((entry) => entry.id === order.buildingId)
+      if (building) {
+        const center = buildingCenter(building)
+        threatened = knownPillarReaches(state, side, center.x, center.y)
+      }
+    }
+    if (!threatened) continue
+    if (order?.type === 'move' && Math.hypot(order.x - home.x, order.y - home.y) < 80) continue
+    fleeing.push(unit.id)
+  }
+  if (fleeing.length) commandMove(state, fleeing, home.x, home.y, false)
 }
 
 /** Two Gorillas for each Flasher, so a siege has guns for buildings. */

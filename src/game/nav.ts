@@ -253,6 +253,35 @@ export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set
   return lanes
 }
 
+/**
+ * A Pillar tile inside Silo sight, as close as the gap rules allow to a mine or Storage.
+ * Prefers a tile whose own sight reaches that spot, so the Pillar can capture a Stalker there.
+ */
+export function findTowerWatchSpot(
+  state: MatchState,
+  keepTx: number,
+  keepTy: number,
+  watchX: number,
+  watchY: number,
+): { tx: number; ty: number } | null {
+  const stats = BUILDING_STATS.tower
+  const lanes = mineralLaneTiles(state, keepTx + 1, keepTy + 1)
+  const reach = Math.ceil(BUILDING_STATS.keep.sight / TILE) + 2
+  const cx = keepTx + 1
+  const cy = keepTy + 1
+  let best: { tx: number; ty: number; score: number } | null = null
+  for (let ty = cy - reach; ty <= cy + reach; ty++) {
+    for (let tx = cx - reach; tx <= cx + reach; tx++) {
+      if (!footprintInKeepSight(keepTx, keepTy, tx, ty, stats.w, stats.h)) continue
+      if (!aiMayBuild(state, 'tower', tx, ty, lanes)) continue
+      const dist = Math.hypot((tx + stats.w / 2) * TILE - watchX, (ty + stats.h / 2) * TILE - watchY)
+      const score = (dist <= stats.sight ? 0 : 100000) + dist
+      if (!best || score < best.score) best = { tx, ty, score }
+    }
+  }
+  return best ? { tx: best.tx, ty: best.ty } : null
+}
+
 export function findBuildSpot(
   state: MatchState,
   kind: 'yard' | 'silo' | 'tower',

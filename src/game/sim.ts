@@ -884,9 +884,10 @@ function tryFire(state: MatchState, unit: Unit): void {
 }
 
 /**
- * A finished Tower uses its own damage, a Bike's rate, and the Drone's sight as its range.
+ * A finished Pillar uses its own damage, a Flasher's rate, and a Hover's sight as its range.
  * It holds the closest enemy it can see until that enemy leaves sight or dies.
- * Rocks and trees block the shot. Ground the Tower cannot currently see is ignored.
+ * An uncovered enemy Stalker is a target; the hit captures them. A covered one is ignored.
+ * Rocks and trees block the shot. Ground the Pillar cannot currently see is ignored.
  */
 function tryFireTower(state: MatchState, building: Building, dt: number): void {
   building.attackCd = Math.max(0, building.attackCd - dt)
@@ -971,7 +972,10 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
   return best
 }
 
-/** True when this enemy is inside the Tower's own sight, currently visible, and not behind rock or a tree. */
+/**
+ * True when this enemy is inside the Pillar's own sight, currently visible, and not behind rock or a tree.
+ * Covered Stalkers are skipped. Uncovered ones stay valid so the shot can capture them.
+ */
 function towerEngages(state: MatchState, building: Building, origin: { x: number; y: number }, target: Target): boolean {
   if (target.hp <= 0 || target.owner === building.owner || target.targetKind === 'rock') return false
   if (coveredStalkerTarget(state, target)) return false
