@@ -11,11 +11,14 @@ export function updateVision(state: MatchState): void {
       state.sideVisible[0] = state.visible
       continue
     }
-    const visible = new Uint8Array(cells)
+    let visible = state.sideVisible[owner]
+    if (!visible || visible.length !== cells) {
+      visible = new Uint8Array(cells)
+      state.sideVisible[owner] = visible
+    } else visible.fill(0)
     paintSight(state, owner, visible, explored)
     if (owner === 0) state.visible = visible
     else if (owner === 1) state.aiVisible = visible
-    state.sideVisible[owner] = visible
   }
   const now = state.time
   for (let i = 0; i < state.visible.length; i++) {

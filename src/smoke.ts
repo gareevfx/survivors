@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1998,6 +1998,7 @@ stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
 storageStartsEmptyAndFillsWithCells()
 bothModesUseTheirOwnMapSize()
+tenPlayerFieldPlacesTenSilos()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
@@ -2302,6 +2303,103 @@ function captureHarvestAndPassages(): void {
   }
   assert(duel.outcome === 'win', `capturing the enemy silo did not win (${duel.outcome})`)
   for (const id of enemyIds) assert(unitById(duel, id)?.owner === 0, '1v1 capture left units with the loser')
+}
+
+function tenPlayerFieldPlacesTenSilos(): void {
+  assert(PLAYER_NAME.length === 10 && PLAYER_NAME[0] === 'Silo 01' && PLAYER_NAME[9] === 'Silo 10', 'side names do not run Silo 01 through Silo 10')
+  assert(PLAYER_COLOR.length === 10 && new Set(PLAYER_COLOR).size === 10, 'the ten team colors are not distinct')
+  const duel = createMatch(2, 'duel')
+  assert(duel.mode === 'duel' && duel.mapW === 80 && duel.mapH === 40 && duel.playerCount === 2, '1 vs 1 changed size')
+  const four = createMatch(2, 'ffa')
+  assert(four.mode === 'ffa' && four.mapW === 90 && four.mapH === 50 && four.playerCount === 4, '4-player free-for-all changed size')
+
+  for (const seed of [2, 7]) {
+    const state = createMatch(seed, 'ffa10')
+    assert(state.mode === 'ffa10' && state.mapW === 150 && state.mapH === 150, `10-player map is ${state.mapW}×${state.mapH}`)
+    assert(state.playerCount === 10 && state.tiles.length === 150 * 150, 'the 10-player map did not seat ten sides on 150×150')
+    assert(state.sideExplored.length === 10 && state.sideVisible.length === 10 && state.oreHeld.length === 10, 'a side is missing fog or a bank')
+    const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
+    assert(keeps.length === 10, `expected 10 Silos, saw ${keeps.length}`)
+    assert(new Set(keeps.map((keep) => keep.owner)).size === 10, 'two Silos share a side')
+    const gaps = narrowPassageCount(state.tiles, state.ore, state.mapW, state.mapH)
+    assert(gaps === 0, `10-player seed ${seed} left ${gaps} one-tile passages`)
+    let corners = 0
+    let edges = 0
+    let inners = 0
+    let minD = Infinity
+    const onEdge = (value: number) => value < 20 || value > 130
+    for (let i = 0; i < keeps.length; i++) {
+      const keep = keeps[i]
+      if (!keep) continue
+      const ex = onEdge(keep.tx)
+      const ey = onEdge(keep.ty)
+      if (ex && ey) corners += 1
+      else if (ex || ey) edges += 1
+      else inners += 1
+      for (let j = i + 1; j < keeps.length; j++) {
+        const other = keeps[j]
+        if (!other) continue
+        minD = Math.min(minD, Math.hypot(keep.tx + 1.5 - (other.tx + 1.5), keep.ty + 1.5 - (other.ty + 1.5)))
+      }
+      const yards = {
+        x0: keep.tx - 9,
+        y0: keep.ty - 9,
+        x1: keep.tx + 2 + 9,
+        y1: keep.ty + 2 + 9,
+      }
+      for (let j = i + 1; j < keeps.length; j++) {
+        const other = keeps[j]
+        if (!other) continue
+        const box = { x0: other.tx - 9, y0: other.ty - 9, x1: other.tx + 2 + 9, y1: other.ty + 2 + 9 }
+        const overlap = yards.x0 <= box.x1 && box.x0 <= yards.x1 && yards.y0 <= box.y1 && box.y0 <= yards.y1
+        assert(!overlap, `seed ${seed} Silo yards overlap`)
+      }
+      const sight = BUILDING_STATS.keep.sight / TILE
+      const near = state.ore.filter(
+        (node) => Math.hypot(node.tx + 0.5 - (keep.tx + 1.5), node.ty + 0.5 - (keep.ty + 1.5)) <= sight + 1,
+      )
+      assert(near.length >= 4, `Silo ${keep.owner} has only ${near.length} dumps nearby`)
+      const workers = state.units.filter((unit) => unit.owner === keep.owner && unit.kind === 'porter' && unit.hp > 0)
+      assert(workers.length === 4, `side ${keep.owner} did not start with four stalkers`)
+      assert(sideTileVisible(state, keep.owner, keep.tx + 1, keep.ty + 1), `side ${keep.owner} cannot see its own Silo`)
+    }
+    assert(corners === 4 && edges === 4 && inners === 2, `Silos are ${corners} corners, ${edges} edges, ${inners} inner`)
+    assert(minD > 40, `Silos are only ${minD.toFixed(1)} tiles apart`)
+    assert(state.rocks.length > duel.rocks.length * 3, 'rocks and trees did not scale with the 150×150 field')
+    assert(state.ore.length > four.ore.length, 'the 150×150 field has fewer dumps than the 4-player map')
+  }
+
+  const state = createMatch(4, 'ffa10')
+  const victim = state.buildings.find((building) => building.owner === 9 && building.kind === 'keep' && building.hp > 0)
+  assert(victim, 'missing Silo 10')
+  const ids = state.units.filter((unit) => unit.owner === 9 && unit.hp > 0).map((unit) => unit.id)
+  const victimOre = state.oreHeld[9] ?? 0
+  const captorOre = state.oreHeld[4] ?? 0
+  victim.hp = 6
+  const fallenCenter = buildingCenter(victim)
+  const killer = makeUnit(state, 4, 'pike', fallenCenter.x, fallenCenter.y + 70)
+  commandAttack(state, [killer.id], victim.id, 'building')
+  for (let i = 0; i < 90; i++) {
+    step(state, 1 / 60)
+    if (state.eliminated[9]) break
+  }
+  assert(state.eliminated[9], 'destroying a Silo did not eliminate that side in the 10-player match')
+  assert(state.outcome == null, 'one capture ended the 10-player match')
+  assert(!state.units.some((unit) => unit.owner === 9), 'captured units kept Silo 10')
+  assert(!state.buildings.some((building) => building.owner === 9 && building.hp > 0), 'captured buildings kept Silo 10')
+  for (const id of ids) assert(unitById(state, id)?.owner === 4, 'a captured unit did not join Silo 05')
+  assert(state.oreHeld[4] === captorOre + victimOre, `dumps moved to ${state.oreHeld[4]}, expected ${captorOre + victimOre}`)
+  assert(state.oreHeld[9] === 0, 'Silo 10 kept dumps')
+  assert(state.buildings.some((building) => building.owner > 0 && building.kind === 'keep' && building.hp > 0), 'every enemy Silo fell with the first capture')
+
+  const pace = createMatch(3, 'ffa10')
+  step(pace, 1 / 60)
+  const frames = 600
+  const started = performance.now()
+  for (let i = 0; i < frames; i++) step(pace, 1 / 60)
+  const ticksPerSecond = frames / ((performance.now() - started) / 1000)
+  console.log(`10-player SiloAI ${ticksPerSecond.toFixed(1)} ticks/s`)
+  assert(ticksPerSecond >= 45, `10 SiloAI only managed ${ticksPerSecond.toFixed(1)} ticks/s`)
 }
 
 function bothModesUseTheirOwnMapSize(): void {

@@ -6,7 +6,7 @@ import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
-import { FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
+import { FFA_MAP_H, FFA_MAP_W, FFA10_MAP_H, FFA10_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
@@ -34,7 +34,11 @@ if (duelNote) {
 }
 const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
 if (ffaNote) {
-  ffaNote.textContent = `${PLAYER_NAME.join(', ')}, each against the others, on a ${FFA_MAP_W}×${FFA_MAP_H} field.`
+  ffaNote.textContent = `${PLAYER_NAME.slice(0, 4).join(', ')}, each against the others, on a ${FFA_MAP_W}×${FFA_MAP_H} field.`
+}
+const ffa10Note = document.querySelector<HTMLElement>('#menu-ffa10-note')
+if (ffa10Note) {
+  ffa10Note.textContent = `10 players on a ${FFA10_MAP_W}×${FFA10_MAP_H} field.`
 }
 
 const sfx = new Sfx()
@@ -91,13 +95,13 @@ function startMatch(mode: MatchMode, seed?: number): void {
   menuOpen = false
   menu?.classList.add('hidden')
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
-  terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode === 'ffa')
-  camera.zoom = mode === 'ffa' ? 0.85 : 1.35
+  terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
+  camera.zoom = mode === 'ffa10' ? 0.62 : mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
     hintCopy.textContent =
-      mode === 'ffa'
-        ? 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
-        : 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+      mode === 'duel'
+        ? 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+        : 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
   }
   input.clearGroups()
   resetHudCache()
@@ -169,6 +173,7 @@ document.querySelector('#pause')?.addEventListener('click', () => {
 document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
 document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
 document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
+document.querySelector('#menu-ffa10')?.addEventListener('click', () => startMatch('ffa10'))
 menuResume?.addEventListener('click', () => {
   if (!match || match.outcome) return
   menuOpen = false

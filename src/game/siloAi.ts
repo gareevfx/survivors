@@ -766,20 +766,42 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
+  // A ten-side field thinks one army per tick. Four-side and duel keep the half-second beat.
+  const crowded = state.playerCount > 4
+  const think = crowded ? 0.75 : 0.5
+  let budget = crowded ? 1 : 8
+
   state.aiAcc += dt
-  if (state.aiAcc >= 0.5) {
-    state.aiAcc = 0
-    if (!state.eliminated[1] && keepStands(state, 1)) runSide(state, 1)
+  if (state.aiAcc >= think) {
+    if (state.eliminated[1] || !keepStands(state, 1)) state.aiAcc = 0
+    else if (budget > 0) {
+      state.aiAcc = 0
+      budget -= 1
+      runSide(state, 1)
+    } else state.aiAcc = think
   }
   for (let owner = 2; owner < state.playerCount; owner++) {
     state.sideAcc[owner] = (state.sideAcc[owner] ?? 0) + dt
-    if ((state.sideAcc[owner] ?? 0) < 0.5) continue
+    if ((state.sideAcc[owner] ?? 0) < think) continue
+    if (state.eliminated[owner] || !keepStands(state, owner)) {
+      state.sideAcc[owner] = 0
+      continue
+    }
+    if (budget <= 0) {
+      state.sideAcc[owner] = think
+      continue
+    }
     state.sideAcc[owner] = 0
-    if (!state.eliminated[owner] && keepStands(state, owner)) runSide(state, owner)
+    budget -= 1
+    runSide(state, owner)
   }
   if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0)) return
   state.playerAiAcc += dt
-  if (state.playerAiAcc < 0.5) return
+  if (state.playerAiAcc < think) return
+  if (budget <= 0 && crowded) {
+    state.playerAiAcc = think
+    return
+  }
   state.playerAiAcc = 0
   runSide(state, 0)
 }

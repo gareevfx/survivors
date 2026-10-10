@@ -7,8 +7,11 @@ export const MAP_PX_H = TILE * MAP_H
 /** Free-for-all uses a 90×50 field. */
 export const FFA_MAP_W = 90
 export const FFA_MAP_H = 50
+/** Ten-player free-for-all uses a 150×150 field. */
+export const FFA10_MAP_W = 150
+export const FFA10_MAP_H = 150
 
-export type MatchMode = 'duel' | 'ffa'
+export type MatchMode = 'duel' | 'ffa' | 'ffa10'
 
 export const PLAYER_KEEP_TX = 6
 export const PLAYER_KEEP_TY = 34
@@ -190,8 +193,31 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
 }
 
-export const PLAYER_NAME: readonly string[] = ['Silo 01', 'Silo 02', 'Silo 03', 'Silo 04']
-export const PLAYER_COLOR: readonly string[] = ['#5ec8ff', '#ff5d4e', '#7dff6a', '#c58bff']
+export const PLAYER_NAME: readonly string[] = [
+  'Silo 01',
+  'Silo 02',
+  'Silo 03',
+  'Silo 04',
+  'Silo 05',
+  'Silo 06',
+  'Silo 07',
+  'Silo 08',
+  'Silo 09',
+  'Silo 10',
+]
+/** Bright team colors, separated on the olive terrain and from each other. */
+export const PLAYER_COLOR: readonly string[] = [
+  '#5ec8ff',
+  '#ff5d4e',
+  '#7dff6a',
+  '#c58bff',
+  '#ffd24a',
+  '#ff7ad1',
+  '#2fe0c8',
+  '#ff9a32',
+  '#e8e6f2',
+  '#6f93ff',
+]
 
 export type Order =
   | { type: 'move'; x: number; y: number }

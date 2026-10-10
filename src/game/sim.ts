@@ -31,6 +31,7 @@ import {
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
+  PLAYER_COLOR,
   PLAYER_NAME,
   STUCK_REDIRECT_SECONDS,
   TILE,
@@ -991,7 +992,7 @@ function tryFire(state: MatchState, unit: Unit): void {
     life: 0.12,
     max: 0.12,
     r: 3,
-    color: sideTone(unit.owner, '#e7f6ff', '#ffe1d6', '#e7ffe4', '#f3e8ff'),
+    color: sideTone(unit.owner),
   })
   state.events.push({ type: 'attack' })
 }
@@ -1047,7 +1048,7 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     life: 0.12,
     max: 0.12,
     r: 3,
-    color: sideTone(building.owner, '#e7f6ff', '#ffe1d6', '#e7ffe4', '#f3e8ff'),
+    color: sideTone(building.owner),
   })
   state.events.push({ type: 'attack' })
 }
@@ -1235,7 +1236,7 @@ function updateProjectiles(state: MatchState, dt: number): void {
     const distance = Math.hypot(dx, dy)
     if (distance <= shot.radius + 8) {
       applyHit(state, target, shot.damage, shot.sourceId)
-      burst(state, target.x, target.y, sideTone(shot.owner, '#d7f1ff', '#ffd0c6', '#d9f8d4', '#eadcff'), 4)
+      burst(state, target.x, target.y, sideTone(shot.owner), 4)
       continue
     }
     const stepLen = Math.min(distance, shot.speed * dt)
@@ -1300,7 +1301,7 @@ function cleanup(state: MatchState): void {
   if (deadUnits.length) {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
-      burst(state, unit.x, unit.y, sideTone(unit.owner, '#b9e4f8', '#ffb2a8', '#c8f5c0', '#e2d0ff'), 8)
+      burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
       state.events.push({ type: 'death' })
     }
     state.units = state.units.filter((unit) => unit.hp > 0)
@@ -1312,7 +1313,7 @@ function cleanup(state: MatchState): void {
   const fallenKeeps: Array<{ owner: number; struckBy: number | null }> = []
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
-    burst(state, center.x, center.y, sideTone(building.owner, '#9ec8de', '#e7a197', '#b7e0b4', '#d4c0ea'), 16)
+    burst(state, center.x, center.y, sideTone(building.owner), 16)
     for (const job of building.queue) state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + UNIT_STATS[job.kind].cost
     if (!building.complete) {
       state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
@@ -1376,11 +1377,8 @@ function cleanup(state: MatchState): void {
   }
 }
 
-function sideTone(owner: number, first: string, second: string, third: string, fourth: string): string {
-  if (owner === 0) return first
-  if (owner === 1) return second
-  if (owner === 2) return third
-  return fourth
+function sideTone(owner: number): string {
+  return PLAYER_COLOR[owner] ?? '#d7d3c8'
 }
 
 /**

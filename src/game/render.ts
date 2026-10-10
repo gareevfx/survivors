@@ -14,6 +14,7 @@ import {
   BUILDING_STATS,
   MAP_H,
   MAP_W,
+  type MatchMode,
   ORE_NODE_AMOUNT,
   PLAYER_COLOR,
   ROCK_HP,
@@ -31,11 +32,8 @@ export interface WorldOverlay {
   pointer: { x: number; y: number } | null
 }
 
-function teamColor(owner: number, first: string, second: string, third: string, fourth: string): string {
-  if (owner === 0) return first
-  if (owner === 1) return second
-  if (owner === 2) return third
-  return fourth
+function teamColor(owner: number): string {
+  return PLAYER_COLOR[owner] ?? '#ffffff'
 }
 
 function teamRgba(owner: number, alpha: number): string {
@@ -47,13 +45,13 @@ function teamRgba(owner: number, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H, ffa = false): HTMLCanvasElement {
+export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H, mode: MatchMode = 'duel'): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = mapW * TILE
   canvas.height = mapH * TILE
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-  paintTerrain(ctx, seed, mapW, mapH, ffa)
+  paintTerrain(ctx, seed, mapW, mapH, mode)
   return canvas
 }
 
@@ -82,16 +80,19 @@ export function renderWorld(
   ctx.fillRect(0, 0, viewW, viewH)
 
   ctx.setTransform(dpr * cam.zoom, 0, 0, dpr * cam.zoom, -cam.x * cam.zoom * dpr, -cam.y * cam.zoom * dpr)
-  ctx.imageSmoothingEnabled = true
-  ctx.drawImage(terrain, 0, 0)
-  ctx.imageSmoothingEnabled = false
-
   const view = {
     l: cam.x - 48,
     t: cam.y - 48,
     r: cam.x + viewW / cam.zoom + 48,
     b: cam.y + viewH / cam.zoom + 48,
   }
+  const sx0 = Math.max(0, Math.floor(view.l))
+  const sy0 = Math.max(0, Math.floor(view.t))
+  const sx1 = Math.min(terrain.width, Math.ceil(view.r))
+  const sy1 = Math.min(terrain.height, Math.ceil(view.b))
+  ctx.imageSmoothingEnabled = true
+  if (sx1 > sx0 && sy1 > sy0) ctx.drawImage(terrain, sx0, sy0, sx1 - sx0, sy1 - sy0, sx0, sy0, sx1 - sx0, sy1 - sy0)
+  ctx.imageSmoothingEnabled = false
 
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
@@ -144,14 +145,16 @@ export function renderWorld(
 
   const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
+    if (shot.x < view.l || shot.y < view.t || shot.x > view.r || shot.y > view.b) continue
     if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
-    ctx.fillStyle = teamColor(shot.owner, '#e9f7ff', '#ffd2c8', '#e5ffe2', '#f0e6ff')
+    ctx.fillStyle = teamColor(shot.owner)
     ctx.beginPath()
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
     ctx.fill()
   }
 
   for (const particle of state.particles) {
+    if (particle.x < view.l || particle.y < view.t || particle.x > view.r || particle.y > view.b) continue
     if (!viewTileVisible(state, Math.floor(particle.x / TILE), Math.floor(particle.y / TILE))) continue
     const alpha = Math.max(0, particle.life / particle.max)
     ctx.globalAlpha = alpha
@@ -584,7 +587,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   } else if (unit.kind === 'drone') {
     const dir = facingDir(unit.facing)
     const { fx, fy } = facingBasis(dir)
-    const accent = teamColor(unit.owner, '#5ec8ff', '#ff5d4e', '#7dff6a', '#c58bff')
+    const accent = teamColor(unit.owner)
     ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
     ctx.beginPath()
     ctx.ellipse(2, 12, 8.5, 3.1, 0, 0, Math.PI * 2)
@@ -713,29 +716,15 @@ export function renderMinimap(
   const sy = frame.h / state.mapH
   const ox = frame.x
   const oy = frame.y
-  for (let ty = 0; ty < state.mapH; ty++) {
-    for (let tx = 0; tx < state.mapW; tx++) {
-      if (!viewTileExplored(state, tx, ty)) continue
-      ctx.fillStyle = viewTileVisible(state, tx, ty)
-        ? terrainCss(tx, ty, state.seed, state.mapW, state.mapH, state.mode === 'ffa')
-        : '#12100c'
-      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
-    }
-  }
-  for (let ty = 0; ty < state.mapH; ty++) {
-    for (let tx = 0; tx < state.mapW; tx++) {
-      if (!viewTileExplored(state, tx, ty)) continue
-      const tile = state.tiles[ty * state.mapW + tx]
-      if (tile !== 1 && tile !== 3) continue
-      ctx.fillStyle = tile === 3 ? '#3c6a34' : '#4a4338'
-      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
-    }
-  }
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(minimapGround(state), ox, oy, frame.w, frame.h)
   ctx.fillStyle = '#d4894a'
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
+    ctx.globalAlpha = viewTileVisible(state, node.tx, node.ty) ? 1 : 0.45
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
   }
+  ctx.globalAlpha = 1
   for (const building of state.buildings) {
     if (!viewBuildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
@@ -750,7 +739,7 @@ export function renderMinimap(
     if (building.kind === 'keep') {
       ctx.fillStyle = '#c8c2b4'
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
-      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillStyle = teamColor(building.owner)
       ctx.fillRect(ox + (building.tx + stats.w - 1) * sx, oy + building.ty * sy, sx, Math.max(1, sy))
     } else if (building.kind === 'yard') {
       ctx.fillStyle = '#aeb4bc'
@@ -763,7 +752,7 @@ export function renderMinimap(
         stats.w * sx - inset * 2,
         stats.h * sy - inset * 2,
       )
-      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillStyle = teamColor(building.owner)
       ctx.fillRect(ox + building.tx * sx, oy + (building.ty + stats.h) * sy - Math.max(1, sy * 0.35), stats.w * sx, Math.max(1, sy * 0.35))
     } else if (building.kind === 'silo') {
       const cx = ox + (building.tx + stats.w / 2) * sx
@@ -774,7 +763,7 @@ export function renderMinimap(
       ctx.fillStyle = '#c8c2b4'
       ctx.fill()
       ctx.lineWidth = Math.max(1, radius * 0.28)
-      ctx.strokeStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.strokeStyle = teamColor(building.owner)
       ctx.stroke()
     } else if (building.kind === 'tower') {
       const cx = ox + (building.tx + 0.5) * sx
@@ -784,29 +773,22 @@ export function renderMinimap(
       ctx.arc(cx, cy, radius, 0, Math.PI * 2)
       ctx.fillStyle = '#8d939a'
       ctx.fill()
-      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillStyle = teamColor(building.owner)
       ctx.beginPath()
       ctx.arc(cx, cy, Math.max(0.8, radius * 0.38), 0, Math.PI * 2)
       ctx.fill()
     } else {
-      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillStyle = teamColor(building.owner)
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
     }
   }
   ctx.globalAlpha = 1
   for (const unit of state.units) {
     if (!viewUnitSeen(state, unit)) continue
-    ctx.fillStyle = teamColor(unit.owner, '#d8f4ff', '#ffd0c8', '#e7ffe4', '#f0e4ff')
+    ctx.fillStyle = teamColor(unit.owner)
     const px = ox + (unit.x / TILE) * sx
     const py = oy + (unit.y / TILE) * sy
     ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
-  }
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
-  for (let ty = 0; ty < state.mapH; ty++) {
-    for (let tx = 0; tx < state.mapW; tx++) {
-      if (!viewTileExplored(state, tx, ty) || viewTileVisible(state, tx, ty)) continue
-      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
-    }
   }
   ctx.strokeStyle = '#f4f1c4'
   ctx.lineWidth = 1
@@ -816,4 +798,60 @@ export function renderMinimap(
     (viewW / cam.zoom / TILE) * sx,
     (viewH / cam.zoom / TILE) * sy,
   )
+}
+
+let groundCanvas: HTMLCanvasElement | null = null
+let groundState: MatchState | null = null
+let groundFrame = 0
+
+/** One pixel per tile. Large fields refresh every few frames so the minimap does not repaint the whole map every tick. */
+function minimapGround(state: MatchState): HTMLCanvasElement {
+  groundFrame += 1
+  const big = state.mapW * state.mapH > 90 * 50
+  const sizeChanged = !groundCanvas || groundCanvas.width !== state.mapW || groundCanvas.height !== state.mapH
+  const refresh = sizeChanged || groundState !== state || !big || groundFrame % 4 === 1
+  if (!groundCanvas || sizeChanged) {
+    groundCanvas = document.createElement('canvas')
+    groundCanvas.width = state.mapW
+    groundCanvas.height = state.mapH
+  }
+  if (!refresh) return groundCanvas
+  groundState = state
+  const pen = groundCanvas.getContext('2d')
+  if (!pen) return groundCanvas
+  const image = pen.createImageData(state.mapW, state.mapH)
+  const data = image.data
+  for (let ty = 0; ty < state.mapH; ty++) {
+    const row = ty * state.mapW
+    for (let tx = 0; tx < state.mapW; tx++) {
+      const p = (row + tx) * 4
+      if (!viewTileExplored(state, tx, ty)) continue
+      let r = 18
+      let g = 16
+      let b = 12
+      if (viewTileVisible(state, tx, ty)) {
+        const tile = state.tiles[row + tx]
+        if (tile === 3) {
+          r = 60
+          g = 106
+          b = 52
+        } else if (tile === 1) {
+          r = 74
+          g = 67
+          b = 56
+        } else {
+          const parts = terrainCss(tx, ty, state.seed, state.mapW, state.mapH, state.mode).match(/\d+/g)
+          r = Number(parts?.[0] ?? 40)
+          g = Number(parts?.[1] ?? 48)
+          b = Number(parts?.[2] ?? 28)
+        }
+      }
+      data[p] = r
+      data[p + 1] = g
+      data[p + 2] = b
+      data[p + 3] = 255
+    }
+  }
+  pen.putImageData(image, 0, 0)
+  return groundCanvas
 }
