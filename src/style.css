@@ -299,13 +299,13 @@ button, canvas { font: inherit; }
 
 #dock {
   display: grid;
-  grid-template-columns: 134px minmax(150px, 1fr) minmax(192px, 256px);
-  gap: 8px;
+  grid-template-columns: 147px minmax(165px, 1fr) minmax(211px, 282px);
+  gap: 9px;
   align-items: stretch;
-  height: 118px;
-  min-height: 118px;
-  max-height: 118px;
-  padding: 8px;
+  height: 240px;
+  min-height: 240px;
+  max-height: 240px;
+  padding: 9px;
   overflow: hidden;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%), var(--panel);
   border-top: 1px solid var(--line);
@@ -326,13 +326,13 @@ button, canvas { font: inherit; }
   min-height: 0;
   max-height: 100%;
   overflow-y: auto;
-  padding: 2px 6px 4px;
+  padding: 2px 7px 4px;
 }
 
 .lore {
-  margin: 6px 0 0;
+  margin: 7px 0 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -340,14 +340,14 @@ button, canvas { font: inherit; }
   margin: 0 0 4px;
   font-family: Georgia, "Iowan Old Style", serif;
   font-weight: 500;
-  font-size: 22px;
+  font-size: 24px;
   letter-spacing: 0.01em;
 }
 
 .eyebrow {
   margin: 0;
   color: var(--gold);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -355,12 +355,12 @@ button, canvas { font: inherit; }
 .meta {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
 .meter {
-  height: 6px;
+  height: 7px;
   background: #0e120c;
   border: 1px solid #2c3826;
   margin-top: 4px;
@@ -375,18 +375,19 @@ button, canvas { font: inherit; }
 #commands {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  gap: 6px;
   align-content: start;
   min-height: 0;
   max-height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
 .cmd {
   position: relative;
-  min-height: 46px;
+  min-height: 51px;
   text-align: left;
-  padding: 6px 6px 4px;
+  padding: 7px 7px 4px;
   background: #243024;
   color: var(--text);
   border: 1px solid #46563c;
@@ -397,21 +398,21 @@ button, canvas { font: inherit; }
 .cmd kbd {
   position: absolute;
   top: 4px;
-  right: 6px;
+  right: 7px;
   color: #d5e2c4;
-  font-size: 11px;
+  font-size: 12px;
   font-family: inherit;
 }
 
-.cmd-label { display: block; font-size: 13px; }
+.cmd-label { display: block; font-size: 14px; }
 
 .stalker-icon,
 .unit-icon {
-  width: 28px;
-  height: 28px;
+  width: 31px;
+  height: 31px;
   display: inline-block;
   vertical-align: middle;
-  margin-right: 6px;
+  margin-right: 7px;
 }
 
 .cmd .stalker-icon,
@@ -424,7 +425,7 @@ button, canvas { font: inherit; }
   display: block;
   margin-top: 4px;
   color: var(--gold);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .cmd:disabled {
@@ -439,16 +440,16 @@ button, canvas { font: inherit; }
 
 .cmd-empty {
   grid-column: 1 / -1;
-  margin: 8px 0 0;
+  margin: 9px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .cmd-note {
   grid-column: 1 / -1;
   margin: 0;
   color: #f6e7b0;
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.06em;
 }
 
@@ -513,16 +514,16 @@ button, canvas { font: inherit; }
   #topbar { flex-wrap: wrap; gap: 8px; }
   .brand { width: 100%; }
   #dock {
-    grid-template-columns: 86px 1fr;
+    grid-template-columns: 95px 1fr;
     grid-template-rows: auto auto;
     height: auto;
     min-height: 0;
     max-height: none;
     overflow: visible;
   }
-  #commands { grid-column: 1 / -1; max-height: 92px; }
-  #inspect { max-height: 77px; }
-  #minimap { height: 77px; }
+  #commands { grid-column: 1 / -1; max-height: none; overflow: visible; }
+  #inspect { max-height: 85px; }
+  #minimap { height: 85px; }
   .card h2 { font-size: 30px; }
   #hint { align-items: flex-start; }
 }
