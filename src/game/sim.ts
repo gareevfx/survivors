@@ -30,6 +30,7 @@ import {
   INTERACT,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
+  STORAGE_CAP,
   PLAYER_NAME,
   STUCK_REDIRECT_SECONDS,
   TILE,
@@ -408,12 +409,17 @@ function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
   stopMoving(unit)
 }
 
+function storageAccepts(building: Building): boolean {
+  return building.kind !== 'silo' || building.stock < STORAGE_CAP
+}
+
 function nearestDropoff(state: MatchState, owner: number, x: number, y: number): Building | null {
   let best: Building | null = null
   let bestD = Infinity
   for (const building of state.buildings) {
     if (building.owner !== owner || !building.complete || building.hp <= 0) continue
     if (building.kind !== 'keep' && building.kind !== 'silo') continue
+    if (!storageAccepts(building)) continue
     const center = buildingCenter(building)
     const d = (center.x - x) ** 2 + (center.y - y) ** 2
     if (d < bestD) {
@@ -430,15 +436,17 @@ function approachDropoff(state: MatchState, unit: Unit): void {
     stopMoving(unit)
     return
   }
-  if (distToRect(unit.x, unit.y, buildingRect(drop)) <= INTERACT) {
+  const rect = buildingRect(drop)
+  if (distToRect(unit.x, unit.y, rect) <= INTERACT) {
     stopMoving(unit)
     return
   }
-  if (unit.goalX == null) {
-    const stats = BUILDING_STATS[drop.kind]
-    const spot = nearestParking(state, drop.tx, drop.ty, stats.w, stats.h, unit.x, unit.y)
-    if (spot) setUnitDestination(state, unit, spot.x, spot.y)
-  }
+  const aimed =
+    unit.goalX != null && unit.goalY != null && distToRect(unit.goalX, unit.goalY, rect) <= INTERACT
+  if (aimed) return
+  const stats = BUILDING_STATS[drop.kind]
+  const spot = nearestParking(state, drop.tx, drop.ty, stats.w, stats.h, unit.x, unit.y)
+  if (spot) setUnitDestination(state, unit, spot.x, spot.y)
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
@@ -723,8 +731,15 @@ function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { typ
   const drop = nearestDropoff(state, unit.owner, unit.x, unit.y)
   if (!drop) return
   if (distToRect(unit.x, unit.y, buildingRect(drop)) > INTERACT) return
-  if (drop.kind === 'silo') drop.stock += unit.cargo
-  state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + unit.cargo
+  let moved = unit.cargo
+  if (drop.kind === 'silo') {
+    const room = STORAGE_CAP - drop.stock
+    if (room <= 0) return
+    moved = Math.min(unit.cargo, room)
+    drop.stock += moved
+  }
+  state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + moved
+  unit.cargo -= moved
   if (unit.owner === 0) state.tutorial = false
   state.particles.push({
     x: unit.x,
@@ -735,10 +750,14 @@ function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { typ
     max: 1.15,
     r: 0,
     color: '#ffe7a0',
-    text: `+${unit.cargo}`,
+    text: `+${moved}`,
   })
+  if (unit.cargo > 0) {
+    stopMoving(unit)
+    approachDropoff(state, unit)
+    return
+  }
   const resume = order.binId != null ? null : order.nodeId
-  unit.cargo = 0
   assignMiners(state, [unit], resume)
 }
 

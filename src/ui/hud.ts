@@ -15,6 +15,7 @@ import {
   PLAYER_NAME,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
+  STORAGE_CAP,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -496,7 +497,7 @@ export function describeSelection(state: MatchState): string {
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
-      ${building.kind === 'silo' ? `<p class="meta">${building.stock} dumps stored</p>` : ''}
+      ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}

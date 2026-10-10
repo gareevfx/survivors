@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2023,6 +2023,7 @@ ruinedSiloCanBeRepaired()
 siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
+fullStorageRefusesAHaul()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -4450,4 +4451,182 @@ function cellsBlockTrainingUntilStorage(): void {
   makeBuilding(packed, 0, 'silo', 30, 16, true)
   recomputeSupply(packed)
   assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 60')
+}
+
+function fullStorageRefusesAHaul(): void {
+  assert(STORAGE_CAP === 500, `Storage cap is ${STORAGE_CAP}`)
+  const state = createMatch(4)
+  state.aiAcc = -30
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -30
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'missing a Silo for the overflow')
+  clearPad(state, 14, 14, 40, 28)
+  const full = makeBuilding(state, 0, 'silo', 18, 18, true)
+  full.stock = STORAGE_CAP
+  const open = makeBuilding(state, 0, 'silo', 18, 23, true)
+  let emptyStock = 0
+  open.stock = emptyStock
+  rebuildBlocked(state)
+  const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(worker, 'missing a Stalker to turn away')
+  for (const unit of state.units) {
+    if (unit.id === worker.id) continue
+    unit.cargo = 0
+    unit.order = { type: 'move', x: unit.x, y: unit.y }
+    unit.path = []
+    unit.goalX = unit.x
+    unit.goalY = unit.y
+  }
+  worker.x = (full.tx + 1) * TILE
+  worker.y = (full.ty + 2) * TILE + 8
+  worker.cargo = GATHER_AMOUNT
+  worker.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  const bank = state.oreHeld[0]
+  step(state, 1 / 30)
+  const turned = unitById(state, worker.id)
+  const stillFull = full.stock
+  const stillOpen = open.stock
+  assert(stillFull === STORAGE_CAP, `a full Storage took dumps (${stillFull})`)
+  assert(stillOpen === 0, `the open Storage was filled before the Stalker arrived (${stillOpen})`)
+  assert(turned?.cargo === GATHER_AMOUNT, `the refused haul was dropped (${turned?.cargo})`)
+  assert(state.oreHeld[0] === bank, `the bank took a refused haul (${state.oreHeld[0]})`)
+  for (let i = 0; i < 180; i++) {
+    step(state, 1 / 30)
+    if ((unitById(state, worker.id)?.cargo ?? 1) === 0) break
+  }
+  const delivered = unitById(state, worker.id)
+  assert(delivered?.cargo === 0, `the Stalker never reached another drop-off (${delivered?.cargo})`)
+  const fullAfter = full.stock
+  const openAfter = open.stock
+  assert(fullAfter === STORAGE_CAP, 'the full Storage accepted the rerouted haul')
+  assert(openAfter === GATHER_AMOUNT, `the open Storage received ${openAfter}`)
+  assert(state.oreHeld[0] === bank + GATHER_AMOUNT, `the bank is ${state.oreHeld[0]}`)
+
+  const overflow = createMatch(4)
+  overflow.aiAcc = -30
+  for (let owner = 0; owner < overflow.playerCount; owner++) overflow.sideAcc[owner] = -30
+  const home = overflow.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the remainder')
+  clearPad(overflow, 14, 14, 28, 24)
+  const tight = makeBuilding(overflow, 0, 'silo', 18, 18, true)
+  tight.stock = STORAGE_CAP - 3
+  rebuildBlocked(overflow)
+  const hauler = overflow.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(hauler, 'missing a Stalker for the partial drop')
+  for (const unit of overflow.units) {
+    if (unit.id === hauler.id) continue
+    unit.cargo = 0
+    unit.order = { type: 'move', x: unit.x, y: unit.y }
+    unit.path = []
+    unit.goalX = unit.x
+    unit.goalY = unit.y
+  }
+  hauler.x = (tight.tx + 1) * TILE
+  hauler.y = (tight.ty + 2) * TILE + 8
+  hauler.cargo = GATHER_AMOUNT
+  hauler.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  const before = overflow.oreHeld[0]
+  step(overflow, 1 / 30)
+  assert(tight.stock === STORAGE_CAP, `the Storage stopped at ${tight.stock}`)
+  assert(hauler.cargo === GATHER_AMOUNT - 3, `the Stalker did not keep the remainder (${hauler.cargo})`)
+  assert(overflow.oreHeld[0] === before + 3, `the bank took ${overflow.oreHeld[0] - before}`)
+  hauler.x = (home.tx + 1) * TILE
+  hauler.y = (home.ty + 3) * TILE + 8
+  hauler.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  hauler.path = []
+  hauler.goalX = null
+  hauler.goalY = null
+  step(overflow, 1 / 30)
+  assert(hauler.cargo === 0, `the Silo left ${hauler.cargo} on the Stalker`)
+  assert(tight.stock === STORAGE_CAP, 'the remainder went back into the full Storage')
+  assert(overflow.oreHeld[0] === before + GATHER_AMOUNT, `the Silo bank is ${overflow.oreHeld[0]}`)
+
+  overflow.selectedBuilding = tight.id
+  overflow.selectedUnits = []
+  const fullPanel = describeSelection(overflow)
+  assert(fullPanel.includes(`${STORAGE_CAP} / ${STORAGE_CAP}`), 'the panel does not show 500 / 500')
+  assert(fullPanel.includes('Full'), 'a full Storage is not marked Full')
+  tight.stock = 12
+  const openPanel = describeSelection(overflow)
+  assert(openPanel.includes(`12 / ${STORAGE_CAP}`), 'the panel does not show dumps out of 500')
+  assert(!openPanel.includes('Full'), 'a Storage with room is marked Full')
+
+  const raid = createMatch(3)
+  raid.aiAcc = -30
+  clearPad(raid, 24, 16, 40, 32)
+  const enemyBin = makeBuilding(raid, 1, 'silo', 30, 22, true)
+  enemyBin.stock = STORAGE_CAP
+  raid.oreHeld[1] = 100
+  rebuildBlocked(raid)
+  const thief = raid.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(thief, 'missing a raider')
+  thief.x = (enemyBin.tx + 1) * TILE
+  thief.y = (enemyBin.ty + 2) * TILE + 8
+  thief.cargo = 0
+  thief.order = null
+  assert(commandHarvestOrAttack(raid, [thief.id], enemyBin.id), 'a full Storage could not be raided')
+  for (let i = 0; i < 80; i++) {
+    step(raid, 1 / 30)
+    if ((unitById(raid, thief.id)?.cargo ?? 0) > 0) break
+  }
+  assert(unitById(raid, thief.id)?.cargo === GATHER_AMOUNT, 'raiding a full Storage took nothing')
+  assert(enemyBin.stock === STORAGE_CAP - GATHER_AMOUNT, `the raid left ${enemyBin.stock}`)
+
+  const spent = createMatch(2)
+  clearPad(spent, 16, 16, 28, 28)
+  const bin = makeBuilding(spent, 0, 'silo', 20, 20, true)
+  bin.stock = STORAGE_CAP
+  spent.oreHeld[0] = 200
+  rebuildBlocked(spent)
+  const silo = spent.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'missing a Silo to spend from Storage')
+  assert(tryTrain(spent, silo.id, 'porter') === null, 'spending from a full Storage failed')
+  assert(bin.stock === STORAGE_CAP - UNIT_STATS.porter.cost, `spending left ${bin.stock}`)
+  const builder = spent.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(builder, 'missing a builder')
+  assert(tryPlace(spent, 0, 'silo', 24, 20, [builder.id]) === null, 'a full Storage blocked a new one')
+  assert(
+    spent.buildings.some((building) => building.kind === 'silo' && building.id !== bin.id),
+    'the new Storage was not started',
+  )
+
+  const field = createMatch(7)
+  const aiKeep = field.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(aiKeep, 'missing a Silo for the replacement Storage')
+  const cx = 40
+  const cy = 24
+  const radius = 12
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= field.mapW || y >= field.mapH) continue
+      field.tiles[y * field.mapW + x] = 0
+    }
+  }
+  field.rocks = field.rocks.filter((rock) => Math.max(Math.abs(rock.tx - cx), Math.abs(rock.ty - cy)) > radius)
+  for (const node of field.ore) {
+    if (node.base === 1) node.amount = 0
+    else if (Math.max(Math.abs(node.tx - cx), Math.abs(node.ty - cy)) <= radius + 4) node.amount = 0
+  }
+  const remote = { id: field.nextId++, tx: cx, ty: cy, amount: 420, base: null }
+  field.ore.push(remote)
+  chartDisk(field, 1, cx, cy, radius)
+  const filled = makeBuilding(field, 1, 'silo', cx + 5, cy, true)
+  filled.stock = STORAGE_CAP
+  const aiHome = buildingCenter(aiKeep)
+  for (let i = 0; i < 3; i++) makeUnit(field, 1, 'porter', aiHome.x + i * 12, aiHome.y + 48)
+  rebuildBlocked(field)
+  field.oreHeld[1] = 500
+  const beforeIds = new Set(field.buildings.map((building) => building.id))
+  field.aiAcc = 0
+  updateSiloAi(field, 0.5)
+  const raised = field.buildings.find(
+    (building) => building.owner === 1 && building.kind === 'silo' && !beforeIds.has(building.id),
+  )
+  assert(raised, 'SiloAI left the full Storage as the only drop-off')
+  const gap = footprintGap(raised.tx, raised.ty, BUILDING_STATS.silo.w, BUILDING_STATS.silo.h, remote.tx, remote.ty)
+  assert(
+    gap >= AI_MINERAL_KEEP && gap <= SILO_AI_EXPANSION_REACH,
+    `the replacement Storage is ${gap} tiles from the heap`,
+  )
+  assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
 }

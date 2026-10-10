@@ -2,7 +2,7 @@ import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandCo
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { depositKnown, sideTileExplored } from './vision'
 
 /**
@@ -10,6 +10,7 @@ import { depositKnown, sideTileExplored } from './vision'
  * Computer opponents in 1 vs 1 and free-for-all use it, and so does `ai control`.
  * Stalkers widen a corridor that pinches below two cells, then go back to the job.
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
+ * A Storage that already holds 500 dumps is not a drop-off, so another is raised beside that heap.
  * When two or fewer Cells are free, the next building is a Storage beside the Silo.
  * Gorillas are the siege share and shoot buildings; Flashers take units.
  * Combat units muster beside the Silo and leave in a wave, not one by one.
@@ -372,6 +373,7 @@ function storageNearDump(state: MatchState, owner: PlayerId, tx: number, ty: num
   const stats = BUILDING_STATS.silo
   for (const building of state.buildings) {
     if (building.owner !== owner || building.hp <= 0 || building.kind !== 'silo') continue
+    if (building.stock >= STORAGE_CAP) continue
     if (footprintGap(building.tx, building.ty, stats.w, stats.h, tx, ty) <= SILO_AI_EXPANSION_REACH) return true
   }
   return false
@@ -387,6 +389,7 @@ function farFromBuildings(
   for (const building of state.buildings) {
     if (building.owner !== owner || building.hp <= 0) continue
     if (!kinds.includes(building.kind as 'keep' | 'silo')) continue
+    if (building.kind === 'silo' && building.stock >= STORAGE_CAP) continue
     const stats = BUILDING_STATS[building.kind]
     if (footprintGap(building.tx, building.ty, stats.w, stats.h, tx, ty) <= SILO_AI_EXPANSION_REACH) return false
   }

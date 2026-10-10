@@ -25,6 +25,8 @@ export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
 /** Cells from buildings never rise above this. Training stops at the cap. */
 export const SUPPLY_MAX = 60
+/** One Storage holds this many dumps. A Silo does not. */
+export const STORAGE_CAP = 500
 export const INTERACT = 42
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
@@ -165,7 +167,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
+    blurb: 'Raises the cells cap by 8. Holds at most 500 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
     w: 2,
     h: 2,
     hp: 400,
