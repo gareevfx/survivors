@@ -3,24 +3,22 @@ import { Sfx } from './game/audio'
 import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
-import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
+import { buildTerrain, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
 import { MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
-const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
 const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
 const again = document.querySelector<HTMLButtonElement>('#again')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
 
-if (!view || !minimap) {
+if (!view) {
   throw new Error('Survivors failed to find its canvas.')
 }
 
 const stage: HTMLCanvasElement = view
-const mini: HTMLCanvasElement = minimap
 const commandForm = document.querySelector<HTMLFormElement>('#console')
 const commandInput = document.querySelector<HTMLInputElement>('#console-input')
 if (!commandForm || !commandInput) {
@@ -182,25 +180,16 @@ idle?.addEventListener('click', () => {
   selectIdlePorters()
 })
 
-let miniDrag = false
-const jumpMinimap = (event: PointerEvent) => {
-  const rect = mini.getBoundingClientRect()
-  if (!match || !terrain) return
-  const frame = minimapFrame(rect.width, rect.height, match.mapW, match.mapH)
-  const x = ((event.clientX - rect.left - frame.x) / frame.w) * terrain.width
-  const y = ((event.clientY - rect.top - frame.y) / frame.h) * terrain.height
-  focus(x, y)
+const dock = document.querySelector<HTMLElement>('#dock')
+const keepMapClear = (event: Event) => {
+  event.stopPropagation()
 }
-mini.addEventListener('pointerdown', (event) => {
-  miniDrag = true
-  mini.setPointerCapture(event.pointerId)
-  jumpMinimap(event)
-})
-mini.addEventListener('pointermove', (event) => {
-  if (miniDrag) jumpMinimap(event)
-})
-mini.addEventListener('pointerup', () => {
-  miniDrag = false
+dock?.addEventListener('pointerdown', keepMapClear)
+dock?.addEventListener('pointerup', keepMapClear)
+dock?.addEventListener('wheel', keepMapClear, { passive: true })
+dock?.addEventListener('contextmenu', (event) => {
+  event.preventDefault()
+  event.stopPropagation()
 })
 
 showMenu()
@@ -224,11 +213,10 @@ function loop(now: number): void {
       }
     }
     input.pan(dt)
-    const drawn = renderWorld(stage, live, ground, camera, {
+    renderWorld(stage, live, ground, camera, {
       drag: input.dragRect(),
       pointer: input.pointerWorld(),
     })
-    renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
     syncHud(live, {
       armPlace: (kind) => {
         if (live.paused || live.aiControl) return

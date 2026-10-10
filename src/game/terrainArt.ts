@@ -46,7 +46,7 @@ function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/** Large dirt, dry soil, gravel, and dark blotches. Sampled at tile centers for the minimap. */
+/** Large dirt, dry soil, gravel, and dark blotches, sampled at tile centers. */
 export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
   const n = fbm(tx * 0.17, ty * 0.17, seed)
   const blot = fbm(tx * 0.055 + 9, ty * 0.055 - 4, seed + 5)
@@ -62,22 +62,6 @@ export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
   else color = mix(gravel, soil, (n - 0.8) / 0.2)
   if (blot < 0.34) color = mix(color, dark, ((0.34 - blot) / 0.34) * 0.72)
   return color
-}
-
-export function terrainCss(tx: number, ty: number, seed: number, mapW: number, mapH: number, ffa = false): string {
-  let [r, g, b] = terrainRgb(tx + 0.5, ty + 0.5, seed)
-  if (yardAt(seed, mapW, mapH, tx, ty, ffa)) {
-    r = r * 0.62 + 168 * 0.38
-    g = g * 0.62 + 142 * 0.38
-    b = b * 0.62 + 96 * 0.38
-  }
-  return `rgb(${r | 0},${g | 0},${b | 0})`
-}
-
-function yardAt(seed: number, mapW: number, mapH: number, tx: number, ty: number, ffa: boolean): boolean {
-  const yards = yardsFor(seed, mapW, mapH, ffa)
-  if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return false
-  return yards[ty * mapW + tx] === 1
 }
 
 function yardsFor(seed: number, mapW: number, mapH: number, ffa: boolean): Uint8Array {

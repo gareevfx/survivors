@@ -57,7 +57,6 @@ You start with a Silo, four stalkers, and a small store of dumps — not enough 
 | Pan | `WASD` or arrow keys, or move the pointer to the screen edge |
 | Pan (drag) | Middle mouse. On a touch screen, drag the map |
 | Zoom | Mouse wheel |
-| Jump camera | Click the minimap |
 | Center camera | `Space` (selection, or your Silo) |
 | Idle stalkers | `F` or the Idle button |
 | Control groups | `Ctrl+1`–`9` to save, `1`–`9` to recall. Tap the number again to center. |
