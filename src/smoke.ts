@@ -1,4 +1,4 @@
-import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, updateSiloAi } from './game/siloAi'
+import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
@@ -227,12 +227,15 @@ function northmarkPlaysItself(): void {
   const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
   assert(enemy && home, 'missing a castle to attack')
   state.playerSpotted.push({ id: enemy.id, x: (enemy.tx + 1.5) * TILE, y: (enemy.ty + 1.5) * TILE })
+  const rally = siloRallyPoint(state, 0)
+  assert(rally, 'missing the player rally')
+  const need = siloWaveNeed(state)
   const pikes = []
-  for (let i = 0; i < 10; i++) {
-    pikes.push(makeUnit(state, 0, 'pike', (home.tx + 1.5) * TILE + (i - 5) * 6, (home.ty - 2) * TILE))
-  }
+  for (let i = 0; i < need.gorillas; i++) pikes.push(makeUnit(state, 0, 'howler', rally.x, rally.y + i * 8))
+  for (let i = 0; i < need.count - need.gorillas; i++) pikes.push(makeUnit(state, 0, 'pike', rally.x + 14, rally.y + i * 8))
   recomputeSupply(state)
-  for (let i = 0; i < 90; i++) step(state, 1 / 60)
+  state.playerAiAcc = 0
+  for (let i = 0; i < 40; i++) step(state, 1 / 60)
   const enemyX = (enemy.tx + 1.5) * TILE
   const enemyY = (enemy.ty + 1.5) * TILE
   const homeX = (home.tx + 1.5) * TILE
@@ -1666,9 +1669,15 @@ function dunmarchAimsAtTheCastle(): void {
     { id: silo.id, x: siloPoint.x, y: siloPoint.y },
     { id: castle.id, x: castlePoint.x, y: castlePoint.y },
   )
+  const rally = siloRallyPoint(state, 1)
+  assert(rally, 'missing the Dunmarch rally')
+  const need = siloWaveNeed(state)
   const fighters: Array<ReturnType<typeof makeUnit>> = []
-  for (let i = 0; i < 10; i++) fighters.push(makeUnit(state, 1, 'pike', siloPoint.x + 36, siloPoint.y + i * 4))
-  const distracted = fighters[0]
+  for (let i = 0; i < need.gorillas; i++) fighters.push(makeUnit(state, 1, 'howler', rally.x, rally.y + i * 8))
+  for (let i = 0; i < need.count - need.gorillas; i++) {
+    fighters.push(makeUnit(state, 1, 'pike', rally.x + 14, rally.y + i * 8))
+  }
+  const distracted = fighters.find((unit) => unit.kind === 'pike')
   assert(distracted, 'missing a fighter')
   commandAttack(state, [distracted.id], silo.id, 'building')
   step(state, 0.5)
@@ -1751,7 +1760,18 @@ function dunmarchScoutsMineralsAndTheEnemy(): void {
   const before = live.aiExplored.reduce((sum, bit) => sum + bit, 0)
   step(live, 0.5)
   assert(live.aiScout === drone.id, 'Dunmarch sent a tank to scout instead of the Drone')
-  assert(unitById(live, tank.id)?.order == null, 'the tank left the army to scout')
+  const tankOrder = unitById(live, tank.id)?.order
+  const rally = siloRallyPoint(live, 1)
+  const homePoint = buildingCenter(enemy)
+  assert(rally, 'missing the rally beside the Silo')
+  const tankX = tankOrder?.type === 'attackMove' || tankOrder?.type === 'move' ? tankOrder.x : null
+  const tankY = tankOrder?.type === 'attackMove' || tankOrder?.type === 'move' ? tankOrder.y : null
+  assert(
+    tankX != null &&
+      tankY != null &&
+      (Math.hypot(tankX - rally.x, tankY - rally.y) < 100 || Math.hypot(tankX - homePoint.x, tankY - homePoint.y) < 120),
+    'the Gorilla left the Silo to scout',
+  )
   for (let i = 0; i < 8 * 30; i++) step(live, 1 / 30)
   const flown = unitById(live, drone.id)
   assert(flown?.order?.type === 'move', 'the Drone scout was not ordered into the fog')
@@ -1990,6 +2010,7 @@ siloAiWidensNarrowPassages()
 siloAiStoresAtNewDumpsWhileHomeRemains()
 siloAiAimsGorillasAtBuildings()
 humanPlacementIgnoresAiGap()
+siloAiAttacksInWaves()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2332,10 +2353,12 @@ function aisAttackEachOther(): void {
   state.sideSpotted[3]?.push({ id: keep2.id, x: home2.x, y: home2.y })
   state.sideAttacking[2] = true
   state.sideAttacking[3] = true
-  for (let n = 0; n < 3; n++) {
-    makeUnit(state, 2, 'pike', home2.x + 30 + n * 18, home2.y + 36)
-    makeUnit(state, 3, 'pike', home3.x + 30 + n * 18, home3.y + 36)
-  }
+  const rally2 = siloRallyPoint(state, 2)
+  assert(rally2, 'missing the Silo 03 rally')
+  const need = siloWaveNeed(state)
+  for (let n = 0; n < need.gorillas; n++) makeUnit(state, 2, 'howler', rally2.x, rally2.y + n * 8)
+  for (let n = 0; n < need.count - need.gorillas; n++) makeUnit(state, 2, 'pike', rally2.x + 12, rally2.y + n * 8)
+  for (let n = 0; n < 3; n++) makeUnit(state, 3, 'pike', home3.x + 30 + n * 18, home3.y + 36)
   updateSiloAi(state, 0.5)
   const mover = state.units.find((unit) => {
     if (unit.owner !== 2 || unit.kind !== 'pike' || !unit.order) return false
@@ -3667,4 +3690,86 @@ function humanPlacementIgnoresAiGap(): void {
     }
   }
   assert(placed, 'no human footprint sat against rock, so the gap check could not run')
+}
+
+function aimsAt(unit: Unit | undefined, point: { x: number; y: number }, reach: number): boolean {
+  const order = unit?.order
+  if (order?.type !== 'attackMove' && order?.type !== 'move') return false
+  return Math.hypot(order.x - point.x, order.y - point.y) <= reach
+}
+
+function siloAiAttacksInWaves(): void {
+  const early = createMatch(4)
+  early.time = 20
+  const late = createMatch(4)
+  late.time = 300
+  const ffa = createMatch(4, 'ffa')
+  ffa.time = 20
+  const ffaLate = createMatch(4, 'ffa')
+  ffaLate.time = 300
+  const earlyNeed = siloWaveNeed(early)
+  const lateNeed = siloWaveNeed(late)
+  const ffaNeed = siloWaveNeed(ffa)
+  const ffaLateNeed = siloWaveNeed(ffaLate)
+  assert(earlyNeed.gorillas >= 2 && earlyNeed.count >= 6, 'an early wave has no Gorilla share')
+  assert(lateNeed.count > earlyNeed.count, 'the wave does not grow as the match goes on')
+  assert(ffaNeed.count > earlyNeed.count && ffaNeed.gorillas > earlyNeed.gorillas, 'free-for-all does not ask for a larger wave')
+  assert(ffaLateNeed.count > ffaNeed.count, 'a late free-for-all wave did not grow')
+
+  const state = createMatch(5)
+  state.time = 20
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep && foe, 'missing a Silo for the wave')
+  const foePoint = buildingCenter(foe)
+  state.aiSpotted.push({ id: foe.id, x: foePoint.x, y: foePoint.y })
+  const rally = siloRallyPoint(state, 1)
+  assert(rally, 'SiloAI has no rally point')
+  assert(Math.hypot(rally.x - buildingCenter(keep).x, rally.y - buildingCenter(keep).y) > 3 * TILE, 'the rally sits on the Silo')
+  const need = siloWaveNeed(state)
+  const short: Unit[] = []
+  short.push(makeUnit(state, 1, 'howler', rally.x, rally.y))
+  short.push(makeUnit(state, 1, 'pike', rally.x + 10, rally.y))
+  short.push(makeUnit(state, 1, 'pike', rally.x - 10, rally.y))
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(!state.aiAttacking, 'SiloAI marched before the wave was full')
+  for (const unit of short) {
+    const now = unitById(state, unit.id)
+    assert(!aimsAt(now, foePoint, 120), 'a short group was sent at the enemy Silo')
+    assert(aimsAt(now, rally, 100), 'a short group did not stay at the rally')
+  }
+
+  const wave: Unit[] = [...short]
+  while (wave.filter((unit) => unit.kind === 'howler').length < need.gorillas) {
+    wave.push(makeUnit(state, 1, 'howler', rally.x, rally.y + 8))
+  }
+  while (wave.length < need.count) {
+    wave.push(makeUnit(state, 1, 'pike', rally.x, rally.y - 8))
+  }
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(state.aiAttacking, 'a full wave did not leave the rally')
+  for (const unit of wave) {
+    assert(aimsAt(unitById(state, unit.id), foePoint, 120), 'the wave did not attack together')
+  }
+
+  const home = buildingCenter(keep)
+  const newbie = makeUnit(state, 1, 'pike', home.x + 140, home.y)
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const held = unitById(state, newbie.id)
+  assert(!aimsAt(held, foePoint, 120), 'a new Flasher joined the wave alone')
+  assert(aimsAt(held, rally, 100), 'a new Flasher did not gather for the next wave')
+  for (const unit of wave) {
+    assert(aimsAt(unitById(state, unit.id), foePoint, 120), 'the first wave turned back before it was wiped out')
+  }
+
+  for (const unit of wave.slice(1)) unit.hp = 0
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const survivor = unitById(state, wave[0]?.id ?? -1)
+  assert(survivor && survivor.hp > 0, 'the last fighter was removed')
+  assert(!aimsAt(survivor, foePoint, 120), 'a wiped wave kept marching')
+  assert(aimsAt(survivor, rally, 100) || aimsAt(survivor, home, 120), 'the survivor did not regroup')
 }

@@ -11,6 +11,7 @@ import { depositKnown } from './vision'
  * Stalkers widen a corridor that pinches below two cells, then go back to the job.
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
  * Gorillas are the siege share and shoot buildings; Flashers take units.
+ * Combat units muster beside the Silo and leave in a wave, not one by one.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -615,51 +616,40 @@ function runSide(state: MatchState, owner: PlayerId): void {
   const homeAlert = castleUnderAttack(state, side, keepPoint)
   const castle = spottedKeep(state, side.owner)
   const spotted = knownEnemyBuilding(state, side)
-  if (spotted && (army.length >= 10 || (state.time > 105 && army.length >= 5))) side.attacking = true
-  if (army.length === 0) side.attacking = false
+  const rally = rallyPoint(state, side, keepPoint)
+  const need = siloWaveNeed(state)
   const garrison = garrisonIds(army, keepPoint)
   if (homeAlert) {
     recallToCastle(state, army, keepPoint)
     finish(state, side)
     return
   }
-  if (!side.attacking || !spotted) {
+  if (army.length === 0) side.attacking = false
+
+  const pool = army.filter((unit) => !garrison.has(unit.id))
+  const dest = castle ?? spotted
+  const field = dest ? pool.filter((unit) => withWave(unit, rally, keepPoint, dest)) : []
+  const formed = pool.filter((unit) => !field.includes(unit) && Math.hypot(unit.x - rally.x, unit.y - rally.y) <= WAVE_FORM)
+  const wiped = side.attacking && field.length <= 1
+  if (wiped) side.attacking = false
+  const gorillasReady = formed.filter((unit) => unit.kind === 'howler').length >= need.gorillas
+  const rallyReady = !!dest && formed.length >= need.count && gorillasReady
+  if (rallyReady) side.attacking = true
+
+  if (!side.attacking || !dest) {
+    holdGarrison(state, army, garrison, keepPoint)
+    holdRally(state, pool, rally)
     finish(state, side)
     return
   }
-  holdGarrison(state, army, garrison, keepPoint)
 
-  const dest = castle ?? spotted
-  const strikers = army.filter((unit) => !garrison.has(unit.id))
-  const blocker = rockBlockingMarch(state, strikers, dest.x, dest.y)
+  const strike = pool.filter((unit) => (rallyReady && formed.includes(unit)) || (!wiped && field.includes(unit)))
+  const waiting = pool.filter((unit) => !strike.includes(unit))
+  holdGarrison(state, army, garrison, keepPoint)
+  holdRally(state, waiting, rally)
+  const blocker = rockBlockingMarch(state, strike, dest.x, dest.y)
   if (blocker) assignRockBreakers(state, side.owner, blocker.rock, blocker.trapped)
-  for (const unit of strikers) {
-    const order = unit.order
-    if (
-      castle &&
-      unit.kind !== 'howler' &&
-      order?.type === 'attack' &&
-      order.kind === 'building' &&
-      order.targetId !== castle.id
-    ) {
-      commandMove(state, [unit.id], dest.x, dest.y, true)
-      continue
-    }
-    if (
-      castle &&
-      unit.kind !== 'howler' &&
-      order?.type === 'attackMove' &&
-      order.focusKind === 'building' &&
-      order.focusId !== castle.id
-    ) {
-      order.focusId = null
-      order.focusKind = null
-    }
-    if (order?.type === 'attack') continue
-    if (order?.type === 'attackMove' && order.focusId != null) continue
-    if (order?.type === 'attackMove' && Math.hypot(order.x - dest.x, order.y - dest.y) < 56) continue
-    commandMove(state, [unit.id], dest.x, dest.y, true)
-  }
+  marchWave(state, strike, dest, castle)
   finish(state, side)
 }
 
@@ -815,9 +805,124 @@ function travelGoal(unit: Unit): { x: number; y: number } | null {
   return null
 }
 
+/**
+ * Fighters required before a wave leaves the rally.
+ * The bar rises with the match clock, and free-for-all asks for a larger group.
+ * Every wave includes at least a couple of Gorillas.
+ */
+export function siloWaveNeed(state: MatchState): { count: number; gorillas: number } {
+  let count = 6
+  let gorillas = 2
+  if (state.time >= 150) count = 8
+  if (state.time >= 260) {
+    count = 10
+    gorillas = 3
+  }
+  if (state.playerCount > 2) {
+    count += 2
+    gorillas += 1
+  }
+  return { count, gorillas }
+}
+
+/** Where this side's Flashers and Gorillas form up, a short walk in front of the Silo. */
+export function siloRallyPoint(state: MatchState, owner: PlayerId): { x: number; y: number } | null {
+  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+  if (!keep) return null
+  return rallyPoint(state, brain(state, owner), buildingCenter(keep))
+}
+
+/** Units this close to the rally count as formed up. */
+const WAVE_FORM = 130
+
+function rallyPoint(state: MatchState, side: Brain, keepPoint: { x: number; y: number }): { x: number; y: number } {
+  const castle = spottedKeep(state, side.owner)
+  const aim = castle ?? { x: (state.mapW * TILE) / 2, y: (state.mapH * TILE) / 2 }
+  const dx = aim.x - keepPoint.x
+  const dy = aim.y - keepPoint.y
+  const len = Math.hypot(dx, dy) || 1
+  for (const tiles of [6, 7, 5, 8]) {
+    const x = keepPoint.x + (dx / len) * tiles * TILE
+    const y = keepPoint.y + (dy / len) * tiles * TILE
+    const walk = nearestWalkable(state, x, y)
+    if (!walk) continue
+    const point = { x: (walk.tx + 0.5) * TILE, y: (walk.ty + 0.5) * TILE }
+    if (Math.hypot(point.x - keepPoint.x, point.y - keepPoint.y) < 4 * TILE) continue
+    return point
+  }
+  return { x: keepPoint.x, y: keepPoint.y }
+}
+
+/** Already sent with a wave, or far from home with the army that is out. */
+function withWave(
+  unit: Unit,
+  rally: { x: number; y: number },
+  keepPoint: { x: number; y: number },
+  dest: { x: number; y: number },
+): boolean {
+  const order = unit.order
+  if (order?.type === 'attackMove' || order?.type === 'move') {
+    if (Math.hypot(order.x - dest.x, order.y - dest.y) < 96) return true
+  }
+  return Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) > 320 && Math.hypot(unit.x - rally.x, unit.y - rally.y) > WAVE_FORM
+}
+
+function holdRally(state: MatchState, units: Unit[], rally: { x: number; y: number }): void {
+  const ids: number[] = []
+  for (const unit of units) {
+    const order = unit.order
+    if (order?.type === 'attack') continue
+    if (
+      (order?.type === 'attackMove' || order?.type === 'move') &&
+      Math.hypot(order.x - rally.x, order.y - rally.y) < 80
+    ) {
+      continue
+    }
+    ids.push(unit.id)
+  }
+  if (ids.length) commandMove(state, ids, rally.x, rally.y, true)
+}
+
+function marchWave(
+  state: MatchState,
+  strikers: Unit[],
+  dest: { x: number; y: number },
+  castle: { id: number; x: number; y: number } | null,
+): void {
+  const fresh: number[] = []
+  for (const unit of strikers) {
+    const order = unit.order
+    if (
+      castle &&
+      unit.kind !== 'howler' &&
+      order?.type === 'attack' &&
+      order.kind === 'building' &&
+      order.targetId !== castle.id
+    ) {
+      fresh.push(unit.id)
+      continue
+    }
+    if (
+      castle &&
+      unit.kind !== 'howler' &&
+      order?.type === 'attackMove' &&
+      order.focusKind === 'building' &&
+      order.focusId !== castle.id
+    ) {
+      order.focusId = null
+      order.focusKind = null
+    }
+    if (order?.type === 'attack') continue
+    if (order?.type === 'attackMove' && order.focusId != null) continue
+    if (order?.type === 'attackMove' && Math.hypot(order.x - dest.x, order.y - dest.y) < 56) continue
+    fresh.push(unit.id)
+  }
+  if (fresh.length) commandMove(state, fresh, dest.x, dest.y, true)
+}
+
 /** Combat units already beside the Castle stay there. Two is enough for a standing guard. */
 const HOME_GUARD = 2
-const HOME_NEAR = 220
+const HOME_NEAR = 100
 
 function garrisonIds(army: Unit[], keepPoint: { x: number; y: number }): Set<number> {
   const near = army
