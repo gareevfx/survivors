@@ -23,8 +23,8 @@ export const ROCK_HP = 28
 /** Trees block like rock and take half as many hits. */
 export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
-/** Cells from buildings never rise above this. Training stops at the cap. */
-export const SUPPLY_MAX = 60
+/** Cells from buildings never rise above this. A Silo (12) and eleven Storages (8 each) reach it. */
+export const SUPPLY_MAX = 100
 /** One Storage holds this many dumps. A Silo does not. */
 export const STORAGE_CAP = 500
 export const INTERACT = 42

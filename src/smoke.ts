@@ -4409,7 +4409,11 @@ function siloAiKeepsStalkersWorking(): void {
 }
 
 function cellsBlockTrainingUntilStorage(): void {
-  assert(SUPPLY_MAX === 60, `Cells maximum is ${SUPPLY_MAX}`)
+  assert(SUPPLY_MAX === 100, `Cells maximum is ${SUPPLY_MAX}`)
+  assert(
+    BUILDING_STATS.keep.supply + 11 * BUILDING_STATS.silo.supply === SUPPLY_MAX,
+    'eleven Storages do not reach the Cells maximum',
+  )
   assert(BUILDING_STATS.tower.hp === 160, `Pillar health is ${BUILDING_STATS.tower.hp}`)
   assert(BUILDING_STATS.tower.buildTime === 7, `Pillar build time is ${BUILDING_STATS.tower.buildTime}`)
   const state = createMatch(3)
@@ -4437,11 +4441,11 @@ function cellsBlockTrainingUntilStorage(): void {
   const packed = createMatch(4)
   const home = packed.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(home, 'missing a Silo for the Cells maximum')
-  for (let i = 0; i < 8; i++) makeBuilding(packed, 0, 'silo', 8 + (i % 4) * 4, 8 + Math.floor(i / 4) * 4, true)
+  for (let i = 0; i < 11; i++) makeBuilding(packed, 0, 'silo', 8 + (i % 4) * 4, 8 + Math.floor(i / 4) * 4, true)
   recomputeSupply(packed)
   assert(packed.supplyCap[0] === SUPPLY_MAX, `Cells stopped at ${packed.supplyCap[0]}, not ${SUPPLY_MAX}`)
   guard = 0
-  while (packed.supplyUsed[0] < SUPPLY_MAX && guard++ < 80) {
+  while (packed.supplyUsed[0] < SUPPLY_MAX && guard++ < 120) {
     makeUnit(packed, 0, 'pike', 48 + (guard % 20) * 8, 48)
     recomputeSupply(packed)
   }
@@ -4450,7 +4454,7 @@ function cellsBlockTrainingUntilStorage(): void {
   assert(still === 'Cells cap reached — raise a Storage', `the maximum still allowed training (${still})`)
   makeBuilding(packed, 0, 'silo', 30, 16, true)
   recomputeSupply(packed)
-  assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 60')
+  assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 100')
 }
 
 function fullStorageRefusesAHaul(): void {

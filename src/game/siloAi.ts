@@ -831,6 +831,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (building) => building.owner === side.owner && !building.complete && building.hp > 0,
   )
   if (!constructing) {
+    // Free Cells against the live cap. A Silo is 12 and each finished Storage adds 8, up to 100.
     const supplyRoom = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
     const ore = state.oreHeld[side.owner]
     const yards = state.buildings.filter(
