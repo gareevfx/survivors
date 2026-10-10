@@ -2027,6 +2027,72 @@ function captureHarvestAndPassages(): void {
   const safe = unitById(far, lone.id)
   assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, 'a friendly flasher did not keep the stalker')
 
+  assert(BUILDING_STATS.silo.sight === 150, `storage sight is ${BUILDING_STATS.silo.sight}`)
+  assert(
+    UNIT_STATS.porter.blurb.includes('Storage'),
+    'the stalker tooltip no longer names Storage cover',
+  )
+  const sheltered = createMatch(4)
+  const shelterBin = makeBuilding(sheltered, 1, 'silo', 38, 24, true)
+  const binCenter = buildingCenter(shelterBin)
+  const shelteredStalker = makeUnit(sheltered, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  assert(
+    Math.hypot(shelteredStalker.x - binCenter.x, shelteredStalker.y - binCenter.y) <= BUILDING_STATS.silo.sight,
+    'the sheltered stalker is outside storage sight',
+  )
+  for (const keep of sheltered.buildings) {
+    if (keep.kind !== 'keep') continue
+    const keepCenter = buildingCenter(keep)
+    assert(
+      Math.hypot(keepCenter.x - shelteredStalker.x, keepCenter.y - shelteredStalker.y) > BUILDING_STATS.keep.sight,
+      'the storage-cover stalker is also inside a silo',
+    )
+  }
+  const storageShooter = makeUnit(sheltered, 0, 'pike', shelteredStalker.x + 18, shelteredStalker.y)
+  commandAttack(sheltered, [storageShooter.id], shelteredStalker.id, 'unit')
+  for (let i = 0; i < 40; i++) step(sheltered, 1 / 60)
+  const shelteredStill = unitById(sheltered, shelteredStalker.id)
+  assert(
+    shelteredStill?.owner === 1 && shelteredStill.hp === UNIT_STATS.porter.hp,
+    `storage sight did not keep the stalker (${shelteredStill?.owner}, ${shelteredStill?.hp})`,
+  )
+
+  const beyond = createMatch(4)
+  const distantBin = makeBuilding(beyond, 1, 'silo', 8, 8, true)
+  const distantCenter = buildingCenter(distantBin)
+  const exposedStalker = makeUnit(beyond, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  assert(
+    Math.hypot(exposedStalker.x - distantCenter.x, exposedStalker.y - distantCenter.y) > BUILDING_STATS.silo.sight,
+    'the exposed stalker is still inside storage sight',
+  )
+  const exposedShooter = makeUnit(beyond, 0, 'pike', exposedStalker.x + 18, exposedStalker.y)
+  commandAttack(beyond, [exposedShooter.id], exposedStalker.id, 'unit')
+  for (let i = 0; i < 40; i++) step(beyond, 1 / 60)
+  const exposedTaken = unitById(beyond, exposedStalker.id)
+  assert(exposedTaken?.owner === 0, `a stalker outside storage sight was not captured (${exposedTaken?.owner})`)
+
+  const ai = createMatch(6)
+  const aiBin = makeBuilding(ai, 0, 'silo', 38, 24, true)
+  const aiCenter = buildingCenter(aiBin)
+  const aiStalker = makeUnit(ai, 0, 'porter', aiCenter.x, aiCenter.y)
+  const aiPike = makeUnit(ai, 1, 'pike', aiStalker.x + 30, aiStalker.y)
+  ai.aiVisible[Math.floor(aiStalker.y / TILE) * ai.mapW + Math.floor(aiStalker.x / TILE)] = 1
+  commandMove(ai, [aiPike.id], aiStalker.x, aiStalker.y, true)
+  ai.aiAcc = 0
+  updateSiloAi(ai, 0.5)
+  ai.aiAcc = -10
+  const aiOrder = unitById(ai, aiPike.id)?.order
+  assert(
+    !(aiOrder?.type === 'attack' && aiOrder.kind === 'unit' && aiOrder.targetId === aiStalker.id),
+    'SiloAI ordered a capture on a Stalker covered by Storage',
+  )
+  for (let i = 0; i < 90; i++) step(ai, 1 / 60)
+  const aiKept = unitById(ai, aiStalker.id)
+  assert(
+    aiKept?.owner === 0 && aiKept.hp === UNIT_STATS.porter.hp,
+    `SiloAI captured a stalker beside Storage (${aiKept?.owner}, ${aiKept?.hp})`,
+  )
+
   const dump = createMatch(2)
   const worker = dump.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   const playerKeep = dump.buildings.find((building) => building.owner === 0 && building.kind === 'keep')

@@ -433,7 +433,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  * Every computer side, and `ai control`, shares SiloAI.
  * A side with no Silo is already eliminated, so it is skipped.
  * Units and buildings captured with that Silo belong to the captor and are ordered here on the captor's turn.
- * Covered Stalkers are not auto-targets; a hit captures one only outside its own Silo, Flasher, and Gorilla sight.
+ * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, Storage, Flasher, and Gorilla sight.
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
