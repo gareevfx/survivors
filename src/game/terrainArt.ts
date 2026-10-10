@@ -64,6 +64,23 @@ export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
   return color
 }
 
+/** Tile color for the minimap. Sampled at the tile center, with the Silo yard mixed in. */
+export function terrainCss(tx: number, ty: number, seed: number, mapW: number, mapH: number, ffa = false): string {
+  let [r, g, b] = terrainRgb(tx + 0.5, ty + 0.5, seed)
+  if (yardAt(seed, mapW, mapH, tx, ty, ffa)) {
+    r = r * 0.62 + 168 * 0.38
+    g = g * 0.62 + 142 * 0.38
+    b = b * 0.62 + 96 * 0.38
+  }
+  return `rgb(${r | 0},${g | 0},${b | 0})`
+}
+
+function yardAt(seed: number, mapW: number, mapH: number, tx: number, ty: number, ffa: boolean): boolean {
+  const yards = yardsFor(seed, mapW, mapH, ffa)
+  if (tx < 0 || ty < 0 || tx >= mapW || ty >= mapH) return false
+  return yards[ty * mapW + tx] === 1
+}
+
 function yardsFor(seed: number, mapW: number, mapH: number, ffa: boolean): Uint8Array {
   const key = `${seed}:${mapW}x${mapH}:${ffa ? 'ffa' : 'duel'}`
   if (yardMask && yardKey === key) return yardMask

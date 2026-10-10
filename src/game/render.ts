@@ -8,7 +8,7 @@ import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
-import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain } from './terrainArt'
+import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -656,4 +656,146 @@ function hpColor(ratio: number): string {
   if (ratio > 0.55) return '#8ed15a'
   if (ratio > 0.28) return '#e6c15a'
   return '#e25b4a'
+}
+
+/** Fit the map inside the minimap element without stretching it. */
+export function minimapFrame(
+  cssW: number,
+  cssH: number,
+  mapW = MAP_W,
+  mapH = MAP_H,
+): { x: number; y: number; w: number; h: number } {
+  const aspect = mapW / mapH
+  const box = cssW / Math.max(1, cssH)
+  if (box > aspect) {
+    const w = cssH * aspect
+    return { x: (cssW - w) / 2, y: 0, w, h: cssH }
+  }
+  const h = cssW / aspect
+  return { x: 0, y: (cssH - h) / 2, w: cssW, h }
+}
+
+export function renderMinimap(
+  canvas: HTMLCanvasElement,
+  state: MatchState,
+  cam: Camera,
+  viewW: number,
+  viewH: number,
+): void {
+  const rect = canvas.getBoundingClientRect()
+  const cssW = Math.max(1, rect.width)
+  const cssH = Math.max(1, rect.height)
+  const dpr = Math.min(2, window.devicePixelRatio || 1)
+  const bw = Math.round(cssW * dpr)
+  const bh = Math.round(cssH * dpr)
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw
+    canvas.height = bh
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = '#070806'
+  ctx.fillRect(0, 0, cssW, cssH)
+  const frame = minimapFrame(cssW, cssH, state.mapW, state.mapH)
+  const sx = frame.w / state.mapW
+  const sy = frame.h / state.mapH
+  const ox = frame.x
+  const oy = frame.y
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
+      if (!viewTileExplored(state, tx, ty)) continue
+      ctx.fillStyle = viewTileVisible(state, tx, ty)
+        ? terrainCss(tx, ty, state.seed, state.mapW, state.mapH, state.mode === 'ffa')
+        : '#12100c'
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
+    }
+  }
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
+      if (!viewTileExplored(state, tx, ty)) continue
+      const tile = state.tiles[ty * state.mapW + tx]
+      if (tile !== 1 && tile !== 3) continue
+      ctx.fillStyle = tile === 3 ? '#3c6a34' : '#4a4338'
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
+    }
+  }
+  ctx.fillStyle = '#d4894a'
+  for (const node of state.ore) {
+    if (!viewGroundShown(state, node.tx, node.ty)) continue
+    ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
+  }
+  for (const building of state.buildings) {
+    if (!viewBuildingSeen(state, building)) continue
+    const stats = BUILDING_STATS[building.kind]
+    ctx.globalAlpha = building.complete ? 1 : 0.55
+    if (building.kind === 'keep') {
+      ctx.fillStyle = '#c8c2b4'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + (building.tx + stats.w - 1) * sx, oy + building.ty * sy, sx, Math.max(1, sy))
+    } else if (building.kind === 'yard') {
+      ctx.fillStyle = '#aeb4bc'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.fillStyle = '#2c3136'
+      const inset = Math.max(0.6, Math.min(sx, sy) * 0.35)
+      ctx.fillRect(
+        ox + building.tx * sx + inset,
+        oy + building.ty * sy + inset,
+        stats.w * sx - inset * 2,
+        stats.h * sy - inset * 2,
+      )
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + building.tx * sx, oy + (building.ty + stats.h) * sy - Math.max(1, sy * 0.35), stats.w * sx, Math.max(1, sy * 0.35))
+    } else if (building.kind === 'silo') {
+      const cx = ox + (building.tx + stats.w / 2) * sx
+      const cy = oy + (building.ty + stats.h / 2) * sy
+      const radius = Math.min(stats.w * sx, stats.h * sy) * 0.42
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+      ctx.fillStyle = '#c8c2b4'
+      ctx.fill()
+      ctx.lineWidth = Math.max(1, radius * 0.28)
+      ctx.strokeStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.stroke()
+    } else if (building.kind === 'tower') {
+      const cx = ox + (building.tx + 0.5) * sx
+      const cy = oy + (building.ty + 0.5) * sy
+      const radius = Math.min(sx, sy) * 0.42
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+      ctx.fillStyle = '#8d939a'
+      ctx.fill()
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.beginPath()
+      ctx.arc(cx, cy, Math.max(0.8, radius * 0.38), 0, Math.PI * 2)
+      ctx.fill()
+    } else {
+      ctx.fillStyle = teamColor(building.owner, '#7ecfff', '#ff7d70', '#9dff90', '#d7b6ff')
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+    }
+  }
+  ctx.globalAlpha = 1
+  for (const unit of state.units) {
+    if (!viewUnitSeen(state, unit)) continue
+    ctx.fillStyle = teamColor(unit.owner, '#d8f4ff', '#ffd0c8', '#e7ffe4', '#f0e4ff')
+    const px = ox + (unit.x / TILE) * sx
+    const py = oy + (unit.y / TILE) * sy
+    ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+  for (let ty = 0; ty < state.mapH; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
+      if (!viewTileExplored(state, tx, ty) || viewTileVisible(state, tx, ty)) continue
+      ctx.fillRect(ox + tx * sx, oy + ty * sy, sx, sy)
+    }
+  }
+  ctx.strokeStyle = '#f4f1c4'
+  ctx.lineWidth = 1
+  ctx.strokeRect(
+    ox + (cam.x / TILE) * sx,
+    oy + (cam.y / TILE) * sy,
+    (viewW / cam.zoom / TILE) * sx,
+    (viewH / cam.zoom / TILE) * sy,
+  )
 }
