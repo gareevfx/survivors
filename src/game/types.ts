@@ -19,11 +19,15 @@ export const ORE_NODE_AMOUNT = 420
 /** At most this many miners from one side may work a single deposit. */
 export const MINERS_PER_DEPOSIT = 3
 /** Workers chip gray rock when ordered. Bikes and tanks cannot damage it. */
-export const ROCK_HP = 56
+export const ROCK_HP = 28
 /** Trees block like rock and take half as many hits. */
 export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
-export const SUPPLY_MAX = 60
+/**
+ * Storage art reads as full at a Silo plus four Storages.
+ * Cells are counted for the HUD, and they do not limit training or building.
+ */
+export const STORAGE_FILL_REFERENCE = 44
 export const INTERACT = 42
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
@@ -164,7 +168,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
+    blurb: 'A closer drop-off for dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
     w: 2,
     h: 2,
     hp: 400,
@@ -178,9 +182,9 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight.',
     w: 1,
     h: 1,
-    hp: 320,
+    hp: 160,
     cost: 100,
-    buildTime: 14,
+    buildTime: 7,
     supply: 0,
     sight: UNIT_STATS.drone.sight,
     damage: 8 / 3,
@@ -202,6 +206,7 @@ export type Order =
   | { type: 'attack'; targetId: number; kind: TargetKind; resumeNode?: number; resume?: Order }
   | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return'; binId?: number }
   | { type: 'construct'; buildingId: number }
+  | { type: 'repair'; buildingId: number }
 
 export interface Unit {
   id: number
@@ -274,7 +279,19 @@ export interface Building {
   struckBy: number | null
   /** The killing blow was a Flasher or Gorilla, so a Storage leaves one dumps pile. */
   dropDumps: boolean
+  /** A fallen Silo left on the map. Neutral, blocks movement, and can be repaired. */
+  ruined: boolean
+  /** The repair cost has already been paid, so more Stalkers only add speed. */
+  repairPaid: boolean
 }
+
+/**
+ * A Silo is the side's home and has no build price, so repair is not half of zero.
+ * 80 dumps is the price of a Storage, which is half a Factory. One Stalker finishes in 8 seconds.
+ * The Silo comes back at full health, owned by that Stalker's side.
+ */
+export const SILO_REPAIR_COST = 80
+export const SILO_REPAIR_TIME = 8
 
 export interface OreNode {
   id: number

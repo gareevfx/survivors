@@ -1,6 +1,6 @@
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { updateScanners } from './scanner'
-import { assignMiners, coverOpenSites, fillOpenGatherSlots, redirectStuckPorter } from './commands'
+import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
@@ -28,6 +28,8 @@ import {
   GATHER_AMOUNT,
   GATHER_TIME,
   INTERACT,
+  SILO_REPAIR_COST,
+  SILO_REPAIR_TIME,
   PLAYER_NAME,
   STUCK_REDIRECT_SECONDS,
   TILE,
@@ -51,6 +53,7 @@ export function step(state: MatchState, dt: number): void {
   releaseFromTerrain(state)
   advanceGather(state, dt)
   advanceConstruct(state, dt)
+  advanceRepair(state, dt)
   advanceProduction(state, dt)
 
   for (const unit of state.units) {
@@ -159,6 +162,11 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
 
   if (order.type === 'gather') {
     refreshGather(state, unit, order)
+    return
+  }
+
+  if (order.type === 'repair') {
+    refreshRepair(state, unit, order)
     return
   }
 
@@ -328,6 +336,27 @@ function refreshBinGather(state: MatchState, unit: Unit, order: Extract<Order, {
     return
   }
   approachDropoff(state, unit)
+}
+
+function refreshRepair(state: MatchState, unit: Unit, order: Extract<Order, { type: 'repair' }>): void {
+  const building = buildingById(state, order.buildingId)
+  if (!building?.ruined) {
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  const rect = buildingRect(building)
+  if (distToRect(unit.x, unit.y, rect) <= INTERACT) {
+    stopMoving(unit)
+    const center = buildingCenter(building)
+    unit.facing = Math.atan2(center.y - unit.y, center.x - unit.x)
+    return
+  }
+  if (unit.goalX == null) {
+    const stats = BUILDING_STATS.keep
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    if (spot) setUnitDestination(state, unit, spot.x, spot.y)
+  }
 }
 
 function refreshConstruct(state: MatchState, unit: Unit, order: Extract<Order, { type: 'construct' }>): void {
@@ -622,7 +651,13 @@ function isStationary(unit: Unit): boolean {
   if (unit.goalX != null) return false
   const order = unit.order
   if (!order) return false
-  return order.type === 'attack' || order.type === 'attackMove' || order.type === 'gather' || order.type === 'construct'
+  return (
+    order.type === 'attack' ||
+    order.type === 'attackMove' ||
+    order.type === 'gather' ||
+    order.type === 'construct' ||
+    order.type === 'repair'
+  )
 }
 
 function advanceGather(state: MatchState, dt: number): void {
@@ -731,6 +766,65 @@ function advanceConstruct(state: MatchState, dt: number): void {
       pushToast(state, `${BUILDING_STATS[building.kind].label} finished.`)
     }
   }
+}
+
+function advanceRepair(state: MatchState, dt: number): void {
+  for (const building of state.buildings) {
+    if (!building.ruined) continue
+    const crew = state.units.filter((unit) => {
+      if (unit.hp <= 0 || unit.order?.type !== 'repair' || unit.order.buildingId !== building.id) return false
+      return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
+    })
+    if (!crew.length) continue
+    const payer = crew[0]
+    if (!payer) continue
+    if (!building.repairPaid) {
+      if ((state.oreHeld[payer.owner] ?? 0) < SILO_REPAIR_COST) {
+        for (const unit of crew) {
+          unit.order = null
+          stopMoving(unit)
+        }
+        if (payer.owner === 0) pushToast(state, `Need ${SILO_REPAIR_COST} dumps`)
+        continue
+      }
+      debitDumps(state, payer.owner, SILO_REPAIR_COST)
+      building.repairPaid = true
+    }
+    const speed = 1 + (crew.length - 1) * 0.6
+    building.progress += (dt * speed) / SILO_REPAIR_TIME
+    if (building.progress < 1) continue
+    restoreSilo(state, building, payer.owner)
+  }
+}
+
+/** A finished repair is a working Silo at full health, owned by the Stalker who completed it. */
+function restoreSilo(state: MatchState, building: Building, owner: number): void {
+  const stats = BUILDING_STATS.keep
+  const mouth = keepEntrance(building)
+  building.ruined = false
+  building.repairPaid = false
+  building.owner = owner
+  building.hp = stats.hp
+  building.complete = true
+  building.progress = 1
+  building.queue = []
+  building.stock = 0
+  building.alert = 0
+  building.focusId = null
+  building.focusKind = null
+  building.struckBy = null
+  building.hatch = 0
+  building.rallyX = mouth.x
+  building.rallyY = mouth.y
+  for (const unit of state.units) {
+    if (unit.order?.type === 'repair' && unit.order.buildingId === building.id) {
+      unit.order = null
+      stopMoving(unit)
+    }
+  }
+  recomputeSupply(state)
+  rebuildBlocked(state)
+  if (owner === 0) pushToast(state, 'The Silo is repaired.')
 }
 
 function advanceProduction(state: MatchState, dt: number): void {
@@ -1194,8 +1288,9 @@ function cleanup(state: MatchState): void {
     state.selectedUnits = state.selectedUnits.filter((id) => !deadIds.has(id))
   }
 
-  const deadBuildings = state.buildings.filter((building) => building.hp <= 0)
+  const deadBuildings = state.buildings.filter((building) => building.hp <= 0 && !building.ruined)
   if (!deadBuildings.length) return
+  const fallenKeeps: Array<{ owner: number; struckBy: number | null }> = []
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
     burst(state, center.x, center.y, sideTone(building.owner, '#9ec8de', '#e7a197', '#b7e0b4', '#d4c0ea'), 16)
@@ -1209,6 +1304,10 @@ function cleanup(state: MatchState): void {
         unit.order = null
         stopMoving(unit)
       }
+      if (unit.order?.type === 'repair' && unit.order.buildingId === building.id) {
+        unit.order = null
+        stopMoving(unit)
+      }
       if (unit.order?.type === 'attack' && unit.order.kind === 'building' && unit.order.targetId === building.id) {
         unit.order = null
         stopMoving(unit)
@@ -1216,21 +1315,39 @@ function cleanup(state: MatchState): void {
     }
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
     state.events.push({ type: 'death' })
+    if (building.kind === 'keep') fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
   }
-  const deadKeeps = deadBuildings.filter((building) => building.kind === 'keep')
-  state.buildings = state.buildings.filter((building) => building.hp > 0)
+  for (const building of deadBuildings) {
+    if (building.kind !== 'keep') continue
+    building.ruined = true
+    building.repairPaid = false
+    building.owner = -1
+    building.hp = 0
+    building.complete = false
+    building.progress = 0
+    building.queue = []
+    building.stock = 0
+    building.alert = 0
+    building.focusId = null
+    building.focusKind = null
+    building.hatch = 0
+    building.dropDumps = false
+  }
+  state.buildings = state.buildings.filter((building) => building.hp > 0 || building.ruined)
   let removedSide = false
   for (let owner = 0; owner < state.playerCount; owner++) {
     if (state.eliminated[owner] || sideHasKeep(state, owner)) continue
-    const captor = captorFor(state, owner, deadKeeps)
+    const fallen = fallenKeeps.find((entry) => entry.owner === owner)
+    const captor = captorFor(state, owner, fallen?.struckBy ?? null)
     if (captor == null) eliminateSide(state, owner)
     else captureSide(state, owner, captor)
     removedSide = true
   }
   if (removedSide) recomputeSupply(state)
   rebuildBlocked(state)
-  const playerAlive = state.buildings.some((building) => building.owner === 0 && building.kind === 'keep')
-  const enemyAlive = state.buildings.some((building) => building.owner !== 0 && building.kind === 'keep')
+  const livingKeep = (building: Building) => building.kind === 'keep' && building.hp > 0 && !building.ruined
+  const playerAlive = state.buildings.some((building) => building.owner === 0 && livingKeep(building))
+  const enemyAlive = state.buildings.some((building) => building.owner > 0 && livingKeep(building))
   if (!playerAlive) {
     state.outcome = 'lose'
     state.events.push({ type: 'lose' })
@@ -1315,9 +1432,8 @@ function sideHasKeep(state: MatchState, owner: number): boolean {
   return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
-function captorFor(state: MatchState, victim: number, deadKeeps: Building[]): number | null {
-  const fallen = deadKeeps.find((building) => building.owner === victim)
-  const struck = fallen?.struckBy
+function captorFor(state: MatchState, victim: number, struckBy: number | null): number | null {
+  const struck = struckBy
   if (struck != null && struck !== victim && !state.eliminated[struck] && sideHasKeep(state, struck)) return struck
   for (let owner = 0; owner < state.playerCount; owner++) {
     if (owner === victim || state.eliminated[owner]) continue
@@ -1540,6 +1656,10 @@ function workingInPlace(state: MatchState, unit: Unit): boolean {
   if (order.type === 'construct') {
     const building = buildingById(state, order.buildingId)
     return !!building && building.hp > 0 && distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
+  }
+  if (order.type === 'repair') {
+    const building = buildingById(state, order.buildingId)
+    return !!building && building.ruined && distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
   }
   if (order.type === 'attack') {
     const target = getTarget(state, order.targetId, order.kind)

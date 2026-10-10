@@ -16,8 +16,10 @@ import {
 import {
   BUILDING_STATS,
   MINERS_PER_DEPOSIT,
+  SILO_REPAIR_COST,
   TILE,
   UNIT_STATS,
+  type Building,
   type BuildingKind,
   type MatchState,
   type PlayerId,
@@ -242,6 +244,10 @@ export function redirectStuckPorter(state: MatchState, unit: Unit): void {
   }
   if (order.type === 'attack' && order.resumeNode != null) {
     sendNextDeposit(state, unit, order.resumeNode)
+    return
+  }
+  if (order.type === 'repair') {
+    stopMoving(unit)
     return
   }
   if (order.type === 'construct') {
@@ -537,6 +543,57 @@ export function commandConstruct(state: MatchState, ids: number[], buildingId: n
   noteOrder(state, crew)
 }
 
+/** Send these Stalkers to the nearest ruined Silo. */
+export function commandRepairNearest(state: MatchState, ids: number[]): string | null {
+  const crew = living(state, ids).filter((unit) => unit.kind === 'porter')
+  if (!crew.length) return 'You need a stalker to repair'
+  let x = 0
+  let y = 0
+  for (const unit of crew) {
+    x += unit.x
+    y += unit.y
+  }
+  x /= crew.length
+  y /= crew.length
+  let best: Building | undefined
+  let bestD = Infinity
+  for (const building of state.buildings) {
+    if (!building.ruined) continue
+    const center = buildingCenter(building)
+    const distance = Math.hypot(center.x - x, center.y - y)
+    if (distance < bestD) {
+      bestD = distance
+      best = building
+    }
+  }
+  if (!best) return 'No ruined Silo'
+  return commandRepair(state, crew.map((unit) => unit.id), best.id)
+}
+
+/** Send Stalkers to rebuild a ruined Silo. The cost is paid when work starts. */
+export function commandRepair(state: MatchState, ids: number[], buildingId: number): string | null {
+  if (state.paused) return null
+  if (state.outcome) return 'The battle is over'
+  const building = buildingById(state, buildingId)
+  if (!building || !building.ruined) return 'That is not a ruined Silo'
+  const crew = living(state, ids).filter((unit) => unit.kind === 'porter')
+  if (!crew.length) return 'You need a stalker to repair'
+  const payer = crew[0]
+  if (!payer) return 'You need a stalker to repair'
+  if (!building.repairPaid && (state.oreHeld[payer.owner] ?? 0) < SILO_REPAIR_COST) {
+    return `Need ${SILO_REPAIR_COST} dumps`
+  }
+  for (const unit of crew) {
+    unit.order = { type: 'repair', buildingId: building.id }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    unit.scanning = false
+    stopMoving(unit)
+  }
+  noteOrder(state, crew)
+  return null
+}
+
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
@@ -558,9 +615,6 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   if (building.kind === 'silo') return 'A storage does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
-  if (stats.supply > 0 && state.supplyUsed[building.owner] + stats.supply > state.supplyCap[building.owner]) {
-    return 'Cells cap reached — raise a Storage'
-  }
   if (building.queue.length >= 5) return 'Training queue is full'
   debitDumps(state, building.owner, stats.cost)
   building.queue.push({ kind, remaining: stats.trainTime, total: stats.trainTime })

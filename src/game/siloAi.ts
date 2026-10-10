@@ -1,9 +1,9 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandHarvestOrAttack, commandMove, commandRepair, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, INTERACT, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
-import { depositKnown } from './vision'
+import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { depositKnown, sideTileExplored } from './vision'
 
 /**
  * SiloAI plays one side from that side's own sight.
@@ -20,6 +20,10 @@ import { depositKnown } from './vision'
  * A building goes down only on ground this side has explored, footprint and the
  * two-cell gap included. Explored ground under the shroud is fine. A Hover charts
  * a black site before a Stalker is sent to build there.
+ * A ruined Silo on explored, safe ground is repaired when this side can pay.
+ * An enemy in weapon range of the Silo, or of a building beside it, pulls every
+ * Flasher and Gorilla off the wave to attack them. They return to the rally after.
+ * A Stalker with nothing to do mines, helps a building, or joins a repair.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -823,7 +827,6 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (building) => building.owner === side.owner && !building.complete && building.hp > 0,
   )
   if (!constructing) {
-    const supplyRoom = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
     const ore = state.oreHeld[side.owner]
     const yards = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'yard' && building.hp > 0,
@@ -831,9 +834,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
     const towers = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
     ).length
-    if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
-      placeChartedNearKeep(state, side, 'silo')
-    } else if (placeExpansionStorage(state, side)) {
+    if (placeExpansionStorage(state, side)) {
       // A Storage now stands beside a Dumps heap this side has seen.
     } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')
@@ -868,14 +869,15 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (unit) => unit.owner === side.owner && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0,
   )
   const keepPoint = buildingCenter(keep)
-  const homeAlert = castleUnderAttack(state, side, keepPoint)
+  const threats = siloAttackers(state, side, keepPoint)
   const castle = spottedKeep(state, side.owner)
   const spotted = knownEnemyBuilding(state, side)
   const rally = rallyPoint(state, side, keepPoint)
   const need = siloWaveNeed(state)
   const garrison = garrisonIds(army, keepPoint)
-  if (homeAlert) {
-    recallToCastle(state, army, keepPoint)
+  if (threats.length) {
+    side.attacking = false
+    defendHome(state, army, threats)
     finish(state, side)
     return
   }
@@ -909,13 +911,152 @@ function runSide(state: MatchState, owner: PlayerId): void {
 }
 
 function finish(state: MatchState, side: Brain): void {
+  repairRuins(state, side)
   abortThreatenedExpansion(state, side)
   retreatFromEnemyPillars(state, side)
   sendExpansionEscort(state, side)
   staffExpansionDumps(state, side)
   widenNarrowPassages(state, side)
+  employIdleStalkers(state, side)
   scoutUnchartedSite(state, side)
   store(state, side)
+}
+
+/**
+ * A Stalker with no order helps a building, joins a repair, or mines.
+ * The three-miner deposit cap still prefers open slots. Overflow mines too, so nobody stands idle.
+ */
+function employIdleStalkers(state: MatchState, side: Brain): void {
+  let idle = state.units.filter(
+    (unit) =>
+      unit.owner === side.owner &&
+      unit.kind === 'porter' &&
+      unit.hp > 0 &&
+      unit.cargo <= 0 &&
+      !unit.order &&
+      unit.id !== side.scout,
+  )
+  if (!idle.length) return
+  const site = state.buildings.find(
+    (building) => building.owner === side.owner && building.hp > 0 && !building.complete && !building.ruined,
+  )
+  if (site) {
+    commandConstruct(state, idle.map((unit) => unit.id), site.id)
+    return
+  }
+  const repairing = state.buildings.find(
+    (building) =>
+      building.ruined &&
+      state.units.some(
+        (unit) =>
+          unit.owner === side.owner &&
+          unit.hp > 0 &&
+          unit.order?.type === 'repair' &&
+          unit.order.buildingId === building.id,
+      ),
+  )
+  if (repairing) {
+    const crew = state.units.filter(
+      (unit) => unit.hp > 0 && unit.order?.type === 'repair' && unit.order.buildingId === repairing.id,
+    ).length
+    const extra = idle.slice(0, Math.max(0, 2 - crew))
+    if (extra.length) commandRepair(state, extra.map((unit) => unit.id), repairing.id)
+    const sent = new Set(extra.map((unit) => unit.id))
+    idle = idle.filter((unit) => !sent.has(unit.id))
+  }
+  if (!idle.length) return
+  assignMiners(state, idle, null)
+  idle = idle.filter((unit) => !unit.order)
+  const sample = idle[0]
+  if (!sample) return
+  const node = nearestKnownDump(state, side, sample)
+  if (!node) return
+  for (const unit of idle) {
+    unit.nodeMemory = node.id
+    unit.idleAcquire = false
+    unit.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
+    stopMoving(unit)
+  }
+}
+
+function nearestKnownDump(
+  state: MatchState,
+  side: Brain,
+  unit: Unit,
+): { id: number; tx: number; ty: number } | null {
+  let best: { id: number; tx: number; ty: number } | null = null
+  let bestD = Infinity
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    if (!depositKnown(state, side.owner, node.tx, node.ty)) continue
+    const distance = Math.hypot((node.tx + 0.5) * TILE - unit.x, (node.ty + 0.5) * TILE - unit.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = node
+    }
+  }
+  return best
+}
+
+/**
+ * Repair the closest ruined Silo this side has explored, when the ground is safe
+ * and the repair is affordable. One Stalker goes. A site already being repaired is left alone.
+ */
+function repairRuins(state: MatchState, side: Brain): void {
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return
+  const home = buildingCenter(keep)
+  const ruins = state.buildings
+    .filter((building) => building.ruined && building.kind === 'keep')
+    .sort((a, b) => {
+      const da = Math.hypot(buildingCenter(a).x - home.x, buildingCenter(a).y - home.y)
+      const db = Math.hypot(buildingCenter(b).x - home.x, buildingCenter(b).y - home.y)
+      return da - db
+    })
+  for (const ruin of ruins) {
+    if (!ruinCharted(state, side.owner, ruin)) continue
+    const center = buildingCenter(ruin)
+    const safe = siteCovered(state, side.owner, center.x, center.y) || !knownEnemyNear(state, side, center.x, center.y)
+    if (!safe) continue
+    if (state.units.some((unit) => unit.owner === side.owner && unit.hp > 0 && unit.order?.type === 'repair' && unit.order.buildingId === ruin.id)) {
+      return
+    }
+    if (!ruin.repairPaid && (state.oreHeld[side.owner] ?? 0) < SILO_REPAIR_COST) continue
+    const porter = repairPorter(state, side, center.x, center.y)
+    if (!porter) return
+    commandRepair(state, [porter.id], ruin.id)
+    return
+  }
+}
+
+function ruinCharted(state: MatchState, owner: PlayerId, building: Building): boolean {
+  const stats = BUILDING_STATS.keep
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (!sideTileExplored(state, owner, building.tx + x, building.ty + y)) return false
+    }
+  }
+  return true
+}
+
+function repairPorter(state: MatchState, side: Brain, x: number, y: number): Unit | undefined {
+  let best: Unit | undefined
+  let bestRank = Infinity
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0) continue
+    if (unit.id === side.scout) continue
+    const order = unit.order
+    if (order?.type === 'construct' || order?.type === 'repair') continue
+    if (order?.type === 'attack' && order.resume) continue
+    const idle = order == null ? 0 : 1
+    const distance = Math.hypot(unit.x - x, unit.y - y)
+    const rank = idle * 100000 + distance
+    if (rank < bestRank) {
+      bestRank = rank
+      best = unit
+    }
+  }
+  return best
 }
 
 /** A Hover charts a legal site that is still black. One think scouts; a later think can build. */
@@ -1236,7 +1377,6 @@ function holdRally(state: MatchState, units: Unit[], rally: { x: number; y: numb
   const ids: number[] = []
   for (const unit of units) {
     const order = unit.order
-    if (order?.type === 'attack') continue
     if (
       (order?.type === 'attackMove' || order?.type === 'move') &&
       Math.hypot(order.x - rally.x, order.y - rally.y) < 80
@@ -1309,7 +1449,6 @@ function holdGarrison(
   for (const unit of army) {
     if (!garrison.has(unit.id)) continue
     const order = unit.order
-    if (order?.type === 'attack') continue
     if (
       (order?.type === 'attackMove' || order?.type === 'move') &&
       Math.hypot(order.x - keepPoint.x, order.y - keepPoint.y) < 96
@@ -1320,38 +1459,56 @@ function holdGarrison(
   }
 }
 
-function recallToCastle(state: MatchState, army: Unit[], keepPoint: { x: number; y: number }): void {
-  for (const unit of army) {
-    const order = unit.order
-    if (order?.type === 'attack' && order.kind === 'unit') {
-      const foe = state.units.find((other) => other.id === order.targetId && other.hp > 0)
-      if (foe && Math.hypot(foe.x - keepPoint.x, foe.y - keepPoint.y) < 420) continue
-    }
-    if (order?.type === 'attackMove' && Math.hypot(order.x - keepPoint.x, order.y - keepPoint.y) < 96) continue
-    commandMove(state, [unit.id], keepPoint.x, keepPoint.y, true)
-  }
-}
+/** Buildings this close to a Silo count as part of the base the army defends. */
+const SILO_DEFENSE_REACH = 320
 
-/** The Castle, or a building beside it, is taking damage or has an enemy in sight nearby. */
-function castleUnderAttack(state: MatchState, side: Brain, keepPoint: { x: number; y: number }): boolean {
-  for (const building of state.buildings) {
-    if (building.owner !== side.owner || building.hp <= 0 || building.alert <= 0) continue
-    if (building.kind === 'keep') return true
+/**
+ * Enemy units that are damaging the Silo, or a building beside it, or that have
+ * stepped into their own weapon range of one. Pillars shoot on their own.
+ */
+function siloAttackers(state: MatchState, side: Brain, keepPoint: { x: number; y: number }): Unit[] {
+  const watched = state.buildings.filter((building) => {
+    if (building.owner !== side.owner || building.hp <= 0 || building.ruined) return false
     const center = buildingCenter(building)
-    if (Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) < 420) return true
-  }
+    return Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) <= SILO_DEFENSE_REACH
+  })
+  if (!watched.length) return []
+  const threats: Unit[] = []
   for (const unit of state.units) {
     if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
-    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
-    if (Math.hypot(unit.x - keepPoint.x, unit.y - keepPoint.y) < 320) return true
-    for (const building of state.buildings) {
-      if (building.owner !== side.owner || building.hp <= 0) continue
-      const center = buildingCenter(building)
-      if (Math.hypot(center.x - keepPoint.x, center.y - keepPoint.y) > 420) continue
-      if (Math.hypot(unit.x - center.x, unit.y - center.y) < 180) return true
+    const range = UNIT_STATS[unit.kind].range
+    if (range <= 0) continue
+    const seen = tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
+    for (const building of watched) {
+      const distance = distToRect(unit.x, unit.y, buildingRect(building))
+      const reach = building.alert > 0 ? range + 48 : range
+      if (distance > reach) continue
+      if (!seen && building.alert <= 0) continue
+      threats.push(unit)
+      break
     }
   }
-  return false
+  return threats
+}
+
+/** Every Flasher and Gorilla attacks the nearest attacker. The wave waits. */
+function defendHome(state: MatchState, army: Unit[], threats: Unit[]): void {
+  for (const unit of army) {
+    let best: Unit | undefined
+    let bestD = Infinity
+    for (const threat of threats) {
+      if (threat.hp <= 0) continue
+      const distance = Math.hypot(unit.x - threat.x, unit.y - threat.y)
+      if (distance < bestD) {
+        bestD = distance
+        best = threat
+      }
+    }
+    if (!best) continue
+    const order = unit.order
+    if (order?.type === 'attack' && order.kind === 'unit' && order.targetId === best.id) continue
+    commandAttack(state, [unit.id], best.id, 'unit')
+  }
 }
 
 /**

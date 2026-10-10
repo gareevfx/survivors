@@ -1,6 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, STARTING_ORE, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_FILL_REFERENCE, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -20,6 +20,7 @@ import {
   unitSeen,
   updateVision,
   viewBuildingSeen,
+  viewRuinShown,
   viewGroundShown,
   viewTileVisible,
   sideTileVisible,
@@ -1041,16 +1042,12 @@ function aiPlacesMoreFactoriesAndSilos(): void {
   const yards = state.buildings.filter((building) => building.owner === 1 && building.kind === 'yard')
   assert(yards.length >= 2, `Dunmarch stopped at ${yards.length} factories`)
   finishSites()
-  for (let n = 0; n < 5; n++) {
-    packSupply()
-    const before = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
-    step(state, 0.5)
-    const after = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
-    assert(after > before, `Dunmarch did not start silo ${n + 1} (have ${after})`)
-    finishSites()
-  }
-  const silos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
-  assert(silos >= 5, `Dunmarch stopped at ${silos} silos`)
+  const beforeSilos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  packSupply()
+  state.oreHeld[1] = 4000
+  step(state, 0.5)
+  const afterSilos = state.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  assert(afterSilos === beforeSilos, 'SiloAI raised Storage because Cells were full')
 }
 
 function attacksBuildings(): void {
@@ -2018,10 +2015,14 @@ siloAiLeavesUnfinishedStorageExposed()
 pillarCapturesAnUncoveredStalker()
 siloAiPillarsWatchMinesAndAvoidEnemyPillars()
 siloAiRefusesUnchartedGround()
+ruinedSiloCanBeRepaired()
+siloAiDefendsItsSilo()
+siloAiKeepsStalkersWorking()
+cellsDoNotCapTraining()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
-  assert(TREE_HP === 28 && ROCK_HP === 56, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
+  assert(TREE_HP === 14 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
   for (let seed = 1; seed <= 8; seed++) {
     for (const mode of ['duel', 'ffa'] as const) {
       const field = createMatch(seed, mode)
@@ -2659,9 +2660,11 @@ function storageStartsEmptyAndFillsWithCells(): void {
   const first = BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply
   assert(storageFill(first) === 0, 'the first Storage is not empty')
   assert(storageFill(BUILDING_STATS.keep.supply) === 0, 'Silo Cells already fill a Storage')
-  assert(storageFill(SUPPLY_MAX) === 1, 'the Cells maximum does not fill Storage')
-  const middle = storageFill((first + SUPPLY_MAX) / 2)
-  assert(middle > 0.4 && middle < 0.6, `a middle Cells cap filled Storage by ${middle}`)
+  assert(STORAGE_FILL_REFERENCE === BUILDING_STATS.keep.supply + BUILDING_STATS.silo.supply * 4, 'Storage fill reference drifted')
+  assert(storageFill(STORAGE_FILL_REFERENCE) === 1, 'a Silo plus four Storages does not fill Storage')
+  assert(storageFill(STORAGE_FILL_REFERENCE + 40) === 1, 'Cells past the reference overflowed Storage art')
+  const middle = storageFill((first + STORAGE_FILL_REFERENCE) / 2)
+  assert(middle > 0.4 && middle < 0.6, `a middle Cells total filled Storage by ${middle}`)
 }
 
 function scanningHoverRevealsBlackFog(): void {
@@ -2762,13 +2765,17 @@ function hoverCostsDumpsAndNoStoreCells(): void {
   }
   const foeUsed = foe.supplyUsed[1]
   const foeYard = makeBuilding(foe, 1, 'yard', 14, 8, true)
-  foe.oreHeld[1] = 75
+  foe.oreHeld[1] = UNIT_STATS.porter.cost + UNIT_STATS.drone.cost
   step(foe, 0.5)
   assert(
     foeYard.queue.some((job) => job.kind === 'drone'),
-    'the AI waited for store cells before a hover',
+    'the AI skipped a Hover while Cells were already full',
   )
-  assert(foe.supplyUsed[1] === foeUsed, 'the AI hover raised store cells')
+  const queuedCells = foe.buildings
+    .filter((building) => building.owner === 1)
+    .reduce((sum, building) => sum + building.queue.reduce((inner, job) => inner + UNIT_STATS[job.kind].supply, 0), 0)
+  assert(foe.supplyUsed[1] === foeUsed + queuedCells, 'training changed Cells by something other than the queue')
+  assert(UNIT_STATS.drone.supply === 0, 'the Hover queue would raise Cells')
 
   const capped = createMatch(23)
   const capYard = makeBuilding(capped, 1, 'yard', 14, 8, true)
@@ -4149,4 +4156,250 @@ function siloAiRefusesUnchartedGround(): void {
     }
   }
   assert(humanBuilt, 'a human Stalker was refused a building on unexplored ground')
+}
+
+function ruinedSiloCanBeRepaired(): void {
+  const duel = createMatch(2)
+  const enemy = duel.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing the 1v1 Silo')
+  const enemyId = enemy.id
+  enemy.hp = 0
+  enemy.struckBy = 0
+  step(duel, 1 / 60)
+  assert(duel.outcome === 'win', `destroying the Silo did not end the 1v1 (${duel.outcome})`)
+  const wreck = duel.buildings.find((building) => building.id === enemyId)
+  assert(wreck?.ruined && wreck.owner === -1 && wreck.hp === 0, 'the 1v1 Silo disappeared instead of leaving a ruin')
+  assert(
+    !duel.buildings.some((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0),
+    'the loser still has a living Silo',
+  )
+
+  const state = createMatch(4, 'ffa')
+  const fallen = state.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  assert(fallen, 'missing a free-for-all Silo')
+  const victimOre = state.oreHeld[2] ?? 0
+  const captorOre = state.oreHeld[1] ?? 0
+  const fallenId = fallen.id
+  fallen.hp = 0
+  fallen.struckBy = 1
+  state.aiAcc = -20
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -20
+  step(state, 1 / 60)
+  assert(state.eliminated[2], 'destroying the Silo did not capture that side')
+  assert(state.outcome == null, 'one ruined Silo ended the free-for-all')
+  assert(!state.buildings.some((building) => building.owner === 2), 'captured buildings kept the loser')
+  assert(!state.units.some((unit) => unit.owner === 2), 'captured units kept the loser')
+  assert(state.oreHeld[1] === captorOre + victimOre, 'dumps did not transfer with the capture')
+  const ruin = state.buildings.find((building) => building.id === fallenId)
+  assert(ruin?.ruined && ruin.owner === -1 && ruin.hp === 0 && !ruin.complete, 'the Silo did not stay as a neutral ruin')
+  for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.keep.w; x++) {
+      assert(!isWalkable(state, ruin.tx + x, ruin.ty + y), `the ruin does not block ${ruin.tx + x},${ruin.ty + y}`)
+    }
+  }
+  const savedHp = state.units.map((unit) => unit.hp)
+  for (const unit of state.units) unit.hp = 0
+  updateVision(state)
+  assert(!sideTileVisible(state, 1, ruin.tx + 1, ruin.ty + 1), 'a ruined Silo still grants vision')
+  state.units.forEach((unit, index) => {
+    unit.hp = savedHp[index] ?? unit.hp
+  })
+  state.selectedBuilding = ruin.id
+  state.selectedUnits = []
+  const panel = describeSelection(state)
+  assert(panel.includes('Ruined Silo'), 'the info panel did not title the wreck')
+  assert(panel.includes('A collapsed shelter. A Stalker can repair it.'), 'the info panel lore is missing')
+  for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.keep.w; x++) {
+      state.explored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 0
+      state.aiExplored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 0
+    }
+  }
+  assert(!viewRuinShown(state, ruin), 'a ruin on black fog was treated as explored')
+  for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.keep.w; x++) {
+      state.aiExplored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 1
+      state.explored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 1
+      state.aiVisible[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 0
+      state.visible[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 0
+    }
+  }
+  assert(viewRuinShown(state, ruin), 'an explored ruin under the shroud was hidden')
+
+  const owners = state.units.map((unit) => unit.owner)
+  for (const unit of state.units) unit.owner = 0
+  const watcher = makeUnit(state, 0, 'pike', (ruin.tx + 1.5) * TILE, (ruin.ty + 4) * TILE)
+  for (let i = 0; i < 30; i++) step(state, 1 / 60)
+  const watching = unitById(state, watcher.id)
+  assert(
+    !(watching?.order?.type === 'attack' && watching.order.kind === 'building' && watching.order.targetId === ruin.id),
+    'a Flasher auto-fired on the ruined Silo',
+  )
+  state.units = state.units.filter((unit) => unit.id !== watcher.id)
+  state.units.forEach((unit, index) => {
+    if (owners[index] != null) unit.owner = owners[index] ?? unit.owner
+  })
+
+  const stalker = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(stalker, 'missing a Stalker to refuse the repair')
+  state.oreHeld[1] = 0
+  const refused = commandRepair(state, [stalker.id], ruin.id)
+  assert(refused != null, 'a repair started with no dumps')
+  assert(stalker.order?.type !== 'repair', 'the Stalker was ordered to repair without dumps')
+
+  for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.keep.w; x++) state.aiExplored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 0
+  }
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(
+    !state.units.some((unit) => unit.owner === 1 && unit.order?.type === 'repair'),
+    'SiloAI repaired a Silo it had not explored',
+  )
+  for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+    for (let x = 0; x < BUILDING_STATS.keep.w; x++) state.aiExplored[(ruin.ty + y) * state.mapW + (ruin.tx + x)] = 1
+  }
+  const foe = makeUnit(state, 0, 'pike', (ruin.tx + 1.5) * TILE, (ruin.ty + 0.5) * TILE)
+  state.aiVisible[Math.floor(foe.y / TILE) * state.mapW + Math.floor(foe.x / TILE)] = 1
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(
+    !state.units.some((unit) => unit.owner === 1 && unit.order?.type === 'repair'),
+    'SiloAI repaired a Silo beside a visible enemy',
+  )
+  state.units = state.units.filter((unit) => unit.id !== foe.id)
+  state.oreHeld[1] = 500
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(
+    state.units.some((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.order?.type === 'repair' && unit.order.buildingId === ruin.id),
+    'SiloAI did not send a Stalker to the closest safe ruin',
+  )
+
+  for (const unit of state.units) {
+    unit.cargo = 0
+    unit.nodeMemory = -1
+    unit.order = { type: 'move', x: 8, y: 8 }
+    unit.path = []
+    unit.goalX = null
+    unit.goalY = null
+  }
+  const builder = makeUnit(state, 1, 'porter', (ruin.tx + 1.5) * TILE, (ruin.ty + 3.6) * TILE)
+  state.oreHeld[1] = SILO_REPAIR_COST
+  const capBefore = state.supplyCap[1] ?? 0
+  assert(commandRepair(state, [builder.id], ruin.id) == null, 'the paid repair was refused')
+  state.aiAcc = -30
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -30
+  let started = false
+  for (let i = 0; i < 20 * 60; i++) {
+    step(state, 1 / 60)
+    if (ruin.progress > 0 && ruin.ruined) started = true
+    if (!ruin.ruined) break
+  }
+  assert(started, 'the repair never showed progress')
+  const restored = state.buildings.find((building) => building.id === fallenId)
+  assert(restored && !restored.ruined && restored.complete && restored.owner === 1, 'the repair did not restore the Silo')
+  assert(restored.hp === BUILDING_STATS.keep.hp, `the Silo came back with ${restored.hp} health`)
+  assert(state.oreHeld[1] === 0, `repair left ${state.oreHeld[1]} dumps`)
+  assert(state.supplyCap[1] === capBefore + BUILDING_STATS.keep.supply, 'the restored Silo did not add its cells')
+  assert(state.eliminated[2], 'repairing the ruin brought the captured side back')
+  state.oreHeld[1] = UNIT_STATS.porter.cost
+  assert(tryTrain(state, restored.id, 'porter') == null, 'the restored Silo does not train Stalkers')
+  updateVision(state)
+  const center = buildingCenter(restored)
+  let saw = false
+  for (let ty = 0; ty < state.mapH && !saw; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
+      const distance = Math.hypot((tx + 0.5) * TILE - center.x, (ty + 0.5) * TILE - center.y)
+      if (distance < 150 || distance > 240) continue
+      saw = sideTileVisible(state, 1, tx, ty)
+      ty = state.mapH
+      break
+    }
+  }
+  assert(saw, 'the restored Silo grants no vision')
+  assert(SILO_REPAIR_TIME === 8 && SILO_REPAIR_COST === 80, 'repair price changed')
+}
+
+function attacksAttacker(unit: Unit | undefined, targetId: number): boolean {
+  const order = unit?.order
+  return order?.type === 'attack' && order.kind === 'unit' && order.targetId === targetId
+}
+
+function siloAiDefendsItsSilo(): void {
+  const state = createMatch(5)
+  state.time = 20
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep && foe, 'missing a Silo for the defense')
+  const home = buildingCenter(keep)
+  const foePoint = buildingCenter(foe)
+  state.aiSpotted.push({ id: foe.id, x: foePoint.x, y: foePoint.y })
+  const rally = siloRallyPoint(state, 1)
+  assert(rally, 'SiloAI has no rally while defending')
+  const far = makeUnit(state, 1, 'pike', foePoint.x - 40, foePoint.y)
+  far.order = { type: 'attackMove', x: foePoint.x, y: foePoint.y, focusId: foe.id, focusKind: 'building' }
+  state.aiAttacking = true
+  const rallyPike = makeUnit(state, 1, 'pike', rally.x, rally.y)
+  const gorilla = makeUnit(state, 1, 'howler', rally.x + 18, rally.y)
+  const shed = makeBuilding(state, 1, 'silo', keep.tx, keep.ty + 4, true)
+  const shedCenter = buildingCenter(shed)
+  const bystander = makeUnit(state, 0, 'howler', foePoint.x + 90, foePoint.y)
+  updateVision(state)
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(!attacksAttacker(unitById(state, far.id), bystander.id), 'a distant enemy pulled the army home')
+  assert(!attacksAttacker(unitById(state, rallyPike.id), bystander.id), 'the rally group attacked a distant enemy')
+
+  const attacker = makeUnit(state, 0, 'pike', shedCenter.x, shedCenter.y + BUILDING_STATS.silo.h * TILE * 0.5 + 24)
+  updateVision(state)
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(!state.aiAttacking, 'SiloAI kept the wave going while the base was under attack')
+  for (const unit of [far, rallyPike, gorilla]) {
+    assert(attacksAttacker(unitById(state, unit.id), attacker.id), 'a military unit did not attack the Silo attacker')
+  }
+  const drone = state.units.find((unit) => unit.owner === 1 && unit.kind === 'drone' && unit.hp > 0)
+  if (drone) assert(!attacksAttacker(drone, attacker.id), 'a Hover joined the Silo defense')
+
+  attacker.hp = 0
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  for (const unit of [far, rallyPike, gorilla]) {
+    const now = unitById(state, unit.id)
+    assert(now?.order?.type !== 'attack', 'the army kept chasing after the attack ended')
+    assert(aimsAt(now, rally, 180) || aimsAt(now, home, 180), 'the army did not return to the rally')
+  }
+}
+
+function siloAiKeepsStalkersWorking(): void {
+  const state = createMatch(2)
+  state.oreHeld[1] = 0
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing a Silo for idle stalkers')
+  const home = buildingCenter(keep)
+  for (let i = 0; i < 8; i++) makeUnit(state, 1, 'porter', home.x + i * 8, home.y + 70)
+  updateVision(state)
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const porters = state.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const idle = porters.filter((unit) => !unit.order)
+  assert(idle.length === 0, `SiloAI left ${idle.length} stalkers with nothing to do`)
+  const working = porters.filter((unit) => unit.order?.type === 'gather' || (unit.order?.type === 'attack' && unit.order.kind === 'rock'))
+  assert(working.length >= 4, `expected stalkers on dumps, got ${working.length}`)
+}
+
+function cellsDoNotCapTraining(): void {
+  assert(BUILDING_STATS.tower.hp === 160, `Pillar health is ${BUILDING_STATS.tower.hp}`)
+  assert(BUILDING_STATS.tower.buildTime === 7, `Pillar build time is ${BUILDING_STATS.tower.buildTime}`)
+  const state = createMatch(3)
+  const silo = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'missing a Silo for Cells')
+  for (let i = 0; i < 70; i++) makeUnit(state, 0, 'pike', 40 + (i % 20) * 8, 40 + Math.floor(i / 20) * 8)
+  recomputeSupply(state)
+  assert(state.supplyUsed[0] > 60, 'the old Cells maximum was not passed')
+  assert(state.supplyUsed[0] > state.supplyCap[0], 'spawned units stayed under the building Cells')
+  state.oreHeld[0] = UNIT_STATS.porter.cost
+  assert(tryTrain(state, silo.id, 'porter') === null, 'Cells stopped a Stalker from training')
+  assert(silo.queue.some((job) => job.kind === 'porter'), 'the Stalker was not queued past the old cap')
 }

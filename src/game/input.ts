@@ -6,6 +6,8 @@ import {
   commandHarvestOrAttack,
   commandMove,
   commandRally,
+  commandRepair,
+  commandRepairNearest,
   commandStop,
   tryPlace,
   tryTrain,
@@ -171,6 +173,11 @@ function clearSelection(state: MatchState): void {
       }
       if (touch && state.selectedUnits.length && touchHit?.type === 'building') {
         const building = buildingById(state, touchHit.id)
+        if (building?.ruined) {
+          const error = commandRepair(state, state.selectedUnits, touchHit.id)
+          if (error) pushToast(state, error)
+          return
+        }
         if (building && building.owner !== 0) {
           if (!commandHarvestOrAttack(state, state.selectedUnits, touchHit.id)) {
             commandAttack(state, state.selectedUnits, touchHit.id, 'building')
@@ -221,15 +228,15 @@ function clearSelection(state: MatchState): void {
     }
     if (hit.type === 'building') {
       const building = buildingById(state, hit.id)
-      if (!building || building.owner !== 0) {
-        if (!shift) clearSelection(state)
+      if (building?.ruined || building?.owner === 0) {
+        state.selectedBuilding = building.id
+        state.selectedUnits = []
+        state.selectedOre = null
+        state.events.push({ type: 'select' })
+        lastClick = { t: performance.now(), id: -1 }
         return
       }
-      state.selectedBuilding = building.id
-      state.selectedUnits = []
-      state.selectedOre = null
-      state.events.push({ type: 'select' })
-      lastClick = { t: performance.now(), id: -1 }
+      if (!shift) clearSelection(state)
       return
     }
     if (hit.type === 'ore') {
@@ -269,6 +276,11 @@ function clearSelection(state: MatchState): void {
     }
     if (hit?.type === 'building') {
       const building = buildingById(state, hit.id)
+      if (building?.ruined) {
+        const error = commandRepair(state, state.selectedUnits, hit.id)
+        if (error) pushToast(state, error)
+        return
+      }
       if (building && building.owner === 0 && !building.complete) {
         const workers = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter' && unitById(state, id)?.hp)
         if (workers) {
@@ -502,7 +514,8 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyJ' ||
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
-        event.code === 'KeyC')
+        event.code === 'KeyC' ||
+        event.code === 'KeyR')
     ) {
       return
     }
@@ -545,6 +558,29 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyH') {
       trainSelected('drone')
+      return
+    }
+    if (event.code === 'KeyR') {
+      if (state.paused) return
+      if (state.selectedUnits.length) {
+        const error = commandRepairNearest(state, state.selectedUnits)
+        if (error) pushToast(state, error)
+        return
+      }
+      const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
+      if (!building?.ruined) return
+      const worker = state.units
+        .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+        .sort((a, b) => {
+          const center = buildingCenter(building)
+          return Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y)
+        })[0]
+      if (!worker) {
+        pushToast(state, 'You need a stalker to repair')
+        return
+      }
+      const error = commandRepair(state, [worker.id], building.id)
+      if (error) pushToast(state, error)
       return
     }
     if (event.code === 'KeyC') {
@@ -693,7 +729,8 @@ function pick(
   if (best) return { type: 'unit', id: best.id }
   for (let i = state.buildings.length - 1; i >= 0; i--) {
     const building = state.buildings[i]
-    if (!building || building.hp <= 0 || !viewBuildingSeen(state, building)) continue
+    if (!building || !viewBuildingSeen(state, building)) continue
+    if (building.hp <= 0 && !building.ruined) continue
     const rect = {
       x: building.tx * TILE,
       y: building.ty * TILE,

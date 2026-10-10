@@ -346,7 +346,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const y = building.ty * TILE
   const w = stats.w * TILE
   const h = stats.h * TILE
-  const color = PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0]
+  const color = building.ruined ? '#6a645c' : (PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0])
   const selected = state.selectedBuilding === building.id
   ctx.save()
   if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo' && building.kind !== 'tower') {
@@ -359,14 +359,14 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
     ctx.ellipse(x + w * 0.52 + 4, y + h * 0.78, w * 0.3, 5.5, 0, 0, Math.PI * 2)
     ctx.fill()
   }
-  if (!building.complete) ctx.globalAlpha = 0.45 + building.progress * 0.5
+  if (!building.complete && !building.ruined) ctx.globalAlpha = 0.45 + building.progress * 0.5
 
   if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
   else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
   else if (building.kind === 'tower') drawTower(ctx, state, building, x, y, color)
   else drawStorage(ctx, state, building, x, y, color)
 
-  if (building.hp < stats.hp) {
+  if (!building.ruined && building.hp < stats.hp) {
     ctx.strokeStyle = 'rgba(40, 24, 18, 0.45)'
     ctx.beginPath()
     ctx.moveTo(x + w * 0.3, y + 10)
@@ -376,7 +376,18 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   }
   ctx.restore()
 
-  if (!building.complete) {
+  if (building.ruined) {
+    const repairing = state.units.some(
+      (unit) => unit.order?.type === 'repair' && unit.order.buildingId === building.id && unit.hp > 0,
+    )
+    if (building.progress > 0 || repairing) {
+      bar(ctx, x + 8, y - 8, w - 16, building.progress, '#e6c15a')
+      ctx.fillStyle = '#f4e7bf'
+      ctx.font = '10px "Segoe UI", sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(repairing && building.progress < 1 ? 'Repairing' : 'Paused', x + w / 2, y - 12)
+    }
+  } else if (!building.complete) {
     bar(ctx, x + 8, y - 8, w - 16, building.progress, '#e6c15a')
     ctx.fillStyle = '#f4e7bf'
     ctx.font = '10px "Segoe UI", sans-serif'
@@ -417,11 +428,11 @@ function drawKeep(
   ctx.imageSmoothingQuality = 'high'
   drawKeepSprite(ctx, x, y, {
     color,
-    open,
-    lit: keepWindowCount(state.oreHeld[building.owner] ?? 0),
-    stage: keepDamageStage(building.hp, stats.hp),
+    open: building.ruined ? 0 : open,
+    lit: building.ruined ? 0 : keepWindowCount(state.oreHeld[building.owner] ?? 0),
+    stage: building.ruined ? 4 : keepDamageStage(building.hp, stats.hp),
     dish: building.dish,
-    progress,
+    progress: building.ruined ? -1 : progress,
     smoke: state.time,
   })
   ctx.restore()
@@ -728,6 +739,13 @@ export function renderMinimap(
   for (const building of state.buildings) {
     if (!viewBuildingSeen(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
+    if (building.ruined) {
+      ctx.globalAlpha = 0.55
+      ctx.fillStyle = '#5c564c'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.globalAlpha = 1
+      continue
+    }
     ctx.globalAlpha = building.complete ? 1 : 0.55
     if (building.kind === 'keep') {
       ctx.fillStyle = '#c8c2b4'

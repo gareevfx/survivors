@@ -1,19 +1,22 @@
-import { cancelBuilding, cancelTrain, commandStop, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandRepair, commandRepairNearest, commandStop, tryTrain } from '../game/commands'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
 import { factoryPortraitUrl } from '../game/factoryArt'
-import { siloPortraitUrl } from '../game/siloArt'
+import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, unitById } from '../game/state'
+import { buildingById, buildingCenter, unitById } from '../game/state'
 import {
   BUILDING_STATS,
   PLAYER_COLOR,
   PLAYER_NAME,
+  SILO_REPAIR_COST,
+  SILO_REPAIR_TIME,
   UNIT_STATS,
+  type Building,
   type BuildingKind,
   type MatchState,
   type UnitKind,
@@ -64,10 +67,9 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const sides = document.querySelector('#sides')
 
   if (ore) ore.textContent = String(state.oreHeld[0])
-  const supplyText = `${state.supplyUsed[0]} / ${state.supplyCap[0]}`
   if (supply) {
-    supply.textContent = supplyText
-    supply.classList.toggle('tight', state.supplyCap[0] - state.supplyUsed[0] <= 1)
+    supply.textContent = String(state.supplyUsed[0])
+    supply.classList.remove('tight')
     const cells = supply.closest('.readout')
     if (cells instanceof HTMLElement) cells.title = loreBody('Cells')
   }
@@ -173,6 +175,29 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
   }
 
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
+  if (building?.ruined && state.selectedUnits.length === 0) {
+    const afford = building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST
+    const porter = nearestPlayerPorter(state, building)
+    return [
+      {
+        id: 'repair-silo',
+        label: 'Repair',
+        hotkey: 'R',
+        detail: `${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s`,
+        title: !porter ? 'You need a stalker to repair' : afford ? 'Send the nearest Stalker to repair this Silo' : `Need ${SILO_REPAIR_COST} dumps`,
+        disabled: !porter || !afford,
+        run: () => {
+          const worker = nearestPlayerPorter(state, building)
+          if (!worker) {
+            state.toasts.push({ text: 'You need a stalker to repair', life: 3 })
+            return
+          }
+          const error = commandRepair(state, [worker.id], building.id)
+          if (error) state.toasts.push({ text: error, life: 3 })
+        },
+      },
+    ]
+  }
   if (building && building.owner === 0 && state.selectedUnits.length === 0) {
     if (!building.complete) {
       return [
@@ -256,7 +281,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       })
     }
     if (porters) {
-      cmds.push(placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
+      cmds.push(repairButton(state), placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
     }
     return cmds
   }
@@ -289,22 +314,44 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
   }
 }
 
+function repairButton(state: MatchState): Cmd {
+  const porters = state.selectedUnits.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0
+  })
+  const ruin = state.buildings.some((building) => building.ruined)
+  const afford = state.buildings.some(
+    (building) => building.ruined && (building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST),
+  )
+  let title = 'Repair the nearest ruined Silo'
+  if (!porters.length) title = 'You need a stalker to repair'
+  else if (!ruin) title = 'No ruined Silo'
+  else if (!afford) title = `Need ${SILO_REPAIR_COST} dumps`
+  return {
+    id: 'repair',
+    label: 'Repair',
+    hotkey: 'R',
+    detail: `${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s`,
+    title,
+    disabled: !porters.length || !ruin || !afford,
+    run: () => {
+      const error = commandRepairNearest(state, state.selectedUnits)
+      if (error) state.toasts.push({ text: error, life: 3 })
+    },
+  }
+}
+
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
   const afford = state.oreHeld[0] >= stats.cost
-  const room = stats.supply === 0 || state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
-  let title = stats.blurb
-  if (!afford) title = `Need ${stats.cost} dumps`
-  else if (!room) title = 'Cells cap reached — raise a Storage'
-  const cells = stats.supply === 1 ? '1 cell' : `${stats.supply} cells`
-  const detail = stats.supply === 0 ? `${stats.cost} dumps · no cells` : `${stats.cost} dumps · ${cells}`
+  const title = afford ? stats.blurb : `Need ${stats.cost} dumps`
   return {
     id: `train-${kind}`,
     label: stats.label,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : 'H',
-    detail,
+    detail: `${stats.cost} dumps`,
     title,
-    disabled: !afford || !room,
+    disabled: !afford,
     run: () => {
       const error = tryTrain(state, buildingId, kind)
       if (error) state.toasts.push({ text: error, life: 3 })
@@ -389,8 +436,35 @@ function formatThirds(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
+function nearestPlayerPorter(state: MatchState, building: Building): { id: number } | undefined {
+  const center = buildingCenter(building)
+  let best: { id: number } | undefined
+  let bestD = Infinity
+  for (const unit of state.units) {
+    if (unit.owner !== 0 || unit.kind !== 'porter' || unit.hp <= 0) continue
+    const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = unit
+    }
+  }
+  return best
+}
+
 export function describeSelection(state: MatchState): string {
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
+  if (building?.ruined && state.selectedUnits.length === 0) {
+    const portraitUrl = ruinedSiloPortraitUrl()
+    const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
+    const pct = Math.max(0, Math.min(1, building.progress))
+    return `
+      <p class="eyebrow">Neutral</p>
+      <h2>${portrait}Ruined Silo</h2>
+      <div class="meter"><span style="width:${pct * 100}%"></span></div>
+      <p class="meta">${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s</p>
+      <p class="lore">${escapeHtml(loreBody('Ruined Silo'))}</p>
+    `
+  }
   if (building && state.selectedUnits.length === 0) {
     const stats = BUILDING_STATS[building.kind]
     const pct = Math.max(0, Math.min(1, building.hp / stats.hp))

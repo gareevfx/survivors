@@ -2,10 +2,11 @@
 export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Surface', body: 'Uncharted territory;' },
   { name: 'Silo', body: 'A shelter housing people;' },
+  { name: 'Ruined Silo', body: 'A collapsed shelter. A Stalker can repair it.' },
   { name: 'Stalker', body: 'Trained shelter residents;' },
   { name: 'Dumps', body: 'The piles of technical debris;' },
-  { name: 'Cells', body: 'Storage units;' },
-  { name: 'Storage', body: 'Storage for Cells;' },
+  { name: 'Cells', body: 'How many Cells your units take. There is no cap, and Cells do not limit training or building.' },
+  { name: 'Storage', body: 'A nearer drop-off for Dumps. It does not raise a Cells cap.' },
   { name: 'Pillar', body: 'Windmill with battle tower;' },
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },
   { name: 'Flasher', body: 'Very fast unit;' },

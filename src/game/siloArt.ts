@@ -215,6 +215,14 @@ function paintBody(ctx: CanvasRenderingContext2D, color: string, stage: number):
   ctx.lineTo(DOOR.x + DOOR.w - 1, 99)
   ctx.stroke()
 
+  if (stage >= 4) {
+    ctx.fillStyle = 'rgba(18, 14, 10, 0.55)'
+    ctx.fillRect(8, 10, 80, 78)
+    ctx.fillStyle = 'rgba(42, 22, 12, 0.4)'
+    ctx.beginPath()
+    ctx.ellipse(48, 40, 28, 16, 0.2, 0, Math.PI * 2)
+    ctx.fill()
+  }
   if (stage > 0) paintDamage(ctx, stage)
 }
 
@@ -269,6 +277,22 @@ function paintDamage(ctx: CanvasRenderingContext2D, stage: number): void {
     ctx.lineTo(86, 18)
     ctx.lineTo(80, 28)
     ctx.closePath()
+    ctx.fill()
+  }
+  if (stage >= 4) {
+    ctx.fillStyle = '#2a241e'
+    ctx.beginPath()
+    ctx.moveTo(14, 18)
+    ctx.lineTo(52, 28)
+    ctx.lineTo(46, 58)
+    ctx.lineTo(10, 44)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#1a1612'
+    ctx.fillRect(30, 34, 22, 16)
+    ctx.fillStyle = 'rgba(180, 72, 28, 0.55)'
+    ctx.beginPath()
+    ctx.ellipse(40, 42, 6, 3, 0, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.restore()
@@ -380,16 +404,63 @@ function paintSmoke(ctx: CanvasRenderingContext2D, time: number, stage: number):
   ctx.fill()
 }
 
+function paintRuin(ctx: CanvasRenderingContext2D, time: number): void {
+  paintSmoke(ctx, time, 4)
+  const drift = Math.sin(time * 1.7) * 3
+  ctx.fillStyle = 'rgba(28, 24, 20, 0.55)'
+  ctx.beginPath()
+  ctx.ellipse(40 + drift, 2, 14, 5, 0, 0, Math.PI * 2)
+  ctx.ellipse(68 - drift, 8, 9, 4, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(90, 40, 16, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(40, 44, 8, 3.5, 0, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 export function drawKeepSprite(ctx: CanvasRenderingContext2D, x: number, y: number, look: KeepLook): void {
   const body = bodySprite(look.color, look.stage)
   ctx.drawImage(body, x - OX, y - OY)
   ctx.save()
   ctx.translate(x, y)
-  paintWindows(ctx, look.lit)
-  paintDoor(ctx, look.open, look.progress)
-  paintDish(ctx, look.dish, look.color)
-  paintSmoke(ctx, look.smoke, look.stage)
+  if (look.stage >= 4) paintRuin(ctx, look.smoke)
+  else {
+    paintWindows(ctx, look.lit)
+    paintDoor(ctx, look.open, look.progress)
+    paintDish(ctx, look.dish, look.color)
+    paintSmoke(ctx, look.smoke, look.stage)
+  }
   ctx.restore()
+}
+
+/** Selection portrait for a wreck. Empty when there is no document, so smoke can call it. */
+export function ruinedSiloPortraitUrl(): string {
+  if (typeof document === 'undefined') return ''
+  const cached = portraits.get(-1)
+  if (cached) return cached
+  const canvas = document.createElement('canvas')
+  canvas.width = 72
+  canvas.height = 72
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  ctx.fillStyle = '#3a342c'
+  ctx.fillRect(0, 0, 72, 72)
+  ctx.save()
+  ctx.translate(6, 4)
+  ctx.scale(0.58, 0.58)
+  drawKeepSprite(ctx, 0, 0, {
+    color: '#6a645c',
+    open: 0,
+    lit: 0,
+    stage: 4,
+    dish: 0,
+    progress: -1,
+    smoke: 1.2,
+  })
+  ctx.restore()
+  const url = canvas.toDataURL()
+  portraits.set(-1, url)
+  return url
 }
 
 /** Selection portrait. Empty when there is no document, so smoke can call it. */

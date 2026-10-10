@@ -11,7 +11,6 @@ import {
   ORE_NODE_AMOUNT,
   ROCK_HP,
   STARTING_ORE,
-  SUPPLY_MAX,
   TILE,
   TREE_HP,
   UNIT_STATS,
@@ -42,7 +41,7 @@ export function rebuildBlocked(state: MatchState): void {
     if (node.amount > 0) state.blocked[tileIndex(node.tx, node.ty, state.mapW)] = 1
   }
   for (const building of state.buildings) {
-    if (building.hp <= 0) continue
+    if (building.hp <= 0 && !building.ruined) continue
     const stats = BUILDING_STATS[building.kind]
     for (let y = 0; y < stats.h; y++) {
       for (let x = 0; x < stats.w; x++) {
@@ -65,7 +64,7 @@ export function recomputeSupply(state: MatchState): void {
     for (const job of building.queue) used[building.owner] = (used[building.owner] ?? 0) + UNIT_STATS[job.kind].supply
   }
   state.supplyUsed = used
-  state.supplyCap = cap.map((value) => Math.min(SUPPLY_MAX, value))
+  state.supplyCap = cap
 }
 
 export function pushToast(state: MatchState, text: string): void {
@@ -304,6 +303,8 @@ export function makeBuilding(
     stock: 0,
     struckBy: null,
     dropDumps: false,
+    ruined: false,
+    repairPaid: false,
   }
   state.buildings.push(building)
   return building

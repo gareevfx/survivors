@@ -124,12 +124,24 @@ export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
 }
 
 export function viewBuildingSeen(state: MatchState, building: Building): boolean {
+  if (building.ruined) return viewRuinShown(state, building)
   if (!state.bothCam && !state.enemyCam && building.owner === 0) return true
   if (!state.bothCam && state.enemyCam && building.owner !== 0) return true
   const stats = BUILDING_STATS[building.kind]
   for (let y = 0; y < stats.h; y++) {
     for (let x = 0; x < stats.w; x++) {
       if (viewTileVisible(state, building.tx + x, building.ty + y)) return true
+    }
+  }
+  return false
+}
+
+/** A ruined Silo is drawn on explored ground, including the gray shroud. Black fog hides it. */
+export function viewRuinShown(state: MatchState, building: Building): boolean {
+  const stats = BUILDING_STATS[building.kind]
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (viewTileExplored(state, building.tx + x, building.ty + y)) return true
     }
   }
   return false
