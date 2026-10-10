@@ -2,7 +2,7 @@ import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, s
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
-import { AI_BUILD_GAP, AI_MINERAL_KEEP, mineralLaneTiles } from './game/nav'
+import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
@@ -1004,6 +1004,9 @@ function combatUnitsDoNotChipRock(): void {
 function aiPlacesMoreFactoriesAndSilos(): void {
   const state = createMatch(2)
   state.oreHeld[1] = 4000
+  const home = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the factories')
+  chartBase(state, 1, home.tx + 1, home.ty + 1, 40)
   const finishSites = () => {
     for (const building of state.buildings) {
       if (building.owner !== 1 || building.complete) continue
@@ -2014,6 +2017,7 @@ siloAiAttacksInWaves()
 siloAiLeavesUnfinishedStorageExposed()
 pillarCapturesAnUncoveredStalker()
 siloAiPillarsWatchMinesAndAvoidEnemyPillars()
+siloAiRefusesUnchartedGround()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -2454,6 +2458,7 @@ function aiBuildingsLeaveAGapAndAvoidMinerals(): void {
     state.oreHeld[1] = 8000
     const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
     assert(keep, 'missing Dunmarch castle')
+    chartBase(state, 1, keep.tx + 1, keep.ty + 1, 40)
     for (let n = 0; n < 4; n++) {
       const placed = aiPlaceNearKeep(state, n % 2 === 0 ? 'yard' : 'silo', 1)
       assert(placed, `seed ${seed} could not place AI building ${n}`)
@@ -2469,6 +2474,7 @@ function aiBuildingsLeaveAGapAndAvoidMinerals(): void {
         unit.goalY = null
       }
       rebuildBlocked(state)
+      updateVision(state)
     }
     const built = state.buildings.filter((building) => building.owner === 1 && building.kind !== 'keep')
     assert(built.length >= 4, `seed ${seed} placed ${built.length} AI buildings`)
@@ -3374,7 +3380,7 @@ function siloAiRaisesStorageAtRemoteDumps(): void {
   }
   const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
   state.ore.push(remote)
-  state.aiExplored[cy * state.mapW + cx] = 1
+  chartDisk(state, 1, cx, cy, radius)
   rebuildBlocked(state)
   state.oreHeld[1] = 500
   const before = new Set(state.buildings.map((building) => building.id))
@@ -3581,7 +3587,7 @@ function siloAiStoresAtNewDumpsWhileHomeRemains(): void {
   }
   const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
   state.ore.push(remote)
-  state.aiExplored[cy * state.mapW + cx] = 1
+  chartDisk(state, 1, cx, cy, radius)
   rebuildBlocked(state)
   state.oreHeld[1] = 800
   state.aiAcc = 0
@@ -3828,10 +3834,42 @@ function carveRemoteDump(state: MatchState, owner: PlayerId): { tx: number; ty: 
   }
   const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
   state.ore.push(remote)
-  const grid = owner === 0 ? state.explored : owner === 1 ? state.aiExplored : state.sideExplored[owner]
-  if (grid) grid[cy * state.mapW + cx] = 1
+  chartDisk(state, owner, cx, cy, radius)
   rebuildBlocked(state)
   return remote
+}
+
+/** Mark a chebyshev disk explored for one side. Shroud (not currently visible) stays as it is. */
+function chartDisk(state: MatchState, owner: PlayerId, cx: number, cy: number, radius: number): void {
+  const grid = owner === 0 ? state.explored : owner === 1 ? state.aiExplored : state.sideExplored[owner]
+  if (!grid) return
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) > radius) continue
+      grid[y * state.mapW + x] = 1
+    }
+  }
+}
+
+/** Chart ground around a Silo without revealing Dumps tiles, so a far heap stays unknown. */
+function chartBase(state: MatchState, owner: PlayerId, cx: number, cy: number, radius: number): void {
+  const grid = owner === 0 ? state.explored : owner === 1 ? state.aiExplored : state.sideExplored[owner]
+  if (!grid) return
+  const ore = new Set<number>()
+  for (const node of state.ore) {
+    if (node.amount <= 0) continue
+    ore.add(node.ty * state.mapW + node.tx)
+  }
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) > radius) continue
+      const index = y * state.mapW + x
+      if (ore.has(index)) continue
+      grid[index] = 1
+    }
+  }
 }
 
 function siloAiLeavesUnfinishedStorageExposed(): void {
@@ -4023,4 +4061,92 @@ function siloAiPillarsWatchMinesAndAvoidEnemyPillars(): void {
     headingHome(unitById(hot, miner.id), buildingCenter(hotKeep), buildingCenter(enemy)),
     'SiloAI left a Stalker where an enemy Pillar can capture it',
   )
+}
+
+function siloAiRefusesUnchartedGround(): void {
+  const state = createMatch(7)
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing a Silo for the uncharted site')
+  const cx = 40
+  const cy = 24
+  const radius = 12
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      state.tiles[y * state.mapW + x] = 0
+      state.aiExplored[y * state.mapW + x] = 0
+      state.aiVisible[y * state.mapW + x] = 0
+    }
+  }
+  state.rocks = state.rocks.filter((rock) => Math.max(Math.abs(rock.tx - cx), Math.abs(rock.ty - cy)) > radius)
+  for (const node of state.ore) {
+    if (node.base === 1) node.amount = 0
+    else if (Math.max(Math.abs(node.tx - cx), Math.abs(node.ty - cy)) <= radius + 4) node.amount = 0
+  }
+  const remote = { id: state.nextId++, tx: cx, ty: cy, amount: 420, base: null }
+  state.ore.push(remote)
+  state.aiExplored[cy * state.mapW + cx] = 1
+  rebuildBlocked(state)
+  state.oreHeld[1] = 2000
+  const hover = makeUnit(state, 1, 'drone', (keep.tx + 1.5) * TILE, (keep.ty + 1.5) * TILE)
+  const blind = findBuildSpotWithin(state, 'silo', remote.tx, remote.ty, SILO_AI_EXPANSION_REACH, 1, false)
+  assert(blind, 'no terrain-legal Storage site beside the uncharted Dumps')
+  assert(!areaCharted(state, 1, 'silo', blind.tx, blind.ty), 'the remote Storage site was already explored')
+  const before = new Set(state.buildings.map((building) => building.id))
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(
+    !state.buildings.some((building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id)),
+    'SiloAI built a Storage on unexplored ground',
+  )
+  const flown = unitById(state, hover.id)
+  const aim = flown?.order
+  const siteX = (blind.tx + BUILDING_STATS.silo.w / 2) * TILE
+  const siteY = (blind.ty + BUILDING_STATS.silo.h / 2) * TILE
+  assert(
+    aim?.type === 'move' && Math.hypot(aim.x - siteX, aim.y - siteY) < 48,
+    'the Hover was not sent to chart the unexplored Storage site',
+  )
+
+  state.buildings = state.buildings.filter((building) => before.has(building.id))
+  for (const unit of state.units) {
+    if (unit.order?.type !== 'construct') continue
+    unit.order = null
+    unit.path = []
+    unit.goalX = null
+    unit.goalY = null
+  }
+  chartDisk(state, 1, cx, cy, radius)
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (x < 0 || y < 0 || x >= state.mapW || y >= state.mapH) continue
+      state.aiVisible[y * state.mapW + x] = 0
+    }
+  }
+  assert(areaCharted(state, 1, 'silo', blind.tx, blind.ty), 'charting the disk left the Storage site black')
+  state.oreHeld[1] = 2000
+  state.aiAcc = 0
+  rebuildBlocked(state)
+  updateSiloAi(state, 0.5)
+  const built = state.buildings.find(
+    (building) => building.owner === 1 && building.kind === 'silo' && !before.has(building.id),
+  )
+  assert(built, 'SiloAI did not build the Storage once the site was explored')
+  assert(areaCharted(state, 1, 'silo', built.tx, built.ty), 'the Storage footprint is not fully explored')
+  assert(state.aiVisible[built.ty * state.mapW + built.tx] === 0, 'SiloAI required current sight instead of explored ground')
+
+  const hands = createMatch(2)
+  hands.explored.fill(0)
+  hands.oreHeld[0] = 800
+  const stats = BUILDING_STATS.yard
+  let humanBuilt = false
+  for (let ty = 1; ty < MAP_H - stats.h - 1 && !humanBuilt; ty++) {
+    for (let tx = 1; tx < MAP_W - stats.w - 1 && !humanBuilt; tx++) {
+      if (!canPlace(hands, 'yard', tx, ty)) continue
+      if (hands.explored[ty * MAP_W + tx] !== 0) continue
+      if (tryPlace(hands, 0, 'yard', tx, ty, []) != null) continue
+      humanBuilt = hands.explored[ty * MAP_W + tx] === 0
+    }
+  }
+  assert(humanBuilt, 'a human Stalker was refused a building on unexplored ground')
 }

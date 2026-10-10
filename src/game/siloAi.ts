@@ -1,5 +1,5 @@
 import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandHarvestOrAttack, commandMove, tryPlace, tryTrain } from './commands'
-import { findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
+import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
 import { BUILDING_STATS, INTERACT, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
@@ -17,6 +17,9 @@ import { depositKnown } from './vision'
  * Storage does not protect the builder, so a capture or a close enemy pulls the other Stalkers off it.
  * Pillars watch Dumps and Storage so they can capture an uncovered enemy Stalker.
  * A known enemy Pillar is treated as that same capture risk.
+ * A building goes down only on ground this side has explored, footprint and the
+ * two-cell gap included. Explored ground under the shroud is fine. A Hover charts
+ * a black site before a Stalker is sent to build there.
  */
 
 /** A Storage this far from a Dumps tile counts as the drop-off for that heap. */
@@ -33,6 +36,8 @@ interface Brain {
   scout: number
   attacking: boolean
   next: 'pike' | 'howler'
+  /** Build site whose footprint is still black. Cleared every think; not stored. */
+  chart: { x: number; y: number } | null
 }
 
 function brain(state: MatchState, owner: PlayerId): Brain {
@@ -45,6 +50,7 @@ function brain(state: MatchState, owner: PlayerId): Brain {
       scout: state.playerAiScout,
       attacking: state.playerAiAttacking,
       next: state.playerAiNext,
+      chart: null,
     }
   }
   if (owner === 1) {
@@ -56,6 +62,7 @@ function brain(state: MatchState, owner: PlayerId): Brain {
       scout: state.aiScout,
       attacking: state.aiAttacking,
       next: state.aiNext,
+      chart: null,
     }
   }
   return {
@@ -66,6 +73,7 @@ function brain(state: MatchState, owner: PlayerId): Brain {
     scout: state.sideScout[owner] ?? 0,
     attacking: state.sideAttacking[owner] ?? false,
     next: state.sideNext[owner] ?? 'pike',
+    chart: null,
   }
 }
 
@@ -516,7 +524,9 @@ function livingBuilder(state: MatchState, owner: PlayerId, buildingId: number): 
  * farther than a haul from every Silo and Storage this side already has.
  * The builder goes only when the site is inside Silo, Flasher, or Gorilla sight,
  * or when no enemy has been seen nearby. Spare combat walks there first.
- * The spot uses the same gap and lane rules as a base building.
+ * The spot uses the same gap and lane rules as a base building, and the
+ * footprint plus that gap must already be explored. A black site is charted
+ * by a Hover instead of built on.
  */
 function expansionPlan(state: MatchState, side: Brain): ExpansionPlan {
   if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.silo.cost) return { kind: 'none' }
@@ -539,8 +549,12 @@ function expansionPlan(state: MatchState, side: Brain): ExpansionPlan {
     })
   let escort: { x: number; y: number } | null = null
   for (const node of nodes) {
-    const spot = findBuildSpotWithin(state, 'silo', node.tx, node.ty, SILO_AI_EXPANSION_REACH)
-    if (!spot) continue
+    const spot = findBuildSpotWithin(state, 'silo', node.tx, node.ty, SILO_AI_EXPANSION_REACH, side.owner)
+    if (!spot) {
+      const blind = findBuildSpotWithin(state, 'silo', node.tx, node.ty, SILO_AI_EXPANSION_REACH, side.owner, false)
+      rememberBlindSpot(state, side, 'silo', blind)
+      continue
+    }
     const center = spotCenter(spot.tx, spot.ty)
     const covered = siteCovered(state, side.owner, center.x, center.y)
     const enemies = knownEnemyNear(state, side, center.x, center.y)
@@ -818,17 +832,17 @@ function runSide(state: MatchState, owner: PlayerId): void {
       (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
     ).length
     if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
-      aiPlaceNearKeep(state, 'silo', side.owner)
+      placeChartedNearKeep(state, side, 'silo')
     } else if (placeExpansionStorage(state, side)) {
       // A Storage now stands beside a Dumps heap this side has seen.
     } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
-      aiPlaceNearKeep(state, 'yard', side.owner)
+      placeChartedNearKeep(state, side, 'yard')
     } else if (towers < 3 && ore >= BUILDING_STATS.tower.cost) {
       if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
-        aiPlaceNearKeep(state, 'yard', side.owner)
+        placeChartedNearKeep(state, side, 'yard')
       }
     } else if (ore >= BUILDING_STATS.yard.cost) {
-      aiPlaceNearKeep(state, 'yard', side.owner)
+      placeChartedNearKeep(state, side, 'yard')
     }
   }
 
@@ -900,7 +914,40 @@ function finish(state: MatchState, side: Brain): void {
   sendExpansionEscort(state, side)
   staffExpansionDumps(state, side)
   widenNarrowPassages(state, side)
+  scoutUnchartedSite(state, side)
   store(state, side)
+}
+
+/** A Hover charts a legal site that is still black. One think scouts; a later think can build. */
+function scoutUnchartedSite(state: MatchState, side: Brain): void {
+  const chart = side.chart
+  if (!chart) return
+  const drone = state.units.find((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
+  if (!drone) return
+  const order = drone.order
+  if (order?.type === 'move' && Math.hypot(order.x - chart.x, order.y - chart.y) < 48) return
+  commandMove(state, [drone.id], chart.x, chart.y, false)
+}
+
+function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'silo' | 'tower'): boolean {
+  if (aiPlaceNearKeep(state, kind, side.owner)) return true
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return false
+  rememberBlindSpot(state, side, kind, findBuildSpot(state, kind, keep.tx, keep.ty, side.owner, false))
+  return false
+}
+
+/** Remember the first terrain-legal site whose footprint is still unexplored. */
+function rememberBlindSpot(
+  state: MatchState,
+  side: Brain,
+  kind: 'yard' | 'silo' | 'tower',
+  spot: { tx: number; ty: number } | null,
+): void {
+  if (side.chart || !spot) return
+  if (areaCharted(state, side.owner, kind, spot.tx, spot.ty)) return
+  const stats = BUILDING_STATS[kind]
+  side.chart = { x: (spot.tx + stats.w / 2) * TILE, y: (spot.ty + stats.h / 2) * TILE }
 }
 
 /**
@@ -930,14 +977,22 @@ function placeWatchPillar(state: MatchState, side: Brain): boolean {
   )
   open.sort((a, b) => Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y))
   for (const point of open) {
-    const spot = findTowerWatchSpot(state, keep.tx, keep.ty, point.x, point.y)
-    if (!spot) continue
+    const spot = findTowerWatchSpot(state, keep.tx, keep.ty, point.x, point.y, side.owner)
+    if (!spot) {
+      rememberBlindSpot(
+        state,
+        side,
+        'tower',
+        findTowerWatchSpot(state, keep.tx, keep.ty, point.x, point.y, side.owner, false),
+      )
+      continue
+    }
     const centerX = (spot.tx + BUILDING_STATS.tower.w / 2) * TILE
     const centerY = (spot.ty + BUILDING_STATS.tower.h / 2) * TILE
     if (Math.hypot(centerX - point.x, centerY - point.y) > sight) continue
     if (tryPlace(state, side.owner, 'tower', spot.tx, spot.ty, []) === null) return true
   }
-  return aiPlaceNearKeep(state, 'tower', side.owner)
+  return placeChartedNearKeep(state, side, 'tower')
 }
 
 /** Stalkers outside their own cover walk home when a known enemy Pillar can reach them or their job. */

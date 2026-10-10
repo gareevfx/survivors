@@ -6,9 +6,11 @@ import {
   TILE,
   UNIT_STATS,
   type MatchState,
+  type PlayerId,
   type Rock,
   type Unit,
 } from './types'
+import { sideTileExplored } from './vision'
 
 /** True when a circle overlaps a blocked tile, including rocks, trees, minerals, and buildings. */
 export function circleHitsSolid(state: MatchState, x: number, y: number, radius: number): boolean {
@@ -257,12 +259,34 @@ export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set
  * A Pillar tile inside Silo sight, as close as the gap rules allow to a mine or Storage.
  * Prefers a tile whose own sight reaches that spot, so the Pillar can capture a Stalker there.
  */
+/**
+ * Footprint plus the two-cell gap, all on ground this side has explored.
+ * Explored ground under the shroud counts. Black fog does not. Off-map cells fail.
+ */
+export function areaCharted(
+  state: MatchState,
+  owner: PlayerId,
+  kind: 'yard' | 'silo' | 'tower',
+  tx: number,
+  ty: number,
+): boolean {
+  const stats = BUILDING_STATS[kind]
+  for (let y = ty - AI_BUILD_GAP; y <= ty + stats.h - 1 + AI_BUILD_GAP; y++) {
+    for (let x = tx - AI_BUILD_GAP; x <= tx + stats.w - 1 + AI_BUILD_GAP; x++) {
+      if (!sideTileExplored(state, owner, x, y)) return false
+    }
+  }
+  return true
+}
+
 export function findTowerWatchSpot(
   state: MatchState,
   keepTx: number,
   keepTy: number,
   watchX: number,
   watchY: number,
+  owner: PlayerId,
+  charted = true,
 ): { tx: number; ty: number } | null {
   const stats = BUILDING_STATS.tower
   const lanes = mineralLaneTiles(state, keepTx + 1, keepTy + 1)
@@ -273,7 +297,7 @@ export function findTowerWatchSpot(
   for (let ty = cy - reach; ty <= cy + reach; ty++) {
     for (let tx = cx - reach; tx <= cx + reach; tx++) {
       if (!footprintInKeepSight(keepTx, keepTy, tx, ty, stats.w, stats.h)) continue
-      if (!aiMayBuild(state, 'tower', tx, ty, lanes)) continue
+      if (!aiMayBuild(state, owner, 'tower', tx, ty, lanes, charted)) continue
       const dist = Math.hypot((tx + stats.w / 2) * TILE - watchX, (ty + stats.h / 2) * TILE - watchY)
       const score = (dist <= stats.sight ? 0 : 100000) + dist
       if (!best || score < best.score) best = { tx, ty, score }
@@ -287,6 +311,8 @@ export function findBuildSpot(
   kind: 'yard' | 'silo' | 'tower',
   anchorTx: number,
   anchorTy: number,
+  owner: PlayerId,
+  charted = true,
 ): { tx: number; ty: number } | null {
   const cx = anchorTx + 1
   const cy = anchorTy + 1
@@ -297,7 +323,7 @@ export function findBuildSpot(
       for (let x = cx - r; x <= cx + r; x++) {
         if (Math.abs(x - cx) !== r && Math.abs(y - cy) !== r) continue
         if (kind === 'tower' && !footprintInKeepSight(anchorTx, anchorTy, x, y, stats.w, stats.h)) continue
-        if (aiMayBuild(state, kind, x, y, lanes)) return { tx: x, ty: y }
+        if (aiMayBuild(state, owner, kind, x, y, lanes, charted)) return { tx: x, ty: y }
       }
     }
   }
@@ -315,6 +341,8 @@ export function findBuildSpotWithin(
   anchorTx: number,
   anchorTy: number,
   maxRadius: number,
+  owner: PlayerId,
+  charted = true,
 ): { tx: number; ty: number } | null {
   const lanes = mineralLaneTiles(state, anchorTx, anchorTy)
   const limit = Math.min(maxRadius, Math.max(state.mapW, state.mapH))
@@ -322,7 +350,7 @@ export function findBuildSpotWithin(
     for (let y = anchorTy - r; y <= anchorTy + r; y++) {
       for (let x = anchorTx - r; x <= anchorTx + r; x++) {
         if (Math.abs(x - anchorTx) !== r && Math.abs(y - anchorTy) !== r) continue
-        if (aiMayBuild(state, kind, x, y, lanes)) return { tx: x, ty: y }
+        if (aiMayBuild(state, owner, kind, x, y, lanes, charted)) return { tx: x, ty: y }
       }
     }
   }
@@ -331,12 +359,15 @@ export function findBuildSpotWithin(
 
 function aiMayBuild(
   state: MatchState,
+  owner: PlayerId,
   kind: 'yard' | 'silo' | 'tower',
   tx: number,
   ty: number,
   lanes: Set<number>,
+  charted: boolean,
 ): boolean {
   if (!canPlace(state, kind, tx, ty)) return false
+  if (charted && !areaCharted(state, owner, kind, tx, ty)) return false
   const stats = BUILDING_STATS[kind]
   for (let y = ty - AI_BUILD_GAP; y <= ty + stats.h - 1 + AI_BUILD_GAP; y++) {
     for (let x = tx - AI_BUILD_GAP; x <= tx + stats.w - 1 + AI_BUILD_GAP; x++) {
