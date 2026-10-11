@@ -485,7 +485,8 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
     ctx.save()
     ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
     ctx.beginPath()
-    ctx.ellipse(at.x + ((stats.w - stats.h) * TILE) / 2, at.y + 26, 68, 15, 0, 0, Math.PI * 2)
+    const span = (stats.w + stats.h) * TILE
+    ctx.ellipse(at.x + ((stats.w - stats.h) * TILE) / 2, at.y + span * 0.16, span * 0.42, span * 0.09, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
     const sprite = factorySprite(color)

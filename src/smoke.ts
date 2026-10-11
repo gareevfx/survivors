@@ -1414,8 +1414,8 @@ function clearFogCommandRevealsTheMap(): void {
 
 function footprintGridCommand(): void {
   assert(siloCoversDiamond(), 'the Silo photo is not scaled evenly onto the 3x3 diamond')
-  assert(BUILDING_STATS.yard.w === 2 && BUILDING_STATS.yard.h === 3, 'the Factory footprint is not 2x3')
-  assert(factoryCoversFootprint(), 'the Factory photo is not scaled evenly onto the 2x3 diamond')
+  assert(BUILDING_STATS.yard.w === 3 && BUILDING_STATS.yard.h === 3, 'the Factory footprint is not 3x3')
+  assert(factoryCoversFootprint(), 'the Factory photo is not scaled evenly onto the 3x3 diamond')
   const state = createMatch(2)
   assert(!state.showGrid, 'the footprint grid starts on')
   assert(!runCommand(state, 'grid'), 'a partial grid line was accepted')

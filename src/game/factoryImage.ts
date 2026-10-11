@@ -3,16 +3,16 @@ import { PLAYER_COLOR, TILE } from './types'
 
 /**
  * The Factory sprite is the keyed gantry photograph, drawn as-is.
- * It is scaled uniformly so its width matches the 2×3 footprint diamond,
+ * It is scaled uniformly so its width matches the 3×3 footprint diamond,
  * and the bottom center of the picture sits on that diamond's front corner.
  * Orange trim is hue-mapped to the team color. One sprite is cached per color.
  * The drop shadow is drawn by the renderer, not baked into the photo.
  */
 
 const SRC = '/assets/factory.png'
-const FOOT_W = 2
+const FOOT_W = 3
 const FOOT_H = 3
-/** Iso width of the 2×3 diamond. */
+/** Iso width of the 3×3 diamond. */
 const DIAMOND_W = (FOOT_W + FOOT_H) * TILE
 /** Front corner of that diamond, relative to the footprint center. */
 const FRONT_DX = ((FOOT_W - FOOT_H) * TILE) / 2
@@ -46,7 +46,7 @@ export function factoryPlacement(srcW: number, srcH: number): { width: number; h
   return { width, height, ax: width / 2 - FRONT_DX, ay: height - FRONT_DY }
 }
 
-/** True when the photo is scaled evenly to the 2×3 diamond and sits on its front corner. */
+/** True when the photo is scaled evenly to the 3×3 diamond and sits on its front corner. */
 export function factoryCoversFootprint(): boolean {
   const square = factoryPlacement(1000, 1000)
   const tall = factoryPlacement(500, 800)
@@ -55,7 +55,7 @@ export function factoryCoversFootprint(): boolean {
   return (
     square.width === DIAMOND_W &&
     tall.width === DIAMOND_W &&
-    square.width === (2 + 3) * TILE &&
+    square.width === (3 + 3) * TILE &&
     Math.abs(square.height - square.width) <= 1 &&
     Math.abs(tall.height / tall.width - 800 / 500) < 0.02 &&
     onFront(square) &&
