@@ -1,5 +1,4 @@
-import { isoKeepPortraitUrl, isoRuinedPortraitUrl } from './isoArt'
-import { BUILDING_STATS, TILE } from './types'
+import { BUILDING_STATS, PLAYER_COLOR, TILE } from './types'
 
 /**
  * The Silo is a square concrete shelter on the surface. The body is cached.
@@ -42,6 +41,7 @@ export interface KeepLook {
 }
 
 const bodies = new Map<string, HTMLCanvasElement>()
+const portraits = new Map<number, string>()
 
 /** Walkable point just outside the south door. Rally and new units use this. */
 export function keepEntrance(building: { tx: number; ty: number }): { x: number; y: number } {
@@ -435,12 +435,62 @@ export function drawKeepSprite(ctx: CanvasRenderingContext2D, x: number, y: numb
 
 /** Selection portrait for a wreck. Empty when there is no document, so smoke can call it. */
 export function ruinedSiloPortraitUrl(): string {
-  return isoRuinedPortraitUrl()
+  if (typeof document === 'undefined') return ''
+  const cached = portraits.get(-1)
+  if (cached) return cached
+  const canvas = document.createElement('canvas')
+  canvas.width = 72
+  canvas.height = 72
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  ctx.fillStyle = '#3a342c'
+  ctx.fillRect(0, 0, 72, 72)
+  ctx.save()
+  ctx.translate(6, 4)
+  ctx.scale(0.58, 0.58)
+  drawKeepSprite(ctx, 0, 0, {
+    color: '#6a645c',
+    open: 0,
+    lit: 0,
+    stage: 4,
+    dish: 0,
+    progress: -1,
+    smoke: 1.2,
+  })
+  ctx.restore()
+  const url = canvas.toDataURL()
+  portraits.set(-1, url)
+  return url
 }
 
 /** Selection portrait. Empty when there is no document, so smoke can call it. */
 export function siloPortraitUrl(owner: number): string {
-  return isoKeepPortraitUrl(owner)
+  if (typeof document === 'undefined') return ''
+  const cached = portraits.get(owner)
+  if (cached) return cached
+  const canvas = document.createElement('canvas')
+  canvas.width = 72
+  canvas.height = 72
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  ctx.fillStyle = '#8d6b45'
+  ctx.fillRect(0, 0, 72, 72)
+  ctx.save()
+  ctx.translate(6, 4)
+  ctx.scale(0.58, 0.58)
+  drawKeepSprite(ctx, 0, 0, {
+    color: PLAYER_COLOR[owner] ?? '#5ec8ff',
+    open: 0,
+    lit: 4,
+    stage: 0,
+    dish: 0.7,
+    progress: -1,
+    smoke: 0,
+  })
+  ctx.restore()
+  const url = canvas.toDataURL()
+  portraits.set(owner, url)
+  return url
 }
 
 export const KEEP_FOOT = FOOT

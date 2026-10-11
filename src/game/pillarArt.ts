@@ -1,4 +1,4 @@
-import { isoPillarPortraitUrl } from './isoArt'
+import { PLAYER_COLOR } from './types'
 
 /**
  * The Pillar is a one-cell mast with a wind turbine and an observation cab.
@@ -17,6 +17,7 @@ const CAB_Y = 2
 
 const masts = new Map<string, HTMLCanvasElement>()
 const cabs = new Map<string, HTMLCanvasElement>()
+const portraits = new Map<number, string>()
 
 export function pillarDamageStage(hp: number, full: number): number {
   const ratio = full > 0 ? hp / full : 1
@@ -256,5 +257,28 @@ export function drawPillarSprite(ctx: CanvasRenderingContext2D, x: number, y: nu
 
 /** Selection portrait and build-menu icon. Empty when there is no document, so smoke can call it. */
 export function pillarPortraitUrl(owner: number): string {
-  return isoPillarPortraitUrl(owner)
+  if (typeof document === 'undefined') return ''
+  const cachedUrl = portraits.get(owner)
+  if (cachedUrl) return cachedUrl
+  const canvas = document.createElement('canvas')
+  canvas.width = 72
+  canvas.height = 72
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  ctx.fillStyle = '#6d6248'
+  ctx.fillRect(0, 0, 72, 72)
+  ctx.save()
+  ctx.translate(14, 16)
+  ctx.scale(1.35, 1.35)
+  drawPillarSprite(ctx, 0, 0, {
+    color: PLAYER_COLOR[owner] ?? '#5ec8ff',
+    stage: 0,
+    spin: 0.5,
+    aim: 0.3,
+    flash: false,
+  })
+  ctx.restore()
+  const url = canvas.toDataURL()
+  portraits.set(owner, url)
+  return url
 }

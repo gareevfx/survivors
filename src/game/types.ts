@@ -161,7 +161,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     label: 'Factory',
     blurb: 'Trains flashers, gorillas, and hovers.',
     w: 3,
-    h: 3,
+    h: 2,
     hp: 720,
     cost: 160,
     buildTime: 18,
@@ -430,8 +430,6 @@ export interface MatchState {
   godMode: boolean
   /** When set, SiloAI plays Silo 01 from Silo 01's own sight. */
   aiControl: boolean
-  /** Dev overlay. Draws each building's footprint diamond. */
-  showGrid: boolean
   ore: OreNode[]
   rocks: Rock[]
   units: Unit[]

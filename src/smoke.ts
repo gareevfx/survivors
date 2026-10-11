@@ -1,7 +1,5 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
-import { factoryCoversFootprint } from './game/factoryImage'
-import { siloCoversDiamond } from './game/siloImage'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
@@ -9,7 +7,6 @@ import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
-import { centerCamera, screenToWorld, worldToIso, worldToScreen } from './game/camera'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
 import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
@@ -220,11 +217,7 @@ function northmarkPlaysItself(): void {
     assert(depositKnown(state, 0, node.tx, node.ty), 'AI control mined minerals Northmark has not seen')
     assert(node.id !== hidden.id, 'AI control used Dunmarch sight to pick minerals')
   }
-  let site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
-  for (let i = 0; i < 360 && !site; i++) {
-    step(state, 1 / 60)
-    site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
-  }
+  const site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
   assert(site && (site.kind === 'yard' || site.kind === 'silo'), 'Northmark did not start a Factory or Silo')
   assert(
     porters.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === site.id),
@@ -1412,22 +1405,6 @@ function clearFogCommandRevealsTheMap(): void {
   assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'off fog of war left part of the map dark')
 }
 
-function footprintGridCommand(): void {
-  assert(siloCoversDiamond(), 'the Silo photo is not scaled evenly onto the 3x3 diamond')
-  assert(BUILDING_STATS.yard.w === 3 && BUILDING_STATS.yard.h === 3, 'the Factory footprint is not 3x3')
-  assert(factoryCoversFootprint(), 'the Factory photo is not scaled evenly onto the 3x3 diamond')
-  const state = createMatch(2)
-  assert(!state.showGrid, 'the footprint grid starts on')
-  assert(!runCommand(state, 'grid'), 'a partial grid line was accepted')
-  assert(runCommand(state, '  Show Grid  '), 'show grid was rejected')
-  assert(state.showGrid, 'show grid did not draw footprints')
-  assert(runCommand(state, 'SHOW GRID'), 'repeating show grid was rejected')
-  assert(state.showGrid, 'repeating show grid turned the overlay off')
-  assert(runCommand(state, 'off grid'), 'off grid was rejected')
-  assert(!state.showGrid, 'off grid left the overlay on')
-  assert(runCommand(state, 'Off Grid'), 'off grid was rejected while already off')
-}
-
 function godModeSavesNorthmark(): void {
   const state = createMatch(11)
   const open: Array<[number, number]> = []
@@ -1991,7 +1968,6 @@ clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()
 godModeSavesNorthmark()
-footprintGridCommand()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()
 shotsCannotCrossRocks()
@@ -2047,33 +2023,7 @@ siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
-isoViewRoundTripsAndBoxSelects()
 console.log('smoke ok')
-
-function isoViewRoundTripsAndBoxSelects(): void {
-  const cam = { x: 0, y: 0, zoom: 1 }
-  const mapW = 80 * TILE
-  const mapH = 40 * TILE
-  centerCamera(cam, 400, 240, 800, 600, mapW, mapH)
-  const mid = screenToWorld(cam, 400, 300)
-  assert(Math.hypot(mid.x - 400, mid.y - 240) < 0.6, `iso center drifted (${mid.x.toFixed(2)}, ${mid.y.toFixed(2)})`)
-  const near = worldToScreen(cam, 420, 250)
-  const far = worldToScreen(cam, 1400, 900)
-  const box = { x: near.x - 24, y: near.y - 24, w: 48, h: 48 }
-  const inside = (point: { x: number; y: number }) =>
-    point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h
-  assert(inside(near), 'a nearby unit missed the screen selection box')
-  assert(!inside(far), 'a far unit fell inside the screen selection box')
-  const back = screenToWorld(cam, near.x, near.y)
-  assert(Math.hypot(back.x - 420, back.y - 250) < 0.6, 'an iso point did not round-trip')
-  const before = screenToWorld(cam, 120, 90)
-  cam.zoom = 1.4
-  const iso = worldToIso(before.x, before.y)
-  cam.x = iso.x - 120 / cam.zoom
-  cam.y = iso.y - 90 / cam.zoom
-  const after = screenToWorld(cam, 120, 90)
-  assert(Math.hypot(after.x - before.x, after.y - before.y) < 0.6, 'zoom did not keep the cursor on the same ground')
-}
 
 function captureHarvestAndPassages(): void {
   assert(TREE_HP === 14 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)

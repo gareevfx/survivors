@@ -95,24 +95,6 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'Both cam is off.')
     return true
   }
-  if (text === 'show grid') {
-    if (state.showGrid) {
-      pushToast(state, 'Grid is already on.')
-      return true
-    }
-    state.showGrid = true
-    pushToast(state, 'Grid is on.')
-    return true
-  }
-  if (text === 'off grid') {
-    if (!state.showGrid) {
-      pushToast(state, 'Grid is already off.')
-      return true
-    }
-    state.showGrid = false
-    pushToast(state, 'Grid is off.')
-    return true
-  }
   if (text === 'ai control') {
     if (state.aiControl) {
       pushToast(state, 'SiloAI is already on.')

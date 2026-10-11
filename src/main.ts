@@ -46,7 +46,7 @@ let commandArmedAt = 0
 let match: MatchState | null = null
 let terrain: HTMLCanvasElement | null = null
 let menuOpen = true
-const camera: Camera = { x: 0, y: 0, zoom: 1.05 }
+const camera: Camera = { x: 0, y: 0, zoom: 1.35 }
 const menu = document.querySelector<HTMLElement>('#menu')
 const menuResume = document.querySelector<HTMLButtonElement>('#menu-resume')
 const hintCopy = document.querySelector<HTMLElement>('#hint p')
@@ -96,7 +96,7 @@ function startMatch(mode: MatchMode, seed?: number): void {
   menu?.classList.add('hidden')
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
   terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
-  camera.zoom = mode === 'ffa10' ? 0.5 : mode === 'ffa' ? 0.72 : 1.05
+  camera.zoom = mode === 'ffa10' ? 0.62 : mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
     hintCopy.textContent =
       mode === 'duel'

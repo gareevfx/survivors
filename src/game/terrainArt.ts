@@ -46,18 +46,21 @@ function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/** Grass, with dirt patches and ponds, sampled at tile centers. Decoration for the minimap. */
+/** Large dirt, dry soil, gravel, and dark blotches, sampled at tile centers. */
 export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
   const n = fbm(tx * 0.17, ty * 0.17, seed)
   const blot = fbm(tx * 0.055 + 9, ty * 0.055 - 4, seed + 5)
-  const deep: Rgb = [54, 108, 38]
-  const lush: Rgb = [96, 156, 60]
-  const bright: Rgb = [124, 178, 74]
-  const dirt: Rgb = [176, 142, 78]
-  const pond: Rgb = [46, 128, 136]
-  let color = n < 0.45 ? mix(deep, lush, n / 0.45) : mix(lush, bright, (n - 0.45) / 0.55)
-  if (blot > 0.82) color = mix(color, dirt, 0.7)
-  if (blot < 0.16 && n > 0.35) color = pond
+  const dry: Rgb = [138, 108, 64]
+  const dirt: Rgb = [112, 82, 46]
+  const soil: Rgb = [96, 70, 40]
+  const gravel: Rgb = [150, 136, 114]
+  const dark: Rgb = [68, 52, 36]
+  let color: Rgb
+  if (n < 0.33) color = mix(soil, dry, n / 0.33)
+  else if (n < 0.58) color = mix(dry, dirt, (n - 0.33) / 0.25)
+  else if (n < 0.8) color = mix(dirt, gravel, (n - 0.58) / 0.22)
+  else color = mix(gravel, soil, (n - 0.8) / 0.2)
+  if (blot < 0.34) color = mix(color, dark, ((0.34 - blot) / 0.34) * 0.72)
   return color
 }
 
@@ -65,9 +68,9 @@ export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
 export function terrainCss(tx: number, ty: number, seed: number, mapW: number, mapH: number, mode: MatchMode = 'duel'): string {
   let [r, g, b] = terrainRgb(tx + 0.5, ty + 0.5, seed)
   if (yardAt(seed, mapW, mapH, tx, ty, mode)) {
-    r = r * 0.55 + 186 * 0.45
-    g = g * 0.55 + 190 * 0.45
-    b = b * 0.55 + 184 * 0.45
+    r = r * 0.62 + 168 * 0.38
+    g = g * 0.62 + 142 * 0.38
+    b = b * 0.62 + 96 * 0.38
   }
   return `rgb(${r | 0},${g | 0},${b | 0})`
 }

@@ -1,4 +1,4 @@
-import { clampCamera, screenToWorld, worldToIso, worldToScreen, type Camera } from './camera'
+import { clampCamera, screenToWorld, worldToScreen, type Camera } from './camera'
 import {
   commandAttack,
   commandConstruct,
@@ -16,7 +16,6 @@ import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
 import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
 import {
-  BUILDING_STATS,
   TILE,
   type BuildingKind,
   type MatchState,
@@ -311,16 +310,22 @@ function clearSelection(state: MatchState): void {
     const state = opts.getState()
     if (state.outcome) return
     const cam = opts.getCamera()
-    const minX = Math.min(x0, x1)
-    const maxX = Math.max(x0, x1)
-    const minY = Math.min(y0, y1)
-    const maxY = Math.max(y0, y1)
+    const a = screenToWorld(cam, x0, y0)
+    const b = screenToWorld(cam, x1, y1)
+    const minX = Math.min(a.x, b.x)
+    const maxX = Math.max(a.x, b.x)
+    const minY = Math.min(a.y, b.y)
+    const maxY = Math.max(a.y, b.y)
     const ids = state.units
-      .filter((unit) => {
-        if (unit.owner !== 0 || unit.hp <= 0) return false
-        const screen = worldToScreen(cam, unit.x, unit.y)
-        return screen.x >= minX && screen.x <= maxX && screen.y >= minY && screen.y <= maxY
-      })
+      .filter(
+        (unit) =>
+          unit.owner === 0 &&
+          unit.hp > 0 &&
+          unit.x >= minX &&
+          unit.x <= maxX &&
+          unit.y >= minY &&
+          unit.y <= maxY,
+      )
       .map((unit) => unit.id)
     if (shift) {
       const set = new Set(state.selectedUnits)
@@ -440,10 +445,9 @@ function clearSelection(state: MatchState): void {
       const cam = opts.getCamera()
       const before = screenToWorld(cam, pos.x, pos.y)
       const next = cam.zoom * (event.deltaY > 0 ? 0.9 : 1.11)
-      cam.zoom = Math.max(0.35, Math.min(2.2, next))
-      const iso = worldToIso(before.x, before.y)
-      cam.x = iso.x - pos.x / cam.zoom
-      cam.y = iso.y - pos.y / cam.zoom
+      cam.zoom = Math.max(0.55, Math.min(2, next))
+      cam.x = before.x - pos.x / cam.zoom
+      cam.y = before.y - pos.y / cam.zoom
       const box = view()
       const state = opts.getState()
       clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
@@ -727,12 +731,11 @@ function pick(
     const building = state.buildings[i]
     if (!building || !viewBuildingSeen(state, building)) continue
     if (building.hp <= 0 && !building.ruined) continue
-    const stats = BUILDING_STATS[building.kind]
     const rect = {
       x: building.tx * TILE,
       y: building.ty * TILE,
-      w: stats.w * TILE,
-      h: stats.h * TILE,
+      w: (building.kind === 'keep' || building.kind === 'yard' ? 3 : 2) * TILE,
+      h: (building.kind === 'keep' ? 3 : 2) * TILE,
     }
     if (x >= rect.x && y >= rect.y && x <= rect.x + rect.w && y <= rect.y + rect.h) {
       return { type: 'building', id: building.id }
