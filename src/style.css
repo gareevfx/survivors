@@ -485,7 +485,14 @@ button, canvas { font: inherit; }
 .about-card { width: min(520px, 100%); }
 
 .about-card {
+  display: flex;
+  flex-direction: column;
   max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.about-body {
   min-height: 0;
   overflow-y: auto;
 }
