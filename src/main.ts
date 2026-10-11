@@ -1,0 +1,278 @@
+import './style.css'
+import { Sfx } from './game/audio'
+import { centerCamera, type Camera } from './game/camera'
+import { runCommand } from './game/console'
+import { attachInput } from './game/input'
+import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
+import { step } from './game/sim'
+import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
+import { FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
+import { resetHudCache, syncHud } from './ui/hud'
+
+const view = document.querySelector<HTMLCanvasElement>('#view')
+const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
+const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
+const again = document.querySelector<HTMLButtonElement>('#again')
+const idle = document.querySelector<HTMLButtonElement>('#idle')
+
+if (!view || !minimap) {
+  throw new Error('Survivors failed to find its canvas.')
+}
+
+const stage: HTMLCanvasElement = view
+const mini: HTMLCanvasElement = minimap
+const commandForm = document.querySelector<HTMLFormElement>('#console')
+const commandInput = document.querySelector<HTMLInputElement>('#console-input')
+if (!commandForm || !commandInput) {
+  throw new Error('Survivors failed to find its command line.')
+}
+const commandBar = commandForm
+const commandField = commandInput
+const duelNote = document.querySelector<HTMLElement>('#menu-duel-note')
+if (duelNote) {
+  duelNote.textContent = `${PLAYER_NAME[0]} against ${PLAYER_NAME[1]} on the wide ${MAP_W}×${MAP_H} field.`
+}
+const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
+if (ffaNote) {
+  ffaNote.textContent = `${PLAYER_NAME.slice(0, 4).join(', ')}, each against the others, on a ${FFA_MAP_W}×${FFA_MAP_H} field.`
+}
+const sfx = new Sfx()
+let commandArmedAt = 0
+let match: MatchState | null = null
+let terrain: HTMLCanvasElement | null = null
+let menuOpen = true
+const camera: Camera = { x: 0, y: 0, zoom: 1.35 }
+const menu = document.querySelector<HTMLElement>('#menu')
+const menuResume = document.querySelector<HTMLButtonElement>('#menu-resume')
+const hintCopy = document.querySelector<HTMLElement>('#hint p')
+
+function frameSize(): { w: number; h: number } {
+  const rect = stage.getBoundingClientRect()
+  return { w: rect.width, h: rect.height }
+}
+
+function focus(x: number, y: number): void {
+  if (!match) return
+  const size = frameSize()
+  centerCamera(camera, x, y, size.w, size.h, match.mapW * 32, match.mapH * 32)
+}
+
+function openCommand(): void {
+  commandBar.classList.remove('hidden')
+  commandField.focus()
+  commandField.select()
+  commandArmedAt = performance.now()
+}
+
+function closeCommand(): void {
+  commandBar.classList.add('hidden')
+  commandField.value = ''
+  stage.focus()
+}
+
+function lookAtHome(): void {
+  if (!match) return
+  const keep = playerKeep(match)
+  if (!keep) return
+  const center = buildingCenter(keep)
+  focus(center.x, center.y)
+}
+
+function showMenu(): void {
+  menuOpen = true
+  menu?.classList.remove('hidden')
+  if (menuResume) menuResume.classList.toggle('hidden', !match || match.outcome != null)
+  if (match && !match.outcome) match.paused = true
+}
+
+function startMatch(mode: MatchMode, seed?: number): void {
+  closeCommand()
+  menuOpen = false
+  menu?.classList.add('hidden')
+  match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
+  terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
+  camera.zoom = mode === 'ffa' ? 0.85 : 1.35
+  if (hintCopy) {
+    hintCopy.textContent =
+      mode === 'duel'
+        ? 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+        : 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+  }
+  input.clearGroups()
+  resetHudCache()
+  lookAtHome()
+}
+
+function boot(seed?: number): void {
+  startMatch(match?.mode ?? 'duel', seed)
+}
+
+commandForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  if (performance.now() - commandArmedAt < 250) return
+  const text = commandField.value
+  if (!text.trim()) {
+    closeCommand()
+    return
+  }
+  if (!match) return
+  const known = runCommand(match, text)
+  if (known) closeCommand()
+  else commandField.select()
+})
+
+const input = attachInput({
+  canvas: stage,
+  getState: () => {
+    if (!match) throw new Error('Survivors has no match yet.')
+    return match
+  },
+  active: () => match != null && !menuOpen,
+  getCamera: () => camera,
+  onMute: () => {
+    sfx.unlock()
+    sfx.toggle()
+  },
+  commandOpen: () => !commandBar.classList.contains('hidden'),
+  openCommand,
+  closeCommand,
+  onActivity: () => sfx.unlock(),
+  selectIdle: () => selectIdlePorters(),
+  focusPoint: focus,
+})
+
+function selectIdlePorters(): void {
+  if (!match) return
+  const ids = match.units
+    .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
+    .map((unit) => unit.id)
+  if (!ids.length) {
+    pushToast(match, 'Every stalker is already busy.')
+    return
+  }
+  match.selectedUnits = ids
+  match.selectedBuilding = null
+  match.selectedOre = null
+  match.events.push({ type: 'select' })
+  const first = unitById(match, ids[0] ?? -1)
+  if (first) focus(first.x, first.y)
+}
+
+hintClose?.addEventListener('click', () => {
+  if (match) match.tutorial = false
+})
+document.querySelector('#pause')?.addEventListener('click', () => {
+  if (!match || menuOpen) return
+  match.paused = !match.paused
+})
+document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
+document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
+document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
+const donat = document.querySelector<HTMLElement>('#donat')
+document.querySelector('#menu-donat')?.addEventListener('click', () => {
+  donat?.classList.remove('hidden')
+})
+document.querySelector('#donat-close')?.addEventListener('click', () => {
+  donat?.classList.add('hidden')
+})
+const about = document.querySelector<HTMLElement>('#about')
+document.querySelector('#menu-about')?.addEventListener('click', () => {
+  about?.classList.remove('hidden')
+})
+document.querySelector('#about-close')?.addEventListener('click', () => {
+  about?.classList.add('hidden')
+})
+menuResume?.addEventListener('click', () => {
+  if (!match || match.outcome) return
+  menuOpen = false
+  menu?.classList.add('hidden')
+  match.paused = false
+})
+document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
+again?.addEventListener('click', () => boot())
+idle?.addEventListener('click', () => {
+  sfx.unlock()
+  selectIdlePorters()
+})
+
+let miniDrag = false
+const jumpMinimap = (event: PointerEvent) => {
+  const rect = mini.getBoundingClientRect()
+  if (!match || !terrain) return
+  const frame = minimapFrame(rect.width, rect.height, match.mapW, match.mapH)
+  const x = ((event.clientX - rect.left - frame.x) / frame.w) * terrain.width
+  const y = ((event.clientY - rect.top - frame.y) / frame.h) * terrain.height
+  focus(x, y)
+}
+mini.addEventListener('pointerdown', (event) => {
+  miniDrag = true
+  mini.setPointerCapture(event.pointerId)
+  jumpMinimap(event)
+})
+mini.addEventListener('pointermove', (event) => {
+  if (miniDrag) jumpMinimap(event)
+})
+mini.addEventListener('pointerup', () => {
+  miniDrag = false
+})
+
+showMenu()
+
+let last = performance.now()
+let acc = 0
+const STEP = 1 / 60
+
+function loop(now: number): void {
+  const dt = Math.min(0.1, (now - last) / 1000)
+  last = now
+  if (match && terrain && !menuOpen) {
+    const live = match
+    const ground = terrain
+    if (!live.paused) {
+      acc += dt
+      let guard = 0
+      while (acc >= STEP && guard++ < 6) {
+        step(live, STEP)
+        acc -= STEP
+      }
+    }
+    input.pan(dt)
+    const drawn = renderWorld(stage, live, ground, camera, {
+      drag: input.dragRect(),
+      pointer: input.pointerWorld(),
+    })
+    renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
+    syncHud(live, {
+      armPlace: (kind) => {
+        if (live.paused || live.aiControl) return
+        live.placement = live.placement === kind ? null : kind
+        live.attackMoveArmed = false
+        live.moveArmed = false
+      },
+      armMove: () => {
+        if (live.paused || live.aiControl) return
+        live.moveArmed = !live.moveArmed
+        live.attackMoveArmed = false
+        live.placement = null
+      },
+      armAttack: () => {
+        if (live.paused || live.aiControl) return
+        live.attackMoveArmed = !live.attackMoveArmed
+        live.moveArmed = false
+        live.placement = null
+      },
+      dismissHint: () => {
+        live.tutorial = false
+      },
+      selectIdle: () => selectIdlePorters(),
+      restart: () => boot(),
+    })
+    const events = live.events.splice(0, live.events.length)
+    sfx.consume(events)
+    const cursor = live.placement ? 'cell' : live.attackMoveArmed ? 'crosshair' : live.moveArmed ? 'copy' : 'crosshair'
+    if (stage.style.cursor !== cursor) stage.style.cursor = cursor
+  }
+  requestAnimationFrame(loop)
+}
+
+requestAnimationFrame(loop)
