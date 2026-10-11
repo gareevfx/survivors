@@ -445,7 +445,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
     ctx.save()
     ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
     ctx.beginPath()
-    ctx.ellipse(at.x + 10, at.y + 16, 86, 30, -0.2, 0, Math.PI * 2)
+    ctx.ellipse(at.x + 2, at.y + 8, 78, 26, -0.12, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
     const sprite = keepSprite(color, building.ruined)

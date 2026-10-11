@@ -1,18 +1,20 @@
 import { PLAYER_COLOR } from './types'
 
 /**
- * The Silo sprite is the reference photograph, keyed and cropped.
+ * The Silo sprite is the reference render, keyed and cropped.
+ * The octagonal base ring is scaled to the 3×3 footprint diamond (192×96).
+ * The anchor is that ring's center, a few pixels high so the lip sits on the ground.
  * Orange trim is hue-mapped to the team color. Cyan glass is left alone.
  * The drop shadow is drawn by the renderer, not baked into the photo.
  */
 
 const SRC = '/assets/silo.png'
-/** Footprint center, as a fraction of the cropped photo. The pad sits on the diamond. */
-const AX_FRAC = 0.5
-const AY_FRAC = 0.67
+/** Footprint center on the 195×197 sprite. The base ring is 192px wide. */
+const AX_FRAC = 98 / 195
+const AY_FRAC = 144 / 197
 /** Hex gate on the front face. */
-const GATE_X_FRAC = 0.5
-const GATE_Y_FRAC = 0.64
+const GATE_X_FRAC = 99 / 195
+const GATE_Y_FRAC = 123 / 197
 
 type Anchor = { canvas: HTMLCanvasElement; ax: number; ay: number }
 
@@ -28,6 +30,8 @@ export function preloadSiloImage(): void {
   image.decoding = 'async'
   image.onload = () => {
     ready = true
+    for (const color of PLAYER_COLOR) siloPhotoSprite(color, false)
+    if (photo) ruinSprite(photo)
   }
   image.src = SRC
   photo = image
@@ -45,8 +49,8 @@ function anchorOf(width: number, height: number): { ax: number; ay: number } {
 
 /** Gate position relative to the footprint center, in sprite pixels. */
 export function siloGateOffset(): { x: number; y: number } {
-  const width = photo?.width || 236
-  const height = photo?.height || 238
+  const width = photo?.width || 195
+  const height = photo?.height || 197
   const anchor = anchorOf(width, height)
   return { x: width * GATE_X_FRAC - anchor.ax, y: height * GATE_Y_FRAC - anchor.ay }
 }
