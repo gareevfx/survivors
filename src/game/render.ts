@@ -179,6 +179,7 @@ export function renderWorld(
 
   stamps.sort((a, b) => a.depth - b.depth)
   for (const stamp of stamps) stamp.paint()
+  if (state.showGrid) drawFootprintGrid(ctx, state)
 
   for (const ping of state.pings) {
     const at = worldToIso(ping.x, ping.y)
@@ -304,6 +305,21 @@ function traceCircle(ctx: CanvasRenderingContext2D, x: number, y: number, radius
     if (i === 0) ctx.moveTo(at.x, at.y)
     else ctx.lineTo(at.x, at.y)
   }
+}
+
+function drawFootprintGrid(ctx: CanvasRenderingContext2D, state: MatchState): void {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255, 228, 150, 0.92)'
+  ctx.lineWidth = 1.25
+  ctx.setLineDash([5, 4])
+  for (const building of state.buildings) {
+    if (building.hp <= 0 && !building.ruined) continue
+    if (!viewBuildingSeen(state, building)) continue
+    const stats = BUILDING_STATS[building.kind]
+    traceFootprint(ctx, building.tx, building.ty, stats.w, stats.h)
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 function traceFootprint(ctx: CanvasRenderingContext2D, tx: number, ty: number, w: number, h: number): void {
@@ -445,7 +461,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
     ctx.save()
     ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
     ctx.beginPath()
-    ctx.ellipse(at.x + 2, at.y + 8, 78, 26, -0.12, 0, Math.PI * 2)
+    ctx.ellipse(at.x, at.y + 8, 46, 14, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
     const sprite = keepSprite(color, building.ruined)

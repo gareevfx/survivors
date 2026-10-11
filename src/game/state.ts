@@ -366,6 +366,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     bothCam: false,
     godMode: false,
     aiControl: false,
+    showGrid: false,
     ore: [],
     rocks: [],
     units: [],

@@ -16,6 +16,7 @@ import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, playerKeep, pushToast, rockAt, unitById } from './state'
 import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
 import {
+  BUILDING_STATS,
   TILE,
   type BuildingKind,
   type MatchState,
@@ -726,11 +727,12 @@ function pick(
     const building = state.buildings[i]
     if (!building || !viewBuildingSeen(state, building)) continue
     if (building.hp <= 0 && !building.ruined) continue
+    const stats = BUILDING_STATS[building.kind]
     const rect = {
       x: building.tx * TILE,
       y: building.ty * TILE,
-      w: (building.kind === 'keep' || building.kind === 'yard' ? 3 : 2) * TILE,
-      h: (building.kind === 'keep' ? 3 : 2) * TILE,
+      w: stats.w * TILE,
+      h: stats.h * TILE,
     }
     if (x >= rect.x && y >= rect.y && x <= rect.x + rect.w && y <= rect.y + rect.h) {
       return { type: 'building', id: building.id }

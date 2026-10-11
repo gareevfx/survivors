@@ -1,5 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
+import { siloRingInsideDiamond } from './game/siloImage'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
@@ -1406,6 +1407,20 @@ function clearFogCommandRevealsTheMap(): void {
   assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'off fog of war left part of the map dark')
 }
 
+function footprintGridCommand(): void {
+  assert(siloRingInsideDiamond(), 'the Silo ring does not sit inside the 3x3 diamond')
+  const state = createMatch(2)
+  assert(!state.showGrid, 'the footprint grid starts on')
+  assert(!runCommand(state, 'grid'), 'a partial grid line was accepted')
+  assert(runCommand(state, '  Show Grid  '), 'show grid was rejected')
+  assert(state.showGrid, 'show grid did not draw footprints')
+  assert(runCommand(state, 'SHOW GRID'), 'repeating show grid was rejected')
+  assert(state.showGrid, 'repeating show grid turned the overlay off')
+  assert(runCommand(state, 'off grid'), 'off grid was rejected')
+  assert(!state.showGrid, 'off grid left the overlay on')
+  assert(runCommand(state, 'Off Grid'), 'off grid was rejected while already off')
+}
+
 function godModeSavesNorthmark(): void {
   const state = createMatch(11)
   const open: Array<[number, number]> = []
@@ -1969,6 +1984,7 @@ clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()
 godModeSavesNorthmark()
+footprintGridCommand()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()
 shotsCannotCrossRocks()

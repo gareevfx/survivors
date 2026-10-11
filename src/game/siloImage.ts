@@ -2,19 +2,32 @@ import { PLAYER_COLOR } from './types'
 
 /**
  * The Silo sprite is the reference render, keyed and cropped.
- * The octagonal base ring is scaled to the 3×3 footprint diamond (192×96).
- * The anchor is that ring's center, a few pixels high so the lip sits on the ground.
- * Orange trim is hue-mapped to the team color. Cyan glass is left alone.
- * The drop shadow is drawn by the renderer, not baked into the photo.
+ * An affine fit aims the base ring's left and right corners at the 3×3
+ * diamond's horizontal axis and the front lip at the bottom corner, then
+ * scales uniformly so the outer lip touches the diamond and does not cross it.
+ * Dome and antennas may sit above the diamond. Orange trim is hue-mapped.
+ * Cyan glass is left alone. The drop shadow is drawn by the renderer.
  */
 
 const SRC = '/assets/silo.png'
-/** Footprint center on the 195×197 sprite. The base ring is 192px wide. */
-const AX_FRAC = 98 / 195
-const AY_FRAC = 144 / 197
-/** Hex gate on the front face. */
-const GATE_X_FRAC = 99 / 195
-const GATE_Y_FRAC = 123 / 197
+/** Footprint center inside the fitted canvas. */
+const ANCHOR_X = 60
+const ANCHOR_Y = 36
+const FIT_W = 120
+const FIT_H = 68
+/**
+ * x' = a x + b y + c, y' = d x + e y + f, origin at the footprint center.
+ * Measured from the ring corners (0.7, 102.5), (193.3, 103.9) and (94.8, 194.6)
+ * on the 195×197 sprite, then scaled by 0.581 so the front lip stays inside.
+ */
+const FIT_A = 0.5791033734978706
+const FIT_B = 0.013687495584019474
+const FIT_C = -57.58663552508788
+const FIT_D = -0.002218143895503083
+const FIT_E = 0.3054235125211147
+const FIT_F = -31.314587408524677
+/** Hex gate on the unfitted sprite. */
+const GATE_SRC = { x: 99, y: 123 }
 
 type Anchor = { canvas: HTMLCanvasElement; ax: number; ay: number }
 
@@ -43,16 +56,22 @@ export function siloImageReady(): boolean {
   return ready
 }
 
-function anchorOf(width: number, height: number): { ax: number; ay: number } {
-  return { ax: width * AX_FRAC, ay: height * AY_FRAC }
+function fitPoint(x: number, y: number): { x: number; y: number } {
+  return { x: FIT_A * x + FIT_B * y + FIT_C, y: FIT_D * x + FIT_E * y + FIT_F }
 }
 
 /** Gate position relative to the footprint center, in sprite pixels. */
 export function siloGateOffset(): { x: number; y: number } {
-  const width = photo?.width || 195
-  const height = photo?.height || 197
-  const anchor = anchorOf(width, height)
-  return { x: width * GATE_X_FRAC - anchor.ax, y: height * GATE_Y_FRAC - anchor.ay }
+  return fitPoint(GATE_SRC.x, GATE_SRC.y)
+}
+
+/** True when the fitted ring corners sit inside the 3×3 diamond, level at the sides. */
+export function siloRingInsideDiamond(): boolean {
+  const left = fitPoint(0.68, 102.53)
+  const right = fitPoint(193.32, 103.93)
+  const bottom = fitPoint(94.84, 194.55)
+  const inside = (point: { x: number; y: number }) => Math.abs(point.x) / 96 + Math.abs(point.y) / 48 <= 1.01
+  return Math.abs(left.y) < 0.8 && Math.abs(right.y) < 0.8 && inside(left) && inside(right) && inside(bottom) && bottom.y > 0
 }
 
 export function siloPhotoSprite(color: string, ruined: boolean): Anchor | null {
@@ -103,32 +122,40 @@ function portraitUrl(sprite: HTMLCanvasElement, backdrop: string): string {
   return canvas.toDataURL()
 }
 
-function tintSprite(image: HTMLImageElement, color: string): Anchor {
+function fittedCanvas(image: HTMLImageElement): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  canvas.width = image.width
-  canvas.height = image.height
+  canvas.width = FIT_W
+  canvas.height = FIT_H
   const ctx = canvas.getContext('2d')
-  if (!ctx) return { canvas, ...anchorOf(image.width, image.height) }
+  if (!ctx) return canvas
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.setTransform(FIT_A, FIT_D, FIT_B, FIT_E, ANCHOR_X + FIT_C, ANCHOR_Y + FIT_F)
   ctx.drawImage(image, 0, 0)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  return canvas
+}
+
+function tintSprite(image: HTMLImageElement, color: string): Anchor {
+  const canvas = fittedCanvas(image)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
   const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
   recolorTrim(frame.data, color)
   ctx.putImageData(frame, 0, 0)
-  return { canvas, ...anchorOf(canvas.width, canvas.height) }
+  return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
 }
 
 function ruinSprite(image: HTMLImageElement): Anchor {
   if (ruin) return ruin
-  const canvas = document.createElement('canvas')
-  canvas.width = image.width
-  canvas.height = image.height
+  const canvas = fittedCanvas(image)
   const ctx = canvas.getContext('2d')
-  if (!ctx) return { canvas, ...anchorOf(image.width, image.height) }
-  ctx.drawImage(image, 0, 0)
+  if (!ctx) return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
   const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
   scorch(frame.data, canvas.width, canvas.height)
   ctx.putImageData(frame, 0, 0)
   paintWreck(ctx, canvas.width, canvas.height)
-  ruin = { canvas, ...anchorOf(canvas.width, canvas.height) }
+  ruin = { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
   return ruin
 }
 
@@ -184,7 +211,8 @@ function paintWreck(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.strokeStyle = 'rgba(18, 14, 12, 0.9)'
-  ctx.lineWidth = 1.4
+  const mark = width / 195
+  ctx.lineWidth = 1.4 * mark
   const cracks = [
     [0.42, 0.18, 0.48, 0.28, 0.4, 0.36],
     [0.58, 0.16, 0.52, 0.3, 0.6, 0.4],
@@ -200,8 +228,8 @@ function paintWreck(ctx: CanvasRenderingContext2D, width: number, height: number
   }
   ctx.fillStyle = 'rgba(10, 8, 6, 0.38)'
   ctx.beginPath()
-  ctx.ellipse(x(0.34), y(0.46), 22, 14, -0.4, 0, Math.PI * 2)
-  ctx.ellipse(x(0.68), y(0.4), 18, 12, 0.3, 0, Math.PI * 2)
+  ctx.ellipse(x(0.34), y(0.46), 22 * mark, 14 * mark, -0.4, 0, Math.PI * 2)
+  ctx.ellipse(x(0.68), y(0.4), 18 * mark, 12 * mark, 0.3, 0, Math.PI * 2)
   ctx.fill()
   // Dome collapsed into a dark slab.
   ctx.fillStyle = 'rgba(28, 24, 20, 0.72)'
@@ -224,13 +252,13 @@ function paintWreck(ctx: CanvasRenderingContext2D, width: number, height: number
   ] as const
   for (const [fx, fy, rw, rh] of rubble) {
     ctx.beginPath()
-    ctx.ellipse(x(fx), y(fy), rw, rh, 0.2, 0, Math.PI * 2)
+    ctx.ellipse(x(fx), y(fy), rw * mark, rh * mark, 0.2, 0, Math.PI * 2)
     ctx.fill()
     ctx.strokeStyle = 'rgba(12, 10, 8, 0.7)'
     ctx.stroke()
   }
   ctx.fillStyle = '#6a6258'
-  ctx.fillRect(x(0.44), y(0.8), 18, 6)
+  ctx.fillRect(x(0.44), y(0.8), 18 * mark, 6 * mark)
   ctx.restore()
 }
 
