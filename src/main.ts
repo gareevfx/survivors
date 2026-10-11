@@ -168,6 +168,13 @@ document.querySelector('#pause')?.addEventListener('click', () => {
 document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
 document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
 document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
+const donat = document.querySelector<HTMLElement>('#donat')
+document.querySelector('#menu-donat')?.addEventListener('click', () => {
+  donat?.classList.remove('hidden')
+})
+document.querySelector('#donat-close')?.addEventListener('click', () => {
+  donat?.classList.add('hidden')
+})
 menuResume?.addEventListener('click', () => {
   if (!match || match.outcome) return
   menuOpen = false
