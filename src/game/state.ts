@@ -1,12 +1,10 @@
-import { generateBattlefield, pickFfa10Sites, pickFfaSites, pickKeepSites, workerCamp } from './map'
+import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
 import { updateVision } from './vision'
 import {
   BUILDING_STATS,
   FFA_MAP_H,
-  FFA10_MAP_H,
-  FFA10_MAP_W,
   FFA_MAP_W,
   MAP_H,
   MAP_W,
@@ -315,15 +313,12 @@ export function makeBuilding(
 
 export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState {
   const duel = mode === 'duel'
-  const grand = mode === 'ffa10'
-  const mapW = grand ? FFA10_MAP_W : duel ? MAP_W : FFA_MAP_W
-  const mapH = grand ? FFA10_MAP_H : duel ? MAP_H : FFA_MAP_H
-  const playerCount = grand ? 10 : duel ? 2 : 4
+  const mapW = duel ? MAP_W : FFA_MAP_W
+  const mapH = duel ? MAP_H : FFA_MAP_H
+  const playerCount = duel ? 2 : 4
   const sites = duel
     ? [pickKeepSites(seed, mapW, mapH).player, pickKeepSites(seed, mapW, mapH).enemy]
-    : grand
-      ? pickFfa10Sites(seed, mapW, mapH)
-      : pickFfaSites(seed, mapW, mapH)
+    : pickFfaSites(seed, mapW, mapH)
   const field = generateBattlefield(seed, sites, mapW, mapH)
   const cells = mapW * mapH
   const explored = new Uint8Array(cells)
@@ -387,12 +382,10 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     placement: null,
     attackMoveArmed: false,
     moveArmed: false,
-    aiAcc: grand ? 0.12 : 0,
+    aiAcc: 0,
     aiAttacking: false,
     aiNext: 'pike',
-    sideAcc: Array.from({ length: playerCount }, (_, owner) =>
-      playerCount > 4 && owner >= 2 ? ((owner - 2) / (playerCount - 2)) * 0.7 : 0,
-    ),
+    sideAcc: Array.from({ length: playerCount }, () => 0),
     sideAttacking: Array.from({ length: playerCount }, () => false),
     sideNext: Array.from({ length: playerCount }, () => 'pike' as const),
     sideScout: Array.from({ length: playerCount }, () => 0),

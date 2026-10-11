@@ -1,6 +1,6 @@
 import { findPath } from './pathfind'
 import { mulberry32 } from './rng'
-import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, FFA10_MAP_H, FFA10_MAP_W, MAP_H, MAP_W, TILE } from './types'
+import { BUILDING_STATS, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, TILE } from './types'
 
 export interface OreSpawn {
   tx: number
@@ -78,40 +78,6 @@ export function pickFfaSites(seed: number, mapW = FFA_MAP_W, mapH = FFA_MAP_H): 
     corners[j] = swap ?? corners[j]
   }
   return corners
-}
-
-/**
- * Ten Silos on the large field: four corners, four edge midpoints, and two
- * inner sites on the opposite diagonal. Slots are shuffled so any side can
- * start in any of them. Footprints stay on the map and yards do not overlap.
- */
-export function pickFfa10Sites(seed: number, mapW = FFA10_MAP_W, mapH = FFA10_MAP_H): KeepSite[] {
-  const rng = mulberry32(seed + 0x51ed)
-  const left = 4
-  const top = 4
-  const right = mapW - KEEP_W - 4
-  const bottom = mapH - KEEP_H - 4
-  const midX = Math.round((mapW - KEEP_W) / 2)
-  const midY = Math.round((mapH - KEEP_H) / 2)
-  const sites: KeepSite[] = [
-    { tx: left, ty: top },
-    { tx: right, ty: top },
-    { tx: left, ty: bottom },
-    { tx: right, ty: bottom },
-    { tx: midX, ty: top },
-    { tx: midX, ty: bottom },
-    { tx: left, ty: midY },
-    { tx: right, ty: midY },
-    { tx: Math.round(mapW * 0.32), ty: Math.round(mapH * 0.68) },
-    { tx: Math.round(mapW * 0.68), ty: Math.round(mapH * 0.32) },
-  ]
-  for (let i = sites.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    const swap = sites[i]
-    sites[i] = sites[j] ?? sites[i]
-    sites[j] = swap ?? sites[j]
-  }
-  return sites
 }
 
 function pickCorner(rng: () => number, sites: KeepSite[], score: (site: KeepSite) => number): KeepSite {
@@ -378,7 +344,7 @@ export function narrowPassageCount(
 /**
  * Shared dump patches laid out on an 80×50 field. Columns and rows scale with the
  * live size so 1 vs 1 (80×40) and free-for-all (90×50) keep the same pattern,
- * clear of the corner yards. The 150×150 field repeats that density per area.
+ * clear of the corner yards.
  */
 const PATCH_REF_W = 80
 const PATCH_REF_H = 50
@@ -400,20 +366,7 @@ function expansionPatches(mapW: number, mapH: number): Array<[number, number]> {
   const scaleX = mapW / PATCH_REF_W
   const scaleY = mapH / PATCH_REF_H
   const patches = layout.map(([tx, ty]) => [Math.round(tx * scaleX), Math.round(ty * scaleY)] as [number, number])
-  const fitted = patches.filter(([tx, ty]) => tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH)
-  if (mapW * mapH <= FFA_MAP_W * FFA_MAP_H) return fitted
-  const target = Math.max(fitted.length, Math.round(layout.length * ((mapW * mapH) / (PATCH_REF_W * PATCH_REF_H))))
-  const cols = Math.max(1, Math.round(Math.sqrt(target * (mapW / mapH))))
-  const rows = Math.max(1, Math.ceil(target / cols))
-  const dense: Array<[number, number]> = []
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const tx = Math.round(((col + 0.5) * mapW) / cols)
-      const ty = Math.round(((row + 0.5) * mapH) / rows)
-      if (tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH) dense.push([tx, ty])
-    }
-  }
-  return dense
+  return patches.filter(([tx, ty]) => tx >= 1 && ty >= 1 && tx + 2 < mapW && ty + 1 < mapH)
 }
 
 function aimOf(site: KeepSite, sites: KeepSite[]): KeepSite {

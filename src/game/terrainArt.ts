@@ -1,4 +1,4 @@
-import { CASTLE_YARD, pickFfa10Sites, pickFfaSites, pickKeepSites } from './map'
+import { CASTLE_YARD, pickFfaSites, pickKeepSites } from './map'
 import { hash2 } from './rng'
 import { BUILDING_STATS, TILE, type MatchMode } from './types'
 
@@ -94,7 +94,7 @@ function yardsFor(seed: number, mapW: number, mapH: number, mode: MatchMode): Ui
   const mask = new Uint8Array(mapW * mapH)
   const placed = pickKeepSites(seed, mapW, mapH)
   const sites =
-    mode === 'ffa10' ? pickFfa10Sites(seed, mapW, mapH) : mode === 'ffa' ? pickFfaSites(seed, mapW, mapH) : [placed.player, placed.enemy]
+    mode === 'ffa' ? pickFfaSites(seed, mapW, mapH) : [placed.player, placed.enemy]
   const footprintW = BUILDING_STATS.keep.w
   const footprintH = BUILDING_STATS.keep.h
   for (const site of sites) {
