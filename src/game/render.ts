@@ -561,9 +561,9 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   } else if (unit.kind === 'pike') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
     ctx.beginPath()
-    ctx.ellipse(2, 8, 14, 4.6, 0, 0, Math.PI * 2)
+    ctx.ellipse(1, 5, 16, 5.6, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.drawImage(flasherSprite(unit), -32, -34)
+    ctx.drawImage(flasherSprite(unit), -40, -42)
     if (unit.hitFlash > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
       ctx.beginPath()

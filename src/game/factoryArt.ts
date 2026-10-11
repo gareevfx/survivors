@@ -452,10 +452,20 @@ function paintAssembly(
     ctx.lineTo(12, 0)
     ctx.stroke()
   } else {
-    ctx.strokeRect(-15, -4, 30, 8)
     ctx.beginPath()
-    ctx.arc(-9, 0, 3.2, 0, Math.PI * 2)
-    ctx.arc(9, 0, 3.2, 0, Math.PI * 2)
+    ctx.ellipse(0, 0, 8, 5, 0, 0, Math.PI * 2)
+    ctx.moveTo(-3, 3)
+    ctx.lineTo(-11, 8)
+    ctx.moveTo(-3, -3)
+    ctx.lineTo(-11, -8)
+    ctx.moveTo(3, 3)
+    ctx.lineTo(11, 8)
+    ctx.moveTo(3, -3)
+    ctx.lineTo(11, -8)
+    ctx.moveTo(5, 4)
+    ctx.lineTo(14, 5)
+    ctx.moveTo(5, -4)
+    ctx.lineTo(14, -5)
     ctx.stroke()
   }
   const sprite =
@@ -464,7 +474,7 @@ function paintAssembly(
       : kind === 'drone'
         ? hoverFrame(owner, 2, 0)
         : flasherFrame(owner, 2, 0, false, false)
-  const scale = 0.2 + grown * 0.22
+  const scale = kind === 'pike' ? 0.16 + grown * 0.18 : 0.2 + grown * 0.22
   ctx.globalAlpha = 0.15 + grown * 0.85
   ctx.scale(scale, scale)
   ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2)
