@@ -1,33 +1,40 @@
 import { PLAYER_COLOR } from './types'
 
 /**
- * The Silo sprite is the reference render, keyed and cropped.
- * An affine fit aims the base ring's left and right corners at the 3×3
- * diamond's horizontal axis and the front lip at the bottom corner, then
- * scales uniformly so the outer lip touches the diamond and does not cross it.
- * Dome and antennas may sit above the diamond. Orange trim is hue-mapped.
- * Cyan glass is left alone. The drop shadow is drawn by the renderer.
+ * The Silo sprite is the white-background render, keyed and cropped.
+ * An affine maps the ring's left and right corners onto the 3×3 diamond's
+ * horizontal axis and the front lip onto the bottom center line, then scales
+ * about the footprint center until the whole base sits inside the diamond.
+ * The octagon's side edges bow outside the triangle of those three corners,
+ * so the corners land on the axis short of the diamond tips. Dome and
+ * antennas may sit above the ring. Orange trim is hue-mapped. Cyan glass
+ * is left alone. The foundation and shadow are drawn by the renderer.
  */
 
 const SRC = '/assets/silo.png'
 /** Footprint center inside the fitted canvas. */
-const ANCHOR_X = 60
-const ANCHOR_Y = 36
-const FIT_W = 120
-const FIT_H = 68
+const ANCHOR_X = 58
+const ANCHOR_Y = 25
+const FIT_W = 116
+const FIT_H = 56
 /**
  * x' = a x + b y + c, y' = d x + e y + f, origin at the footprint center.
- * Measured from the ring corners (0.7, 102.5), (193.3, 103.9) and (94.8, 194.6)
- * on the 195×197 sprite, then scaled by 0.581 so the front lip stays inside.
+ * Ring corners on the 664×670 keyed sprite: left (2, 294.5), right (658, 292.5),
+ * front lip (334, 667). Pinned to (±96, 0) and (0, 48), then scaled by 0.56833
+ * so the base's widest skirt stays inside the diamond.
  */
-const FIT_A = 0.5791033734978706
-const FIT_B = 0.013687495584019474
-const FIT_C = -57.58663552508788
-const FIT_D = -0.002218143895503083
-const FIT_E = 0.3054235125211147
-const FIT_F = -31.314587408524677
+const FIT_A = 0.1663353535
+const FIT_B = -0.0017813692
+const FIT_C = -54.3678347924
+const FIT_D = 0.0002226712
+const FIT_E = 0.0730361392
+const FIT_F = -21.5095883277
 /** Hex gate on the unfitted sprite. */
-const GATE_SRC = { x: 99, y: 123 }
+const GATE_SRC = { x: 321, y: 474 }
+/** Solid ring corners on the keyed sprite. */
+const RING_LEFT = { x: 2, y: 294.5 }
+const RING_RIGHT = { x: 658, y: 292.5 }
+const RING_FRONT = { x: 334, y: 667 }
 
 type Anchor = { canvas: HTMLCanvasElement; ax: number; ay: number }
 
@@ -65,13 +72,23 @@ export function siloGateOffset(): { x: number; y: number } {
   return fitPoint(GATE_SRC.x, GATE_SRC.y)
 }
 
-/** True when the fitted ring corners sit inside the 3×3 diamond, level at the sides. */
+/** True when the fitted ring stays inside the 3×3 diamond, level at the sides. */
 export function siloRingInsideDiamond(): boolean {
-  const left = fitPoint(0.68, 102.53)
-  const right = fitPoint(193.32, 103.93)
-  const bottom = fitPoint(94.84, 194.55)
-  const inside = (point: { x: number; y: number }) => Math.abs(point.x) / 96 + Math.abs(point.y) / 48 <= 1.01
-  return Math.abs(left.y) < 0.8 && Math.abs(right.y) < 0.8 && inside(left) && inside(right) && inside(bottom) && bottom.y > 0
+  const left = fitPoint(RING_LEFT.x, RING_LEFT.y)
+  const right = fitPoint(RING_RIGHT.x, RING_RIGHT.y)
+  const bottom = fitPoint(RING_FRONT.x, RING_FRONT.y)
+  const inside = (point: { x: number; y: number }) => Math.abs(point.x) / 96 + Math.abs(point.y) / 48 <= 1
+  return (
+    Math.abs(left.y) < 0.6 &&
+    Math.abs(right.y) < 0.6 &&
+    Math.abs(bottom.x) < 0.6 &&
+    left.x < -50 &&
+    right.x > 50 &&
+    bottom.y > 24 &&
+    inside(left) &&
+    inside(right) &&
+    inside(bottom)
+  )
 }
 
 export function siloPhotoSprite(color: string, ruined: boolean): Anchor | null {
@@ -211,7 +228,7 @@ function paintWreck(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.strokeStyle = 'rgba(18, 14, 12, 0.9)'
-  const mark = width / 195
+  const mark = Math.max(0.85, width / 140)
   ctx.lineWidth = 1.4 * mark
   const cracks = [
     [0.42, 0.18, 0.48, 0.28, 0.4, 0.36],
