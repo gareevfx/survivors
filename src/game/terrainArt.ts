@@ -46,21 +46,28 @@ function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 }
 
-/** Large dirt, dry soil, gravel, and dark blotches, sampled at tile centers. */
+function span(n: number): number {
+  return Math.min(1, Math.max(0, (n - 0.28) / 0.52))
+}
+
+/** Meadow greens with lighter and darker patches, and a few dirt clearings. */
 export function terrainRgb(tx: number, ty: number, seed: number): Rgb {
-  const n = fbm(tx * 0.17, ty * 0.17, seed)
-  const blot = fbm(tx * 0.055 + 9, ty * 0.055 - 4, seed + 5)
-  const dry: Rgb = [138, 108, 64]
-  const dirt: Rgb = [112, 82, 46]
-  const soil: Rgb = [96, 70, 40]
-  const gravel: Rgb = [150, 136, 114]
-  const dark: Rgb = [68, 52, 36]
-  let color: Rgb
-  if (n < 0.33) color = mix(soil, dry, n / 0.33)
-  else if (n < 0.58) color = mix(dry, dirt, (n - 0.33) / 0.25)
-  else if (n < 0.8) color = mix(dirt, gravel, (n - 0.58) / 0.22)
-  else color = mix(gravel, soil, (n - 0.8) / 0.2)
-  if (blot < 0.34) color = mix(color, dark, ((0.34 - blot) / 0.34) * 0.72)
+  const n = span(fbm(tx * 0.14, ty * 0.14, seed))
+  const fine = span(fbm(tx * 0.33 + 2, ty * 0.29 - 1, seed + 41))
+  const deep: Rgb = [42, 92, 30]
+  const mid: Rgb = [74, 138, 44]
+  const light: Rgb = [128, 174, 60]
+  const sun: Rgb = [176, 198, 84]
+  let color = n < 0.5 ? mix(deep, mid, n / 0.5) : mix(mid, light, (n - 0.5) / 0.5)
+  if (fine > 0.62) color = mix(color, sun, ((fine - 0.62) / 0.38) * 0.7)
+  else if (fine < 0.28) color = mix(color, deep, ((0.28 - fine) / 0.28) * 0.55)
+  const patch = hash2((tx / 5) | 0, (ty / 5) | 0, seed + 23)
+  if (patch < 0.1) {
+    const soil: Rgb = [112, 82, 48]
+    const dirt: Rgb = [162, 124, 70]
+    const edge = hash2(tx, ty, seed + 31)
+    color = mix(color, edge < 0.45 ? soil : dirt, patch < 0.045 ? 0.86 : 0.42 + edge * 0.28)
+  }
   return color
 }
 
@@ -173,46 +180,77 @@ export function paintTerrain(ctx: CanvasRenderingContext2D, seed: number, mapW: 
   ctx.putImageData(image, 0, 0)
 
   const wash = ctx.createLinearGradient(0, 0, width, height)
-  wash.addColorStop(0, 'rgba(255, 228, 186, 0.07)')
+  wash.addColorStop(0, 'rgba(255, 246, 210, 0.07)')
   wash.addColorStop(0.55, 'rgba(0, 0, 0, 0)')
-  wash.addColorStop(1, 'rgba(28, 16, 8, 0.14)')
+  wash.addColorStop(1, 'rgba(18, 36, 14, 0.12)')
   ctx.fillStyle = wash
   ctx.fillRect(0, 0, width, height)
 
+  ctx.lineCap = 'round'
   for (let ty = 0; ty < mapH; ty++) {
     for (let tx = 0; tx < mapW; tx++) {
       const packed = yards[ty * mapW + tx] === 1
       const roll = hash2(tx + 3, ty + 9, seed + 17)
       const x = tx * TILE
       const y = ty * TILE
+      const [tr, tg] = terrainRgb(tx + 0.5, ty + 0.5, seed)
+      const dirt = tr > tg + 6
       if (packed) {
-        if (roll > 0.72 && roll < 0.8) {
-          ctx.fillStyle = 'rgba(90, 68, 40, 0.22)'
-          ctx.fillRect(x + 4, y + 18, 18, 2)
+        if (roll > 0.7 && roll < 0.82) {
+          ctx.strokeStyle = 'rgba(70, 110, 42, 0.35)'
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(x + 6, y + 20)
+          ctx.lineTo(x + 10, y + 14)
+          ctx.moveTo(x + 16, y + 22)
+          ctx.lineTo(x + 18, y + 15)
+          ctx.stroke()
         }
         continue
       }
-      if (roll > 0.9) {
-        const px = x + 6 + hash2(tx, ty + 1, seed) * 18
-        const py = y + 8 + hash2(tx + 2, ty, seed) * 14
-        ctx.fillStyle = 'rgba(62, 48, 34, 0.7)'
+      if (dirt) {
+        if (roll > 0.55) {
+          const px = x + 8 + hash2(tx, ty + 1, seed) * 16
+          const py = y + 8 + hash2(tx + 2, ty, seed) * 14
+          ctx.fillStyle = 'rgba(92, 70, 46, 0.55)'
+          ctx.beginPath()
+          ctx.ellipse(px, py, 2.1, 1.3, 0.4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = 'rgba(214, 190, 150, 0.35)'
+          ctx.fillRect(px - 1, py - 1, 1, 1)
+        }
+        continue
+      }
+      const sway = hash2(tx + 1, ty + 4, seed) * 6 - 3
+      ctx.strokeStyle = roll > 0.5 ? 'rgba(64, 112, 40, 0.55)' : 'rgba(150, 186, 78, 0.45)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x + 8, y + 22)
+      ctx.lineTo(x + 8 + sway, y + 14)
+      ctx.moveTo(x + 18, y + 24)
+      ctx.lineTo(x + 20 + sway * 0.4, y + 15)
+      if (roll > 0.4) {
+        ctx.moveTo(x + 13, y + 20)
+        ctx.lineTo(x + 12 + sway * 0.3, y + 12)
+      }
+      ctx.stroke()
+      if (roll > 0.28 && roll < 0.4) {
+        ctx.fillStyle = 'rgba(48, 96, 36, 0.28)'
         ctx.beginPath()
-        ctx.ellipse(px, py, 1.7, 1.15, 0, 0, Math.PI * 2)
+        ctx.ellipse(x + 12 + sway, y + 16, 8, 3.4, 0.3, 0, Math.PI * 2)
         ctx.fill()
-        ctx.fillStyle = 'rgba(220, 200, 160, 0.35)'
-        ctx.fillRect(px - 1, py - 1, 1, 1)
-      } else if (roll < 0.04) {
-        ctx.strokeStyle = 'rgba(48, 34, 22, 0.55)'
-        ctx.lineWidth = 1
+      } else if (roll > 0.84 && roll < 0.93) {
+        ctx.fillStyle = 'rgba(186, 210, 96, 0.38)'
         ctx.beginPath()
-        ctx.moveTo(x + 5, y + 22)
-        ctx.lineTo(x + 13, y + 17)
-        ctx.lineTo(x + 24, y + 23)
-        ctx.stroke()
-      } else if (roll > 0.62 && roll < 0.66) {
-        ctx.fillStyle = 'rgba(40, 28, 18, 0.18)'
+        ctx.ellipse(x + 18, y + 12, 7, 3, -0.2, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (roll > 0.96) {
+        const fx = x + 10 + hash2(tx + 6, ty, seed) * 12
+        const fy = y + 10 + hash2(tx, ty + 6, seed) * 12
+        ctx.fillStyle = hash2(tx + 8, ty + 2, seed) > 0.5 ? '#f2e27a' : '#f7f4ea'
         ctx.beginPath()
-        ctx.ellipse(x + 16, y + 20, 7, 2.2, 0.2, 0, Math.PI * 2)
+        ctx.arc(fx, fy, 1.35, 0, Math.PI * 2)
         ctx.fill()
       }
     }
@@ -243,43 +281,128 @@ function rockSprites(): HTMLCanvasElement[] {
     [[12, 30], [11, 16], [20, 8], [31, 12], [34, 26], [22, 34]],
     [[9, 24], [15, 12], [26, 10], [34, 20], [30, 32], [14, 33]],
   ]
+  const tops: Array<Array<[number, number]>> = [
+    [[14, 16], [22, 11], [30, 17], [24, 22], [16, 22]],
+    [[16, 14], [26, 10], [32, 18], [22, 20]],
+    [[14, 18], [20, 11], [30, 14], [26, 22], [16, 24]],
+    [[15, 15], [24, 12], [32, 20], [20, 22]],
+  ]
   rocks = shapes.map((shape, variant) => {
     const canvas = document.createElement('canvas')
     canvas.width = 44
     canvas.height = 44
     const ctx = canvas.getContext('2d')
     if (!ctx) return canvas
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.38)'
+    ctx.fillStyle = 'rgba(24, 32, 18, 0.32)'
     ctx.beginPath()
-    ctx.ellipse(24, 34, 13, 4.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(23, 35, 13, 4.2, 0.1, 0, Math.PI * 2)
     ctx.fill()
-    ctx.fillStyle = variant % 2 === 0 ? '#3c342c' : '#463c32'
+    const body = ctx.createLinearGradient(10, 8, 32, 34)
+    body.addColorStop(0, variant % 2 === 0 ? '#d2c4b0' : '#c8bba6')
+    body.addColorStop(0.42, variant === 2 ? '#8d7b68' : '#7e7266')
+    body.addColorStop(1, '#4a4036')
+    ctx.fillStyle = body
     poly(ctx, shape)
     ctx.fill()
-    const lit = shape.map(([px, py]) => [px - 2, py - 3] as [number, number])
-    ctx.fillStyle = variant === 2 ? '#7d7368' : '#6e655c'
-    poly(ctx, lit)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(255, 244, 220, 0.38)'
-    ctx.beginPath()
-    ctx.ellipse(shape[1]?.[0] ?? 16, (shape[1]?.[1] ?? 14) - 1, 4.2, 2.1, -0.6, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(32, 24, 18, 0.75)'
+    ctx.save()
+    poly(ctx, shape)
+    ctx.clip()
+    ctx.fillStyle = 'rgba(62, 48, 36, 0.45)'
+    ctx.fillRect(8, 24, 28, 14)
+    ctx.restore()
+    const cap = tops[variant] ?? tops[0]
+    if (cap) {
+      ctx.fillStyle = variant === 1 ? '#b7aa9a' : '#cfc3b2'
+      poly(ctx, cap)
+      ctx.fill()
+      ctx.fillStyle = 'rgba(255, 248, 232, 0.55)'
+      ctx.beginPath()
+      ctx.ellipse(cap[0]?.[0] ?? 16, (cap[0]?.[1] ?? 14) + 1, 3.4, 1.7, -0.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.strokeStyle = 'rgba(42, 34, 28, 0.72)'
     ctx.lineWidth = 1
+    poly(ctx, shape)
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(58, 46, 36, 0.65)'
     ctx.beginPath()
-    ctx.moveTo(16, 16)
-    ctx.lineTo(22, 22)
-    ctx.lineTo(20, 28)
+    ctx.moveTo(16, 18)
+    ctx.lineTo(22, 24)
+    ctx.lineTo(19, 29)
     ctx.stroke()
     if (variant === 1 || variant === 3) {
       ctx.beginPath()
-      ctx.moveTo(24, 14)
-      ctx.lineTo(28, 20)
+      ctx.moveTo(25, 15)
+      ctx.lineTo(28, 22)
       ctx.stroke()
     }
     return canvas
   })
   return rocks
+}
+
+function leafClump(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, color: string): void {
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function paintBirch(ctx: CanvasRenderingContext2D, variant: number): void {
+  ctx.fillStyle = 'rgba(28, 48, 22, 0.3)'
+  ctx.beginPath()
+  ctx.ellipse(26, 51, 15, 4.2, 0.05, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#cfc8b6'
+  ctx.fillRect(21, 26, 6, 23)
+  ctx.fillStyle = '#f3efe4'
+  ctx.fillRect(21, 26, 2.4, 23)
+  ctx.fillStyle = '#2c2c28'
+  for (const mark of [30, 36, 41, 46]) ctx.fillRect(21, mark, 6, 1.15)
+  const dark = variant === 0 ? '#2c6230' : '#347238'
+  const mid = variant === 0 ? '#4c923f' : '#5aa348'
+  const lit = variant === 0 ? '#8ec45c' : '#a4d46e'
+  leafClump(ctx, 31, 24, 11, 9, dark)
+  leafClump(ctx, 15, 23, 9, 8, '#214e28')
+  leafClump(ctx, 23, 16, 12, 10, mid)
+  leafClump(ctx, 14, 15, 7, 6, lit)
+  leafClump(ctx, 28, 12, 6.5, 5, '#d4e89a')
+  leafClump(ctx, 18, 11, 3.2, 2.4, 'rgba(244, 250, 214, 0.8)')
+}
+
+function paintWillow(ctx: CanvasRenderingContext2D, variant: number): void {
+  ctx.fillStyle = 'rgba(28, 48, 22, 0.32)'
+  ctx.beginPath()
+  ctx.ellipse(24, 51, 16, 4.4, -0.1, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#6a5434'
+  ctx.lineWidth = 4
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(24, 48)
+  ctx.quadraticCurveTo(22, 36, variant === 2 ? 20 : 26, 26)
+  ctx.stroke()
+  ctx.strokeStyle = '#c4b496'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.moveTo(23, 46)
+  ctx.quadraticCurveTo(21, 36, variant === 2 ? 19 : 25, 28)
+  ctx.stroke()
+  const hang = variant === 2 ? 2 : -1
+  leafClump(ctx, 16 + hang, 28, 10, 8, '#24562c')
+  leafClump(ctx, 30 + hang, 26, 11, 8, '#2f6a34')
+  leafClump(ctx, 22 + hang, 18, 12, 9, '#4e9442')
+  leafClump(ctx, 12 + hang, 20, 7, 6, '#6aaa4e')
+  leafClump(ctx, 32 + hang, 16, 7, 6, '#7eb856')
+  leafClump(ctx, 20 + hang, 12, 6, 4.5, '#c6e08a')
+  ctx.strokeStyle = 'rgba(46, 92, 40, 0.85)'
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.moveTo(16 + hang, 20)
+  ctx.quadraticCurveTo(14 + hang, 30, 12 + hang, 36)
+  ctx.moveTo(30 + hang, 18)
+  ctx.quadraticCurveTo(33 + hang, 28, 34 + hang, 34)
+  ctx.stroke()
 }
 
 function treeSprites(): HTMLCanvasElement[] {
@@ -294,52 +417,8 @@ function treeSprites(): HTMLCanvasElement[] {
       trees.push(canvas)
       continue
     }
-    const dead = variant === 3
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
-    ctx.beginPath()
-    ctx.ellipse(28, 50, 14, 4.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = '#3a2616'
-    ctx.fillRect(22, 28, 5, 20)
-    ctx.fillStyle = '#6b4a2c'
-    ctx.fillRect(21, 28, 3, 20)
-    if (dead) {
-      ctx.strokeStyle = '#5a3e28'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(24, 30)
-      ctx.lineTo(14, 16)
-      ctx.moveTo(24, 26)
-      ctx.lineTo(34, 12)
-      ctx.moveTo(24, 22)
-      ctx.lineTo(18, 12)
-      ctx.stroke()
-      ctx.fillStyle = '#6a5438'
-      ctx.beginPath()
-      ctx.arc(16, 16, 4, 0, Math.PI * 2)
-      ctx.arc(33, 13, 3.5, 0, Math.PI * 2)
-      ctx.fill()
-    } else {
-      const greens = ['#2f6a32', '#3d7a38', '#4c8a3c']
-      const shade = ['#1e4424', '#24502c', '#2c5c30']
-      ctx.fillStyle = shade[variant] ?? shade[0]
-      ctx.beginPath()
-      ctx.arc(30, 24, 11, 0, Math.PI * 2)
-      ctx.arc(16, 22, 9, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = greens[variant] ?? greens[0]
-      ctx.beginPath()
-      ctx.arc(22, 18, 12, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = variant === 0 ? '#6ea24a' : '#7aaf52'
-      ctx.beginPath()
-      ctx.arc(18, 14, 6, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(230, 240, 180, 0.35)'
-      ctx.beginPath()
-      ctx.arc(16, 12, 2.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
+    if (variant < 2) paintBirch(ctx, variant)
+    else paintWillow(ctx, variant)
     trees.push(canvas)
   }
   return trees
