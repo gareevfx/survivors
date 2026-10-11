@@ -124,6 +124,7 @@ button, canvas { font: inherit; }
 #again,
 #to-menu,
 #donat-close,
+#about-close,
 .menu-card button {
   background: var(--panel-2);
   color: var(--text);
@@ -138,6 +139,7 @@ button, canvas { font: inherit; }
 #again:hover,
 #to-menu:hover,
 #donat-close:hover,
+#about-close:hover,
 .menu-card button:hover,
 .cmd:hover:not(:disabled) {
   border-color: #6d8158;
@@ -467,7 +469,8 @@ button, canvas { font: inherit; }
 #again, #to-menu { margin-top: 14px; }
 #to-menu { margin-left: 8px; }
 
-#donat {
+#donat,
+#about {
   position: absolute;
   inset: 0;
   z-index: 8;
@@ -478,21 +481,32 @@ button, canvas { font: inherit; }
   padding: 20px;
 }
 
-.donat-card { width: min(520px, 100%); }
+.donat-card,
+.about-card { width: min(520px, 100%); }
 
-.donat-card p {
+.about-card {
+  max-height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.donat-card p,
+.about-card p {
   margin: 0;
   color: var(--text);
   font-size: 16px;
   line-height: 1.5;
 }
 
+.about-card p + p { margin-top: 12px; }
+
 .selectable {
   user-select: text;
   -webkit-user-select: text;
 }
 
-#donat-close { margin-top: 14px; }
+#donat-close,
+#about-close { margin-top: 14px; }
 
 #menu {
   position: absolute;

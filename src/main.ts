@@ -175,6 +175,13 @@ document.querySelector('#menu-donat')?.addEventListener('click', () => {
 document.querySelector('#donat-close')?.addEventListener('click', () => {
   donat?.classList.add('hidden')
 })
+const about = document.querySelector<HTMLElement>('#about')
+document.querySelector('#menu-about')?.addEventListener('click', () => {
+  about?.classList.remove('hidden')
+})
+document.querySelector('#about-close')?.addEventListener('click', () => {
+  about?.classList.add('hidden')
+})
 menuResume?.addEventListener('click', () => {
   if (!match || match.outcome) return
   menuOpen = false
