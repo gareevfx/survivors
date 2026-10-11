@@ -482,9 +482,13 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
       ctx.restore()
     }
   } else if (building.kind === 'yard') {
-    const producing = building.complete && building.queue[0] != null
-    const frame = Math.floor(state.time * (producing ? 2.4 : 0.7)) % 4
-    const sprite = factorySprite(color, frame)
+    ctx.save()
+    ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
+    ctx.beginPath()
+    ctx.ellipse(at.x + ((stats.w - stats.h) * TILE) / 2, at.y + 26, 68, 15, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    const sprite = factorySprite(color)
     if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
   } else if (building.kind === 'tower') {
     const origin = buildingCenter(building)

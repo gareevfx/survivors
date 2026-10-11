@@ -1,3 +1,4 @@
+import { factoryPhotoPortrait, factoryPhotoSprite } from './factoryImage'
 import { hash2 } from './rng'
 import { siloGateOffset, siloPhotoPortrait, siloPhotoRuinPortrait, siloPhotoSprite } from './siloImage'
 import { facingDir } from './stalkerArt'
@@ -14,7 +15,6 @@ const STEEL_MID = '#6d7680'
 const STEEL_DARK = '#3a434c'
 const STEEL_DEEP = '#262d34'
 const LIGHT = '#e4e8ee'
-const CONCRETE = '#c8ccd2'
 const HOLO = '#3ad4ef'
 
 type Ctx = CanvasRenderingContext2D
@@ -121,20 +121,6 @@ function paintDiamond(ctx: Ctx, hw: number, hh: number): void {
   ctx.closePath()
 }
 
-function footprint(ctx: Ctx, w: number, h: number): void {
-  const c = (dx: number, dy: number) => ({ x: dx - dy, y: (dx + dy) * 0.5 })
-  const nw = c((-w / 2) * 32, (-h / 2) * 32)
-  const ne = c((w / 2) * 32, (-h / 2) * 32)
-  const se = c((w / 2) * 32, (h / 2) * 32)
-  const sw = c((-w / 2) * 32, (h / 2) * 32)
-  ctx.beginPath()
-  ctx.moveTo(nw.x, nw.y)
-  ctx.lineTo(ne.x, ne.y)
-  ctx.lineTo(se.x, se.y)
-  ctx.lineTo(sw.x, sw.y)
-  ctx.closePath()
-}
-
 function spriteCanvas(w: number, h: number, originY: number): { canvas: HTMLCanvasElement; ctx: Ctx; ax: number; ay: number } | null {
   const canvas = document.createElement('canvas')
   canvas.width = w
@@ -174,91 +160,8 @@ export { siloGateOffset }
 
 
 
-export function factorySprite(color: string, frame: number): Anchor | null {
-  const key = `yard:${color}:${frame}`
-  return cached(key, () => {
-    const made = spriteCanvas(230, 180, 118)
-    if (!made) return null
-    paintFactory(made.ctx, color, frame)
-    return { canvas: made.canvas, ax: made.ax, ay: made.ay }
-  })
-}
-
-function paintFactory(ctx: Ctx, accent: string, frame: number): void {
-  ctx.save()
-  ctx.translate(6, 10)
-  footprint(ctx, 3.1, 2.1)
-  ctx.fillStyle = 'rgba(16, 28, 14, 0.25)'
-  ctx.fill()
-  ctx.restore()
-  footprint(ctx, 3, 2)
-  const pad = ctx.createLinearGradient(-30, -10, 20, 30)
-  pad.addColorStop(0, LIGHT)
-  pad.addColorStop(1, CONCRETE)
-  ctx.fillStyle = pad
-  ctx.fill()
-  ctx.strokeStyle = INK
-  ctx.lineWidth = 1.2
-  ctx.stroke()
-  // Hazard edge in team color.
-  ctx.save()
-  ctx.clip()
-  ctx.strokeStyle = accent
-  ctx.lineWidth = 4
-  ctx.setLineDash([7, 5])
-  footprint(ctx, 2.82, 1.86)
-  ctx.stroke()
-  ctx.restore()
-
-  const posts = footprintPoints(3, 2)
-  for (const post of posts) {
-    ctx.fillStyle = LIGHT
-    ctx.fillRect(post.x - 5, post.y - 36, 10, 36)
-    ctx.fillStyle = STEEL_DARK
-    ctx.fillRect(post.x - 5, post.y - 36, 3, 36)
-    ctx.fillStyle = accent
-    ctx.fillRect(post.x - 4, post.y - 16, 8, 4)
-    ctx.strokeStyle = INK
-    ctx.lineWidth = 1
-    ctx.strokeRect(post.x - 5, post.y - 36, 10, 36)
-  }
-  const north = posts[0]
-  const east = posts[1]
-  if (north && east) {
-    ctx.beginPath()
-    ctx.moveTo(north.x, north.y - 34)
-    ctx.lineTo(east.x, east.y - 34)
-    ctx.strokeStyle = STEEL_MID
-    ctx.lineWidth = 6
-    ctx.stroke()
-    ctx.strokeStyle = accent
-    ctx.lineWidth = 2
-    ctx.stroke()
-  }
-  // Cross gantry and the hanging assembly head.
-  const slide = (frame - 1.5) * 10
-  ctx.beginPath()
-  ctx.moveTo(-28, -30)
-  ctx.lineTo(36, -18)
-  ctx.strokeStyle = LIGHT
-  ctx.lineWidth = 5
-  ctx.stroke()
-  const headX = slide
-  const headY = -24 + slide * 0.15
-  ctx.fillStyle = STEEL_DARK
-  ctx.fillRect(headX - 7, headY, 14, 8)
-  ctx.fillStyle = accent
-  ctx.fillRect(headX - 7, headY, 14, 2)
-  ctx.strokeStyle = STEEL_DEEP
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(headX, headY + 8)
-  ctx.lineTo(headX, headY + 20)
-  ctx.stroke()
-  ctx.fillStyle = '#1e252b'
-  ctx.fillRect(headX - 5, headY + 18, 10, 8)
-  ctx.fillStyle = HOLO
-  ctx.fillRect(headX - 3, headY + 20, 6, 3)
+export function factorySprite(color: string): Anchor | null {
+  return factoryPhotoSprite(color)
 }
 
 function footprintPoints(w: number, h: number): Array<{ x: number; y: number }> {
@@ -545,8 +448,7 @@ export function isoRuinedPortraitUrl(): string {
 }
 
 export function isoFactoryPortraitUrl(owner: number): string {
-  const color = PLAYER_COLOR[owner] ?? '#5ec8ff'
-  return portraitOf(`yard-icon:${color}`, (ctx) => paintFactory(ctx, color, 1))
+  return factoryPhotoPortrait(owner)
 }
 
 export function isoStoragePortraitUrl(owner: number): string {

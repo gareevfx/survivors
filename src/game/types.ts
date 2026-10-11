@@ -160,8 +160,8 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   yard: {
     label: 'Factory',
     blurb: 'Trains flashers, gorillas, and hovers.',
-    w: 3,
-    h: 2,
+    w: 2,
+    h: 3,
     hp: 720,
     cost: 160,
     buildTime: 18,

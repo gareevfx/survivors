@@ -162,7 +162,7 @@ function ruinSprite(image: HTMLImageElement): Anchor {
 }
 
 /** Swap the orange/yellow trim hue. Cyan glass and gray steel stay. */
-function recolorTrim(data: Uint8ClampedArray, color: string): void {
+export function recolorTrim(data: Uint8ClampedArray, color: string): void {
   const team = rgbOf(color)
   const target = rgbToHsv(team.r, team.g, team.b)
   for (let i = 0; i < data.length; i += 4) {

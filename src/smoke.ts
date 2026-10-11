@@ -1,5 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
+import { factoryCoversFootprint } from './game/factoryImage'
 import { siloCoversDiamond } from './game/siloImage'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
@@ -219,7 +220,11 @@ function northmarkPlaysItself(): void {
     assert(depositKnown(state, 0, node.tx, node.ty), 'AI control mined minerals Northmark has not seen')
     assert(node.id !== hidden.id, 'AI control used Dunmarch sight to pick minerals')
   }
-  const site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
+  let site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
+  for (let i = 0; i < 360 && !site; i++) {
+    step(state, 1 / 60)
+    site = state.buildings.find((building) => building.owner === 0 && !building.complete && building.hp > 0)
+  }
   assert(site && (site.kind === 'yard' || site.kind === 'silo'), 'Northmark did not start a Factory or Silo')
   assert(
     porters.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === site.id),
@@ -1409,6 +1414,8 @@ function clearFogCommandRevealsTheMap(): void {
 
 function footprintGridCommand(): void {
   assert(siloCoversDiamond(), 'the Silo photo is not scaled evenly onto the 3x3 diamond')
+  assert(BUILDING_STATS.yard.w === 2 && BUILDING_STATS.yard.h === 3, 'the Factory footprint is not 2x3')
+  assert(factoryCoversFootprint(), 'the Factory photo is not scaled evenly onto the 2x3 diamond')
   const state = createMatch(2)
   assert(!state.showGrid, 'the footprint grid starts on')
   assert(!runCommand(state, 'grid'), 'a partial grid line was accepted')
