@@ -1,6 +1,6 @@
 # Survivors
 
-A browser RTS. Run with `npm install` then `npm run dev`.
+A browser RTS. Run with `npm install` then `npm run dev`. 
 Ready-to-play online version of the game https://gareevfx.com/project-survivors/index.html  
 
 ## About the game
