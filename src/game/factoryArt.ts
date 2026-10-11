@@ -1,7 +1,8 @@
 import { flasherFrame } from './flasherArt'
 import { gorillaFrame } from './gorillaArt'
 import { hoverFrame, paintHoverRotors } from './hoverArt'
-import { BUILDING_STATS, PLAYER_COLOR, TILE, type UnitKind } from './types'
+import { isoFactoryPortraitUrl } from './isoArt'
+import { BUILDING_STATS, TILE, type UnitKind } from './types'
 
 /**
  * The Factory is a roofless garage. Walls and the bay floor are cached.
@@ -49,7 +50,6 @@ export interface FactoryLook {
 }
 
 const bodies = new Map<string, HTMLCanvasElement>()
-const portraits = new Map<number, string>()
 
 /** Walkable point just outside the south bay door. New units appear here. */
 export function yardEntrance(building: { tx: number; ty: number }): { x: number; y: number } {
@@ -442,9 +442,19 @@ function paintAssembly(
   ctx.strokeStyle = '#d5dbe1'
   ctx.lineWidth = 1.15
   if (kind === 'howler') {
-    ctx.strokeRect(-16, -7, 32, 14)
-    ctx.strokeRect(-16, -7, 5, 14)
-    ctx.strokeRect(11, -7, 5, 14)
+    ctx.beginPath()
+    ctx.ellipse(0, -2, 10, 6, 0, 0, Math.PI * 2)
+    ctx.moveTo(-4, 2)
+    ctx.lineTo(-12, 9)
+    ctx.moveTo(4, 2)
+    ctx.lineTo(12, 9)
+    ctx.moveTo(-5, 0)
+    ctx.lineTo(-13, 5)
+    ctx.moveTo(5, 0)
+    ctx.lineTo(13, 5)
+    ctx.moveTo(4, -4)
+    ctx.lineTo(16, -6)
+    ctx.stroke()
   } else if (kind === 'drone') {
     ctx.beginPath()
     ctx.ellipse(0, 0, 11, 7, 0, 0, Math.PI * 2)
@@ -546,32 +556,5 @@ export function drawFactorySprite(ctx: CanvasRenderingContext2D, x: number, y: n
 
 /** Selection portrait and build-menu icon. Empty when there is no document, so smoke can call it. */
 export function factoryPortraitUrl(owner: number): string {
-  if (typeof document === 'undefined') return ''
-  const cached = portraits.get(owner)
-  if (cached) return cached
-  const canvas = document.createElement('canvas')
-  canvas.width = 72
-  canvas.height = 72
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  ctx.fillStyle = '#6d6248'
-  ctx.fillRect(0, 0, 72, 72)
-  ctx.save()
-  ctx.translate(8, 10)
-  ctx.scale(0.58, 0.58)
-  drawFactorySprite(ctx, 0, 0, {
-    color: PLAYER_COLOR[owner] ?? '#5ec8ff',
-    owner,
-    open: 0.15,
-    stage: 0,
-    progress: 0.55,
-    kind: 'pike',
-    busy: false,
-    time: 0,
-    built: 1,
-  })
-  ctx.restore()
-  const url = canvas.toDataURL()
-  portraits.set(owner, url)
-  return url
+  return isoFactoryPortraitUrl(owner)
 }

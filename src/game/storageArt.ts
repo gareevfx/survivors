@@ -1,4 +1,5 @@
-import { BUILDING_STATS, PLAYER_COLOR, SUPPLY_MAX } from './types'
+import { isoStoragePortraitUrl } from './isoArt'
+import { BUILDING_STATS, SUPPLY_MAX } from './types'
 
 /**
  * Storage is a round warehouse of three stacked tiers. The whole drawing is
@@ -64,7 +65,6 @@ const TIERS: Tier[] = [
 ]
 
 const bodies = new Map<string, HTMLCanvasElement>()
-const portraits = new Map<number, string>()
 
 /**
  * 0 when Cells are at or below a Silo plus one Storage. 1 at the Cells maximum.
@@ -239,22 +239,5 @@ export function drawStorageSprite(
 
 /** Selection portrait and build-menu icon. Empty when there is no document, so smoke can call it. */
 export function storagePortraitUrl(owner: number): string {
-  if (typeof document === 'undefined') return ''
-  const cached = portraits.get(owner)
-  if (cached) return cached
-  const canvas = document.createElement('canvas')
-  canvas.width = 72
-  canvas.height = 72
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  ctx.fillStyle = '#6d6248'
-  ctx.fillRect(0, 0, 72, 72)
-  ctx.save()
-  ctx.translate(10, 8)
-  ctx.scale(0.78, 0.78)
-  drawStorageSprite(ctx, 0, 0, PLAYER_COLOR[owner] ?? '#5ec8ff', 0.5, 0)
-  ctx.restore()
-  const url = canvas.toDataURL()
-  portraits.set(owner, url)
-  return url
+  return isoStoragePortraitUrl(owner)
 }

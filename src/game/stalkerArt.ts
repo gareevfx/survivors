@@ -1,3 +1,4 @@
+import { isoFacingBasis } from './iso'
 import { PLAYER_COLOR } from './types'
 import type { Unit } from './types'
 
@@ -32,12 +33,9 @@ export function facingDir(facing: number): number {
   return Math.round(angle / (Math.PI / 4)) % 8
 }
 
-/** Ground axes for one snapped facing. +forward is the nose; +side is the rider's right. */
+/** Screen axes for one snapped facing. +forward is the nose; +side is the rider's right. */
 export function facingBasis(dir: number): { ang: number; fx: number; fy: number; sx: number; sy: number } {
-  const ang = dir * (Math.PI / 4)
-  const fx = Math.cos(ang)
-  const fy = Math.sin(ang)
-  return { ang, fx, fy, sx: -Math.sin(ang), sy: Math.cos(ang) }
+  return isoFacingBasis(dir)
 }
 
 export function stalkerSprite(unit: Unit): HTMLCanvasElement {

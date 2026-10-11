@@ -1,14 +1,26 @@
-import type { Camera } from './camera'
-import { buildingCenter, buildingRect, getTarget, placementAllowed, playerKeep } from './state'
-import { flasherSprite } from './flasherArt'
-import { gorillaSprite } from './gorillaArt'
+import { screenToWorld, worldToIso, type Camera } from './camera'
+import { FLASHER_OX, FLASHER_OY, flasherSprite } from './flasherArt'
+import { GORILLA_OX, GORILLA_OY, gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
+import {
+  GROUND_ANCHOR,
+  drawAnchored,
+  factorySprite,
+  fogDiamond,
+  groundKind,
+  groundSprite,
+  keepSprite,
+  oreSprite,
+  pillarAimDir,
+  pillarSprite,
+  rockSprite,
+  storageSprite,
+  treeSprite,
+} from './isoArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
-import { drawFactorySprite, factoryDamageStage } from './factoryArt'
-import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
-import { drawPillarSprite, pillarDamageStage } from './pillarArt'
-import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
-import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
+import { buildingCenter, getTarget, placementAllowed, playerKeep } from './state'
+import { storageFill } from './storageArt'
+import { terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -46,19 +58,18 @@ function teamRgba(owner: number, alpha: number): string {
 }
 
 export function buildTerrain(seed: number, mapW = MAP_W, mapH = MAP_H, mode: MatchMode = 'duel'): HTMLCanvasElement {
+  void seed
+  void mode
   const canvas = document.createElement('canvas')
   canvas.width = mapW * TILE
   canvas.height = mapH * TILE
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return canvas
-  paintTerrain(ctx, seed, mapW, mapH, mode)
   return canvas
 }
 
 export function renderWorld(
   canvas: HTMLCanvasElement,
   state: MatchState,
-  terrain: HTMLCanvasElement,
+  _terrain: HTMLCanvasElement,
   cam: Camera,
   overlay: WorldOverlay,
 ): { viewW: number; viewH: number } {
@@ -80,82 +91,114 @@ export function renderWorld(
   ctx.fillRect(0, 0, viewW, viewH)
 
   ctx.setTransform(dpr * cam.zoom, 0, 0, dpr * cam.zoom, -cam.x * cam.zoom * dpr, -cam.y * cam.zoom * dpr)
-  const view = {
-    l: cam.x - 48,
-    t: cam.y - 48,
-    r: cam.x + viewW / cam.zoom + 48,
-    b: cam.y + viewH / cam.zoom + 48,
-  }
-  const sx0 = Math.max(0, Math.floor(view.l))
-  const sy0 = Math.max(0, Math.floor(view.t))
-  const sx1 = Math.min(terrain.width, Math.ceil(view.r))
-  const sy1 = Math.min(terrain.height, Math.ceil(view.b))
   ctx.imageSmoothingEnabled = true
-  if (sx1 > sx0 && sy1 > sy0) ctx.drawImage(terrain, sx0, sy0, sx1 - sx0, sy1 - sy0, sx0, sy0, sx1 - sx0, sy1 - sy0)
-  ctx.imageSmoothingEnabled = false
+  ctx.imageSmoothingQuality = 'medium'
 
+  const tiles = visibleTiles(cam, viewW, viewH, state.mapW, state.mapH)
+  for (let ty = tiles.ty0; ty <= tiles.ty1; ty++) {
+    for (let tx = tiles.tx0; tx <= tiles.tx1; tx++) {
+      if (!viewTileExplored(state, tx, ty)) continue
+      const north = worldToIso(tx * TILE, ty * TILE)
+      const kind = groundKind(tx, ty, state.seed)
+      ctx.drawImage(groundSprite(kind), north.x - GROUND_ANCHOR.x, north.y - GROUND_ANCHOR.y)
+    }
+  }
+
+  const stamps: Array<{ depth: number; paint: () => void }> = []
   for (const rock of state.rocks) {
     if (rock.hp <= 0) continue
     if (!viewGroundShown(state, rock.tx, rock.ty)) continue
     const x = (rock.tx + 0.5) * TILE
     const y = (rock.ty + 0.5) * TILE
-    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    if (rock.kind === 'tree') drawTreeSprite(ctx, rock.tx, rock.ty, state.seed)
-    else drawRockSprite(ctx, rock.tx, rock.ty, state.seed)
-    if (rock.hitFlash > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
-      ctx.beginPath()
-      ctx.arc(x, y - 1, 10, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    const full = rock.kind === 'tree' ? TREE_HP : ROCK_HP
-    if (rock.hp < full) {
-      bar(ctx, rock.tx * TILE + 4, rock.ty * TILE - 2, TILE - 8, rock.hp / full, hpColor(rock.hp / full))
-    }
+    if (!onScreen(cam, viewW, viewH, x, y, 48)) continue
+    stamps.push({
+      depth: x + y,
+      paint: () => {
+        const sprite = rock.kind === 'tree' ? treeSprite((rock.tx + rock.ty) & 1) : rockSprite((rock.tx * 3 + rock.ty) & 1)
+        const at = worldToIso(x, y)
+        if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+        if (rock.hitFlash > 0) {
+          ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, rock.hitFlash * 2.4)})`
+          ctx.beginPath()
+          ctx.ellipse(at.x, at.y, 12, 6, 0, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        const full = rock.kind === 'tree' ? TREE_HP : ROCK_HP
+        if (rock.hp < full) bar(ctx, at.x - 12, at.y - 28, 24, rock.hp / full, hpColor(rock.hp / full))
+      },
+    })
   }
 
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     const x = (node.tx + 0.5) * TILE
     const y = (node.ty + 0.5) * TILE
-    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
-    drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
+    if (!onScreen(cam, viewW, viewH, x, y, 40)) continue
+    stamps.push({
+      depth: x + y,
+      paint: () => {
+        const sprite = oreSprite(node.amount > ORE_NODE_AMOUNT * 0.55)
+        const at = worldToIso(x, y)
+        if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+        if (state.selectedOre === node.id) {
+          ctx.strokeStyle = '#f6e7b0'
+          ctx.lineWidth = 1.4
+          ctx.beginPath()
+          ctx.ellipse(at.x, at.y + 2, 16, 8, 0, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+      },
+    })
   }
 
-  if (state.tutorial) drawOreHint(ctx, state)
-
-  const buildings = state.buildings.slice().sort((a, b) => a.ty - b.ty)
-  for (const building of buildings) {
+  for (const building of state.buildings) {
     if (!viewBuildingSeen(state, building)) continue
-    const rect = buildingRect(building)
-    if (rect.x > view.r || rect.y > view.b || rect.x + rect.w < view.l || rect.y + rect.h < view.t) continue
-    drawBuilding(ctx, state, building)
+    const stats = BUILDING_STATS[building.kind]
+    const x = (building.tx + stats.w / 2) * TILE
+    const y = (building.ty + stats.h / 2) * TILE
+    if (!onScreen(cam, viewW, viewH, x, y, 140)) continue
+    stamps.push({
+      depth: (building.tx + stats.w + building.ty + stats.h) * TILE,
+      paint: () => drawBuilding(ctx, state, building),
+    })
   }
-
-  for (const ping of state.pings) drawPing(ctx, ping.x, ping.y, ping.life / ping.max, ping.color)
 
   const selected = new Set(state.selectedUnits)
-  const units = state.units.slice().sort((a, b) => a.y - b.y)
-  for (const unit of units) {
+  for (const unit of state.units) {
     if (!viewUnitSeen(state, unit)) continue
-    if (unit.x < view.l || unit.y < view.t || unit.x > view.r || unit.y > view.b) continue
-    if (selected.has(unit.id)) drawOrderLine(ctx, unit)
-    drawUnit(ctx, state, unit, selected.has(unit.id))
+    if (!onScreen(cam, viewW, viewH, unit.x, unit.y, 64)) continue
+    stamps.push({
+      depth: unit.x + unit.y,
+      paint: () => {
+        if (selected.has(unit.id)) drawOrderLine(ctx, unit)
+        drawUnit(ctx, state, unit, selected.has(unit.id))
+      },
+    })
+  }
+
+  stamps.sort((a, b) => a.depth - b.depth)
+  for (const stamp of stamps) stamp.paint()
+
+  for (const ping of state.pings) {
+    const at = worldToIso(ping.x, ping.y)
+    drawPing(ctx, at.x, at.y, ping.life / ping.max, ping.color)
   }
 
   const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
-    if (shot.x < view.l || shot.y < view.t || shot.x > view.r || shot.y > view.b) continue
+    if (!onScreen(cam, viewW, viewH, shot.x, shot.y, 20)) continue
     if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
+    const at = worldToIso(shot.x, shot.y)
     ctx.fillStyle = teamColor(shot.owner)
     ctx.beginPath()
-    ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
+    ctx.arc(at.x, at.y, shot.radius, 0, Math.PI * 2)
     ctx.fill()
   }
 
   for (const particle of state.particles) {
-    if (particle.x < view.l || particle.y < view.t || particle.x > view.r || particle.y > view.b) continue
+    if (!onScreen(cam, viewW, viewH, particle.x, particle.y, 24)) continue
     if (!viewTileVisible(state, Math.floor(particle.x / TILE), Math.floor(particle.y / TILE))) continue
+    const at = worldToIso(particle.x, particle.y)
     const alpha = Math.max(0, particle.life / particle.max)
     ctx.globalAlpha = alpha
     if (particle.text) {
@@ -163,20 +206,21 @@ export function renderWorld(
       ctx.textAlign = 'center'
       ctx.lineWidth = 3
       ctx.strokeStyle = '#1a1408'
-      ctx.strokeText(particle.text, particle.x, particle.y)
+      ctx.strokeText(particle.text, at.x, at.y)
       ctx.fillStyle = particle.color
-      ctx.fillText(particle.text, particle.x, particle.y)
+      ctx.fillText(particle.text, at.x, at.y)
     } else {
       ctx.fillStyle = particle.color
       ctx.beginPath()
-      ctx.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2)
+      ctx.arc(at.x, at.y, particle.r, 0, Math.PI * 2)
       ctx.fill()
     }
     ctx.globalAlpha = 1
   }
 
-  drawFog(ctx, state, view)
-  if (state.bothCam) drawBothSight(ctx, state, view)
+  drawFog(ctx, state, tiles)
+  if (state.bothCam) drawBothSight(ctx, state, cam, viewW, viewH)
+  if (state.tutorial) drawOreHint(ctx, state)
 
   if (state.placement && overlay.pointer) {
     const stats = BUILDING_STATS[state.placement]
@@ -188,16 +232,18 @@ export function renderWorld(
 
   const rally = state.selectedBuilding != null ? state.buildings.find((b) => b.id === state.selectedBuilding) : undefined
   if (rally && rally.owner === 0 && viewBuildingSeen(state, rally)) {
+    const at = worldToIso(rally.rallyX, rally.rallyY)
     ctx.strokeStyle = 'rgba(159, 216, 255, 0.8)'
     ctx.fillStyle = '#9fd8ff'
+    ctx.lineWidth = 1.4
     ctx.beginPath()
-    ctx.moveTo(rally.rallyX, rally.rallyY)
-    ctx.lineTo(rally.rallyX, rally.rallyY - 14)
+    ctx.moveTo(at.x, at.y)
+    ctx.lineTo(at.x, at.y - 16)
     ctx.stroke()
     ctx.beginPath()
-    ctx.moveTo(rally.rallyX, rally.rallyY - 14)
-    ctx.lineTo(rally.rallyX + 8, rally.rallyY - 10)
-    ctx.lineTo(rally.rallyX, rally.rallyY - 6)
+    ctx.moveTo(at.x, at.y - 16)
+    ctx.lineTo(at.x + 8, at.y - 11)
+    ctx.lineTo(at.x, at.y - 7)
     ctx.fill()
   }
 
@@ -212,12 +258,69 @@ export function renderWorld(
   return { viewW, viewH }
 }
 
+function visibleTiles(
+  cam: Camera,
+  viewW: number,
+  viewH: number,
+  mapW: number,
+  mapH: number,
+): { tx0: number; ty0: number; tx1: number; ty1: number } {
+  const corners = [
+    screenToWorld(cam, -120, -140),
+    screenToWorld(cam, viewW + 120, -140),
+    screenToWorld(cam, -120, viewH + 180),
+    screenToWorld(cam, viewW + 120, viewH + 180),
+  ]
+  let minX = corners[0]?.x ?? 0
+  let maxX = minX
+  let minY = corners[0]?.y ?? 0
+  let maxY = minY
+  for (const corner of corners) {
+    minX = Math.min(minX, corner.x)
+    maxX = Math.max(maxX, corner.x)
+    minY = Math.min(minY, corner.y)
+    maxY = Math.max(maxY, corner.y)
+  }
+  return {
+    tx0: Math.max(0, Math.floor(minX / TILE) - 2),
+    ty0: Math.max(0, Math.floor(minY / TILE) - 2),
+    tx1: Math.min(mapW - 1, Math.ceil(maxX / TILE) + 2),
+    ty1: Math.min(mapH - 1, Math.ceil(maxY / TILE) + 2),
+  }
+}
+
+function onScreen(cam: Camera, viewW: number, viewH: number, wx: number, wy: number, margin: number): boolean {
+  const at = worldToIso(wx, wy)
+  return at.x >= cam.x - margin && at.y >= cam.y - margin && at.x <= cam.x + viewW / cam.zoom + margin && at.y <= cam.y + viewH / cam.zoom + margin
+}
+
+function traceCircle(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
+  const steps = 28
+  ctx.beginPath()
+  for (let i = 0; i <= steps; i++) {
+    const angle = (i / steps) * Math.PI * 2
+    const at = worldToIso(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius)
+    if (i === 0) ctx.moveTo(at.x, at.y)
+    else ctx.lineTo(at.x, at.y)
+  }
+}
+
+function traceFootprint(ctx: CanvasRenderingContext2D, tx: number, ty: number, w: number, h: number): void {
+  const corner = (dx: number, dy: number) => worldToIso((tx + dx) * TILE, (ty + dy) * TILE)
+  const nw = corner(0, 0)
+  const ne = corner(w, 0)
+  const se = corner(w, h)
+  const sw = corner(0, h)
+  ctx.beginPath()
+  ctx.moveTo(nw.x, nw.y)
+  ctx.lineTo(ne.x, ne.y)
+  ctx.lineTo(se.x, se.y)
+  ctx.lineTo(sw.x, sw.y)
+  ctx.closePath()
+}
+
 /** Faint rings so Both cam shows which side is lighting the ground. */
-function drawBothSight(
-  ctx: CanvasRenderingContext2D,
-  state: MatchState,
-  view: { l: number; t: number; r: number; b: number },
-): void {
+function drawBothSight(ctx: CanvasRenderingContext2D, state: MatchState, cam: Camera, viewW: number, viewH: number): void {
   ctx.save()
   ctx.lineWidth = 1.25
   ctx.setLineDash([5, 7])
@@ -240,44 +343,27 @@ function drawBothSight(
     ctx.strokeStyle = teamRgba(owner, 0.28)
     for (const source of sources) {
       if (source.owner !== owner) continue
-      if (source.x + source.radius < view.l || source.x - source.radius > view.r) continue
-      if (source.y + source.radius < view.t || source.y - source.radius > view.b) continue
-      ctx.beginPath()
-      ctx.arc(source.x, source.y, source.radius, 0, Math.PI * 2)
+      if (!onScreen(cam, viewW, viewH, source.x, source.y, source.radius)) continue
+      traceCircle(ctx, source.x, source.y, source.radius)
       ctx.stroke()
     }
   }
   ctx.restore()
 }
 
-function fogSide(state: MatchState, tx: number, ty: number, black: boolean): number {
-  if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) return 0
-  if (viewTileVisible(state, tx, ty)) return 2
-  if (black && viewTileExplored(state, tx, ty)) return 1
-  return 0
-}
-
 function drawFog(
   ctx: CanvasRenderingContext2D,
   state: MatchState,
-  view: { l: number; t: number; r: number; b: number },
+  tiles: { tx0: number; ty0: number; tx1: number; ty1: number },
 ): void {
-  const x0 = Math.max(0, Math.floor(view.l / TILE))
-  const y0 = Math.max(0, Math.floor(view.t / TILE))
-  const x1 = Math.min(state.mapW - 1, Math.floor(view.r / TILE))
-  const y1 = Math.min(state.mapH - 1, Math.floor(view.b / TILE))
-  for (let ty = y0; ty <= y1; ty++) {
-    for (let tx = x0; tx <= x1; tx++) {
+  const solid = fogDiamond(true)
+  const shroud = fogDiamond(false)
+  for (let ty = tiles.ty0; ty <= tiles.ty1; ty++) {
+    for (let tx = tiles.tx0; tx <= tiles.tx1; tx++) {
       if (viewTileVisible(state, tx, ty)) continue
-      const black = !viewTileExplored(state, tx, ty)
-      const stamp = fogSprite(
-        black ? 'black' : 'shroud',
-        fogSide(state, tx, ty - 1, black),
-        fogSide(state, tx + 1, ty, black),
-        fogSide(state, tx, ty + 1, black),
-        fogSide(state, tx - 1, ty, black),
-      )
-      ctx.drawImage(stamp, tx * TILE, ty * TILE)
+      const north = worldToIso(tx * TILE, ty * TILE)
+      const stamp = viewTileExplored(state, tx, ty) ? shroud : solid
+      ctx.drawImage(stamp, north.x - GROUND_ANCHOR.x, north.y - GROUND_ANCHOR.y)
     }
   }
 }
@@ -295,11 +381,12 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
     if (!best || d < best.d) best = { x, y, d }
   }
   if (!best) return
+  const at = worldToIso(best.x, best.y)
   ctx.save()
   ctx.fillStyle = '#f6e7b0'
   ctx.font = '12px Georgia, serif'
   ctx.textAlign = 'center'
-  ctx.fillText('Right-click dumps', best.x, best.y - 34)
+  ctx.fillText('Right-click dumps', at.x, at.y - 28)
   ctx.restore()
 }
 
@@ -312,8 +399,7 @@ function drawKeepSight(ctx: CanvasRenderingContext2D, state: MatchState): void {
   ctx.fillStyle = 'rgba(94, 200, 255, 0.06)'
   ctx.lineWidth = 2
   ctx.setLineDash([8, 6])
-  ctx.beginPath()
-  ctx.arc(center.x, center.y, BUILDING_STATS.keep.sight, 0, Math.PI * 2)
+  traceCircle(ctx, center.x, center.y, BUILDING_STATS.keep.sight)
   ctx.fill()
   ctx.stroke()
   ctx.restore()
@@ -329,208 +415,101 @@ function drawPlacement(
   h: number,
 ): void {
   const open = placementAllowed(state, 0, kind, tx, ty)
+  const label = worldToIso((tx + w / 2) * TILE, ty * TILE)
   ctx.save()
   ctx.globalAlpha = 0.85
+  traceFootprint(ctx, tx, ty, w, h)
   ctx.fillStyle = open ? 'rgba(120, 180, 90, 0.35)' : 'rgba(180, 64, 48, 0.35)'
+  ctx.fill()
   ctx.strokeStyle = open ? '#d7f08a' : '#ff8d7a'
   ctx.lineWidth = 2
-  ctx.fillRect(tx * TILE, ty * TILE, w * TILE, h * TILE)
-  ctx.strokeRect(tx * TILE + 1, ty * TILE + 1, w * TILE - 2, h * TILE - 2)
+  ctx.stroke()
+  ctx.globalAlpha = 1
   ctx.fillStyle = '#f4f1e4'
   ctx.font = '12px "Segoe UI", sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText(BUILDING_STATS[kind].label, (tx + w / 2) * TILE, ty * TILE - 6)
+  ctx.fillText(BUILDING_STATS[kind].label, label.x, label.y - 8)
   ctx.restore()
 }
 
 function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building: Building): void {
   const stats = BUILDING_STATS[building.kind]
-  const x = building.tx * TILE
-  const y = building.ty * TILE
-  const w = stats.w * TILE
-  const h = stats.h * TILE
-  const color = building.ruined ? '#6a645c' : (PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0])
-  const selected = state.selectedBuilding === building.id
+  const color = building.ruined ? '#8a8074' : teamColor(building.owner)
+  const cx = (building.tx + stats.w / 2) * TILE
+  const cy = (building.ty + stats.h / 2) * TILE
+  const at = worldToIso(cx, cy)
   ctx.save()
-  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo' && building.kind !== 'tower') {
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
-    ctx.beginPath()
-    ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
-    ctx.beginPath()
-    ctx.ellipse(x + w * 0.52 + 4, y + h * 0.78, w * 0.3, 5.5, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
   if (!building.complete && !building.ruined) ctx.globalAlpha = 0.45 + building.progress * 0.5
-
-  if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
-  else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
-  else if (building.kind === 'tower') drawTower(ctx, state, building, x, y, color)
-  else drawStorage(ctx, state, building, x, y, color)
-
-  if (!building.ruined && building.hp < stats.hp) {
-    ctx.strokeStyle = 'rgba(40, 24, 18, 0.45)'
-    ctx.beginPath()
-    ctx.moveTo(x + w * 0.3, y + 10)
-    ctx.lineTo(x + w * 0.55, y + h * 0.6)
-    ctx.lineTo(x + w * 0.7, y + h - 8)
-    ctx.stroke()
+  if (building.kind === 'keep') {
+    const open = !building.ruined && building.hatch > 0.28
+    const sprite = keepSprite(color, building.ruined, open)
+    if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+  } else if (building.kind === 'yard') {
+    const producing = building.complete && building.queue[0] != null
+    const frame = Math.floor(state.time * (producing ? 2.4 : 0.7)) % 4
+    const sprite = factorySprite(color, frame)
+    if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+  } else if (building.kind === 'tower') {
+    const origin = buildingCenter(building)
+    let aim = Math.PI / 2
+    if (building.focusId != null && (building.focusKind === 'unit' || building.focusKind === 'building')) {
+      const target = getTarget(state, building.focusId, building.focusKind)
+      if (target) aim = Math.atan2(target.y - origin.y, target.x - origin.x)
+    }
+    const cool = UNIT_STATS.pike.cooldown
+    const flash = building.complete && building.attackCd > cool - 0.18
+    const spin = building.complete ? state.time * 2.2 : 0.4
+    const sprite = pillarSprite(color, pillarAimDir(aim), flash, spin)
+    if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+  } else {
+    const cap = state.supplyCap[building.owner] ?? 0
+    const fill = building.complete ? storageFill(cap) : 0
+    const sprite = storageSprite(color, fill)
+    if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
   }
   ctx.restore()
 
+  const top = worldToIso((building.tx + stats.w / 2) * TILE, building.ty * TILE)
   if (building.ruined) {
-    const repairing = state.units.some(
-      (unit) => unit.order?.type === 'repair' && unit.order.buildingId === building.id && unit.hp > 0,
-    )
+    const repairing = state.units.some((unit) => unit.order?.type === 'repair' && unit.order.buildingId === building.id && unit.hp > 0)
     if (building.progress > 0 || repairing) {
-      bar(ctx, x + 8, y - 8, w - 16, building.progress, '#e6c15a')
+      bar(ctx, top.x - 22, top.y - 16, 44, building.progress, '#e6c15a')
       ctx.fillStyle = '#f4e7bf'
       ctx.font = '10px "Segoe UI", sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText(repairing && building.progress < 1 ? 'Repairing' : 'Paused', x + w / 2, y - 12)
+      ctx.fillText(repairing && building.progress < 1 ? 'Repairing' : 'Paused', top.x, top.y - 20)
     }
   } else if (!building.complete) {
-    bar(ctx, x + 8, y - 8, w - 16, building.progress, '#e6c15a')
+    bar(ctx, top.x - 22, top.y - 16, 44, building.progress, '#e6c15a')
     ctx.fillStyle = '#f4e7bf'
     ctx.font = '10px "Segoe UI", sans-serif'
     ctx.textAlign = 'center'
-    const crew = state.units.some(
-      (unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id && unit.hp > 0,
-    )
-    ctx.fillText(crew ? 'Raising' : 'Paused', x + w / 2, y - 12)
-  } else if (selected || building.hp < stats.hp || building.hitFlash > 0) {
-    bar(ctx, x + 8, y - 7, w - 16, building.hp / stats.hp, hpColor(building.hp / stats.hp))
+    const crew = state.units.some((unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id && unit.hp > 0)
+    ctx.fillText(crew ? 'Raising' : 'Paused', top.x, top.y - 20)
+  } else if (state.selectedBuilding === building.id || building.hp < stats.hp || building.hitFlash > 0) {
+    bar(ctx, top.x - 22, top.y - 16, 44, building.hp / stats.hp, hpColor(building.hp / stats.hp))
   }
 
-  if (selected) {
+  if (state.selectedBuilding === building.id) {
     ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
     ctx.lineWidth = 2
-    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2)
+    traceFootprint(ctx, building.tx, building.ty, stats.w, stats.h)
+    ctx.stroke()
   }
   if (building.hitFlash > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${building.hitFlash * 2.2})`
-    ctx.fillRect(x, y, w, h)
+    ctx.save()
+    ctx.globalAlpha = Math.min(0.45, building.hitFlash * 1.6)
+    traceFootprint(ctx, building.tx, building.ty, stats.w, stats.h)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.restore()
   }
-}
-
-function drawKeep(
-  ctx: CanvasRenderingContext2D,
-  state: MatchState,
-  building: Building,
-  x: number,
-  y: number,
-  color: string,
-): void {
-  const stats = BUILDING_STATS.keep
-  const job = building.queue[0]
-  const progress = job && job.total > 0 ? Math.max(0, Math.min(1, 1 - job.remaining / job.total)) : -1
-  const open = building.hatch > 0.28 ? 1 : Math.max(0, building.hatch / 0.28)
-  ctx.save()
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  drawKeepSprite(ctx, x, y, {
-    color,
-    open: building.ruined ? 0 : open,
-    lit: building.ruined ? 0 : keepWindowCount(state.oreHeld[building.owner] ?? 0),
-    stage: building.ruined ? 4 : keepDamageStage(building.hp, stats.hp),
-    dish: building.dish,
-    progress: building.ruined ? -1 : progress,
-    smoke: state.time,
-  })
-  ctx.restore()
-  ctx.imageSmoothingEnabled = false
-}
-
-function drawYard(
-  ctx: CanvasRenderingContext2D,
-  state: MatchState,
-  building: Building,
-  x: number,
-  y: number,
-  color: string,
-): void {
-  const stats = BUILDING_STATS.yard
-  const job = building.queue[0]
-  const producing = building.complete && job != null
-  const progress = job && job.total > 0 ? Math.max(0, Math.min(1, 1 - job.remaining / job.total)) : -1
-  const open = building.hatch > 0.28 ? 1 : Math.max(0, building.hatch / 0.28)
-  ctx.save()
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  drawFactorySprite(ctx, x, y, {
-    color,
-    owner: building.owner,
-    open,
-    stage: factoryDamageStage(building.hp, stats.hp),
-    progress,
-    kind: producing && job ? job.kind : null,
-    busy: producing && building.hatch < 0.05,
-    time: state.time,
-    built: building.complete ? 1 : building.progress,
-  })
-  ctx.restore()
-  ctx.imageSmoothingEnabled = false
-}
-
-function drawTower(
-  ctx: CanvasRenderingContext2D,
-  state: MatchState,
-  building: Building,
-  x: number,
-  y: number,
-  color: string,
-): void {
-  const stats = BUILDING_STATS.tower
-  const origin = buildingCenter(building)
-  let aim = Math.PI / 2
-  if (building.focusId != null && (building.focusKind === 'unit' || building.focusKind === 'building')) {
-    const target = getTarget(state, building.focusId, building.focusKind)
-    if (target) aim = Math.atan2(target.y - origin.y, target.x - origin.x)
-  }
-  const cool = UNIT_STATS.pike.cooldown
-  const flash = building.complete && building.attackCd > cool - 0.18
-  ctx.save()
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  drawPillarSprite(ctx, x, y, {
-    color,
-    stage: pillarDamageStage(building.hp, stats.hp),
-    spin: building.complete ? state.time * 2.6 : 0.4,
-    aim,
-    flash,
-  })
-  ctx.restore()
-  ctx.imageSmoothingEnabled = false
-}
-
-function drawStorage(
-  ctx: CanvasRenderingContext2D,
-  state: MatchState,
-  building: Building,
-  x: number,
-  y: number,
-  color: string,
-): void {
-  const stats = BUILDING_STATS.silo
-  const cap = state.supplyCap[building.owner] ?? 0
-  const fill = building.complete ? storageFill(cap) : 0
-  ctx.save()
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  drawStorageSprite(ctx, x, y, color, fill, storageDamageStage(building.hp, stats.hp))
-  ctx.restore()
-  ctx.imageSmoothingEnabled = false
 }
 
 function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, selected: boolean): void {
   const stats = UNIT_STATS[unit.kind]
-  const bob =
-    unit.kind === 'drone'
-      ? Math.sin(state.time * 3.1 + unit.id * 0.7) * 1.15
-      : unit.goalX != null
-        ? Math.sin(unit.anim) * 1.1
-        : 0
+  const bob = unit.kind === 'drone' ? Math.sin(state.time * 3.1 + unit.id * 0.7) * 1.15 : unit.goalX != null ? Math.sin(unit.anim) * 1.1 : 0
+  const at = worldToIso(unit.x, unit.y)
 
   if (selected || (state.tutorial && unit.owner === 0 && unit.kind === 'porter')) {
     const pulse = state.tutorial && !selected ? 0.45 + Math.sin(state.time * 4) * 0.2 : 0.9
@@ -538,71 +517,40 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.strokeStyle = selected ? `rgba(244, 241, 196, ${pulse})` : `rgba(230, 193, 90, ${pulse})`
     ctx.lineWidth = selected ? 1.6 : 1.2
     ctx.beginPath()
-    ctx.ellipse(unit.x, unit.y + 3, stats.radius + 5, stats.radius * 0.62, 0, 0, Math.PI * 2)
+    ctx.ellipse(at.x, at.y + 2, stats.radius + 6, (stats.radius + 6) * 0.5, 0, 0, Math.PI * 2)
     ctx.stroke()
     ctx.restore()
   }
 
   ctx.save()
-  ctx.translate(unit.x, unit.y + bob)
+  ctx.translate(at.x, at.y)
+  ctx.fillStyle = unit.kind === 'drone' ? 'rgba(16, 22, 12, 0.28)' : 'rgba(16, 28, 14, 0.32)'
+  ctx.beginPath()
+  const shadowW = unit.kind === 'porter' ? 11 : unit.kind === 'drone' ? 9 : 16
+  ctx.ellipse(2, 3, shadowW, shadowW * 0.42, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.translate(0, bob)
+  if (unit.kind === 'drone') ctx.translate(0, -8)
+
   if (unit.kind === 'porter') {
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
-    ctx.beginPath()
-    ctx.ellipse(2, 8, 12, 4.2, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.drawImage(stalkerSprite(unit), -26, -30)
-    if (unit.hitFlash > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
-      ctx.beginPath()
-      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
+    ctx.drawImage(stalkerSprite(unit), -26, -34)
   } else if (unit.kind === 'pike') {
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
-    ctx.beginPath()
-    ctx.ellipse(1, 5, 16, 5.6, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.drawImage(flasherSprite(unit), -40, -42)
-    if (unit.hitFlash > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
-      ctx.beginPath()
-      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
+    ctx.drawImage(flasherSprite(unit), -FLASHER_OX, -FLASHER_OY)
   } else if (unit.kind === 'howler') {
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.36)'
-    ctx.beginPath()
-    ctx.ellipse(2, 9, 16, 5.2, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.drawImage(gorillaSprite(unit), -36, -38)
-    if (unit.hitFlash > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
-      ctx.beginPath()
-      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
-  } else if (unit.kind === 'drone') {
+    ctx.drawImage(gorillaSprite(unit), -GORILLA_OX, -GORILLA_OY)
+  } else {
     const dir = facingDir(unit.facing)
     const { fx, fy } = facingBasis(dir)
-    const accent = teamColor(unit.owner)
-    ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
-    ctx.beginPath()
-    ctx.ellipse(2, 12, 8.5, 3.1, 0, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.translate(0, -6)
     if (unit.goalX != null) {
       ctx.translate(fx * 1.2, fy * 0.35)
-      ctx.rotate(fx * 0.16)
+      ctx.rotate(fx * 0.12)
     }
     const sway = Math.floor(state.time * 2.4 + unit.id) % 2
     ctx.drawImage(hoverSprite(unit, sway), -28, -30)
-    paintHoverRotors(ctx, dir, state.time * 9, accent)
+    paintHoverRotors(ctx, dir, state.time * 9, teamColor(unit.owner))
     if (unit.scanning) {
       const cam = hoverCameraPoint(dir)
-      ctx.strokeStyle = accent
+      ctx.strokeStyle = teamColor(unit.owner)
       ctx.globalAlpha = 0.5 + Math.sin(state.time * 6) * 0.15
       ctx.lineWidth = 1
       ctx.beginPath()
@@ -610,25 +558,25 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
       ctx.stroke()
       ctx.globalAlpha = 1
     }
-    if (unit.hitFlash > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
-      ctx.beginPath()
-      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
   }
+  if (unit.hitFlash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
+    ctx.beginPath()
+    ctx.arc(0, -8, stats.radius, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
 
   const showHp = selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
-  if (showHp) bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
+  if (showHp) bar(ctx, at.x - 12, at.y - stats.radius - 22, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
 
   if (unit.owner === 0 && unit.kind === 'porter' && !unit.order) {
     ctx.fillStyle = '#f0c857'
     ctx.beginPath()
-    ctx.moveTo(unit.x, unit.y - 16)
-    ctx.lineTo(unit.x + 3.5, unit.y - 12)
-    ctx.lineTo(unit.x, unit.y - 8)
-    ctx.lineTo(unit.x - 3.5, unit.y - 12)
+    ctx.moveTo(at.x, at.y - 26)
+    ctx.lineTo(at.x + 3.5, at.y - 21)
+    ctx.lineTo(at.x, at.y - 16)
+    ctx.lineTo(at.x - 3.5, at.y - 21)
     ctx.fill()
   }
 }
@@ -640,9 +588,16 @@ function drawOrderLine(ctx: CanvasRenderingContext2D, unit: Unit): void {
   ctx.lineWidth = 1
   ctx.setLineDash([3, 4])
   ctx.beginPath()
-  ctx.moveTo(unit.x, unit.y)
-  for (const point of unit.path) ctx.lineTo(point.x, point.y)
-  if (unit.goalX != null && unit.goalY != null) ctx.lineTo(unit.goalX, unit.goalY)
+  const start = worldToIso(unit.x, unit.y)
+  ctx.moveTo(start.x, start.y)
+  for (const point of unit.path) {
+    const at = worldToIso(point.x, point.y)
+    ctx.lineTo(at.x, at.y)
+  }
+  if (unit.goalX != null && unit.goalY != null) {
+    const goal = worldToIso(unit.goalX, unit.goalY)
+    ctx.lineTo(goal.x, goal.y)
+  }
   ctx.stroke()
   ctx.restore()
 }
@@ -672,7 +627,7 @@ function hpColor(ratio: number): string {
   return '#e25b4a'
 }
 
-/** Fit the map inside the minimap element without stretching it. */
+
 export function minimapFrame(
   cssW: number,
   cssH: number,
@@ -792,12 +747,21 @@ export function renderMinimap(
   }
   ctx.strokeStyle = '#f4f1c4'
   ctx.lineWidth = 1
-  ctx.strokeRect(
-    ox + (cam.x / TILE) * sx,
-    oy + (cam.y / TILE) * sy,
-    (viewW / cam.zoom / TILE) * sx,
-    (viewH / cam.zoom / TILE) * sy,
-  )
+  const corners = [
+    screenToWorld(cam, 0, 0),
+    screenToWorld(cam, viewW, 0),
+    screenToWorld(cam, viewW, viewH),
+    screenToWorld(cam, 0, viewH),
+  ]
+  ctx.beginPath()
+  corners.forEach((corner, index) => {
+    const px = ox + (corner.x / TILE) * sx
+    const py = oy + (corner.y / TILE) * sy
+    if (index === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  })
+  ctx.closePath()
+  ctx.stroke()
 }
 
 let groundCanvas: HTMLCanvasElement | null = null

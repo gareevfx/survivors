@@ -7,6 +7,7 @@ import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
+import { centerCamera, screenToWorld, worldToIso, worldToScreen } from './game/camera'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
 import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
@@ -2023,7 +2024,33 @@ siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
+isoViewRoundTripsAndBoxSelects()
 console.log('smoke ok')
+
+function isoViewRoundTripsAndBoxSelects(): void {
+  const cam = { x: 0, y: 0, zoom: 1 }
+  const mapW = 80 * TILE
+  const mapH = 40 * TILE
+  centerCamera(cam, 400, 240, 800, 600, mapW, mapH)
+  const mid = screenToWorld(cam, 400, 300)
+  assert(Math.hypot(mid.x - 400, mid.y - 240) < 0.6, `iso center drifted (${mid.x.toFixed(2)}, ${mid.y.toFixed(2)})`)
+  const near = worldToScreen(cam, 420, 250)
+  const far = worldToScreen(cam, 1400, 900)
+  const box = { x: near.x - 24, y: near.y - 24, w: 48, h: 48 }
+  const inside = (point: { x: number; y: number }) =>
+    point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h
+  assert(inside(near), 'a nearby unit missed the screen selection box')
+  assert(!inside(far), 'a far unit fell inside the screen selection box')
+  const back = screenToWorld(cam, near.x, near.y)
+  assert(Math.hypot(back.x - 420, back.y - 250) < 0.6, 'an iso point did not round-trip')
+  const before = screenToWorld(cam, 120, 90)
+  cam.zoom = 1.4
+  const iso = worldToIso(before.x, before.y)
+  cam.x = iso.x - 120 / cam.zoom
+  cam.y = iso.y - 90 / cam.zoom
+  const after = screenToWorld(cam, 120, 90)
+  assert(Math.hypot(after.x - before.x, after.y - before.y) < 0.6, 'zoom did not keep the cursor on the same ground')
+}
 
 function captureHarvestAndPassages(): void {
   assert(TREE_HP === 14 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)

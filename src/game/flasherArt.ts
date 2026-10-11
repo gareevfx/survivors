@@ -7,9 +7,13 @@ import { PLAYER_COLOR, UNIT_STATS, type Unit } from './types'
  * facing, owner, walk frame, and muzzle flash. The twin guns stay mounted.
  */
 
-const SIZE = 80
-const OX = 40
-const OY = 42
+const SIZE = 96
+const OX = 48
+const OY = 68
+/** Ground contact inside the sprite. The body sits above this point. */
+export const FLASHER_OX = OX
+export const FLASHER_OY = OY
+const BODY = 13
 
 const INK = '#2c3238'
 const HULL = '#f4f1e8'
@@ -82,8 +86,8 @@ export function flasherPortraitUrl(owner: number): string {
   canvas.height = 40
   const ctx = canvas.getContext('2d')
   if (!ctx) return ''
-  ctx.translate(20, 18)
-  ctx.scale(0.8, 0.8)
+  ctx.translate(20, 28)
+  ctx.scale(0.62, 0.62)
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
   paintFlasher(ctx, 1, 0, false, false, teamColor(owner))
@@ -141,7 +145,7 @@ function paintFlasher(
 ): void {
   const basis = facingBasis(dir)
   const { ang, fx, fy } = basis
-  const at = (forward: number, side: number, lift = 0): Pt => ({
+  const at = (forward: number, side: number, lift = BODY): Pt => ({
     x: basis.fx * forward + basis.sx * side,
     y: basis.fy * forward + basis.sy * side - lift,
   })
@@ -183,12 +187,12 @@ function poseLeg(
   const footF = leg.footF + reachF * along
   const footS = leg.footS + reachS * along
   return {
-    hip: at(leg.hipF, leg.hipS),
-    knee: at(leg.kneeF + reachF * along * 0.5, leg.kneeS + reachS * along * 0.5, lift),
+    hip: at(leg.hipF, leg.hipS, 10),
+    knee: at(leg.kneeF + reachF * along * 0.5, leg.kneeS + reachS * along * 0.5, 6 + lift),
     foot: at(footF, footS, lift * 0.45),
     side: leg.hipS,
     outward: Math.sign(leg.hipS) || 1,
-    depth: at(footF, footS).y,
+    depth: at(footF, footS, 0).y,
   }
 }
 
