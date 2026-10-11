@@ -1,6 +1,7 @@
+import { hash2 } from './rng'
+import { siloGateOffset, siloPhotoPortrait, siloPhotoRuinPortrait, siloPhotoSprite } from './siloImage'
 import { facingDir } from './stalkerArt'
 import { PLAYER_COLOR } from './types'
-import { hash2 } from './rng'
 
 /**
  * Isometric scenery and buildings. Yellow trim in the references is the team color.
@@ -15,7 +16,6 @@ const STEEL_DEEP = '#262d34'
 const LIGHT = '#e4e8ee'
 const CONCRETE = '#c8ccd2'
 const HOLO = '#3ad4ef'
-const HOLO_DEEP = '#146880'
 
 type Ctx = CanvasRenderingContext2D
 
@@ -166,153 +166,13 @@ export function drawAnchored(ctx: Ctx, sprite: Anchor, x: number, y: number): vo
   ctx.drawImage(sprite.canvas, x - sprite.ax, y - sprite.ay)
 }
 
-export function keepSprite(color: string, ruined: boolean, open = false): Anchor | null {
-  const key = `keep:${color}:${ruined ? 1 : 0}:${open ? 1 : 0}`
-  return cached(key, () => {
-    const made = spriteCanvas(240, 210, 132)
-    if (!made) return null
-    paintKeep(made.ctx, color, ruined, open)
-    return { canvas: made.canvas, ax: made.ax, ay: made.ay }
-  })
+export function keepSprite(color: string, ruined: boolean): Anchor | null {
+  return siloPhotoSprite(color, ruined)
 }
 
-function paintKeep(ctx: Ctx, accent: string, ruined: boolean, open: boolean): void {
-  ctx.save()
-  ctx.translate(8, 12)
-  footprint(ctx, 3.15, 3.15)
-  ctx.fillStyle = 'rgba(16, 28, 14, 0.28)'
-  ctx.fill()
-  ctx.restore()
-  footprint(ctx, 3, 3)
-  const pad = ctx.createLinearGradient(-40, -20, 40, 40)
-  pad.addColorStop(0, ruined ? '#6a645c' : LIGHT)
-  pad.addColorStop(0.5, ruined ? '#4a463f' : STEEL)
-  pad.addColorStop(1, ruined ? '#2e2b28' : STEEL_DARK)
-  ctx.fillStyle = pad
-  ctx.fill()
-  ctx.strokeStyle = accent
-  ctx.lineWidth = 3
-  ctx.stroke()
-  ctx.strokeStyle = INK
-  ctx.lineWidth = 1.2
-  ctx.stroke()
+export { siloGateOffset }
 
-  // Walled ring.
-  footprint(ctx, 2.15, 2.15)
-  ctx.fillStyle = ruined ? '#3a3834' : STEEL_DEEP
-  ctx.fill()
-  ctx.strokeStyle = accent
-  ctx.lineWidth = 2
-  ctx.stroke()
 
-  // Tower body.
-  ctx.fillStyle = ruined ? '#5c584f' : LIGHT
-  roundTower(ctx, 0, 6, 34, 58)
-  ctx.fillStyle = ruined ? '#3e3c38' : STEEL_MID
-  ctx.beginPath()
-  ctx.moveTo(18, 6)
-  ctx.lineTo(30, -2)
-  ctx.lineTo(30, -48)
-  ctx.lineTo(18, -40)
-  ctx.closePath()
-  ctx.fill()
-
-  if (!ruined) {
-    ctx.fillStyle = HOLO
-    ctx.globalAlpha = 0.85
-    ctx.fillRect(-16, -28, 10, 22)
-    ctx.fillRect(2, -26, 12, 18)
-    ctx.globalAlpha = 0.45
-    ctx.fillStyle = '#d8fbff'
-    ctx.fillRect(-14, -26, 3, 16)
-    ctx.globalAlpha = 1
-    // Hex door on the south face. It drops when a Stalker is leaving.
-    const doorY = open ? 6 : -2
-    ctx.fillStyle = STEEL_DEEP
-    ctx.fillRect(-8, doorY, 16, open ? 10 : 16)
-    ctx.strokeStyle = HOLO
-    ctx.lineWidth = 1.2
-    ctx.strokeRect(-8, doorY, 16, open ? 10 : 16)
-    ctx.beginPath()
-    for (let row = 0; row < (open ? 2 : 3); row++) {
-      for (let col = 0; col < 3; col++) {
-        ctx.moveTo(-5 + col * 4, doorY + 4 + row * 4)
-        ctx.lineTo(-3 + col * 4, doorY + 6 + row * 4)
-      }
-    }
-    ctx.stroke()
-  } else {
-    ctx.fillStyle = '#2a2824'
-    ctx.fillRect(-10, 0, 18, 12)
-    ctx.strokeStyle = '#6a5040'
-    ctx.beginPath()
-    ctx.moveTo(-18, -10)
-    ctx.lineTo(8, -36)
-    ctx.lineTo(16, -6)
-    ctx.stroke()
-  }
-
-  // Dome.
-  ctx.beginPath()
-  ctx.ellipse(0, -48, ruined ? 14 : 18, ruined ? 8 : 12, 0, 0, Math.PI * 2)
-  ctx.fillStyle = ruined ? '#3a3a38' : HOLO_DEEP
-  ctx.fill()
-  ctx.strokeStyle = ruined ? '#5c5854' : HOLO
-  ctx.lineWidth = 1.2
-  ctx.stroke()
-  if (!ruined) {
-    ctx.strokeStyle = 'rgba(186, 236, 255, 0.8)'
-    ctx.beginPath()
-    ctx.moveTo(-12, -48)
-    ctx.lineTo(12, -48)
-    ctx.moveTo(0, -58)
-    ctx.lineTo(0, -38)
-    ctx.moveTo(-8, -54)
-    ctx.lineTo(8, -42)
-    ctx.moveTo(8, -54)
-    ctx.lineTo(-8, -42)
-    ctx.stroke()
-  }
-
-  // Team band and small guns.
-  ctx.fillStyle = accent
-  ctx.fillRect(-20, -8, 40, 3)
-  for (const side of [-1, 1]) {
-    ctx.fillStyle = STEEL_DARK
-    ctx.fillRect(side * 28, -6, 10, 6)
-    ctx.fillStyle = accent
-    ctx.fillRect(side * 28, -6, 10, 1.6)
-  }
-
-  // Dish.
-  if (!ruined) {
-    ctx.strokeStyle = STEEL_DARK
-    ctx.lineWidth = 1.4
-    ctx.beginPath()
-    ctx.moveTo(16, -36)
-    ctx.lineTo(26, -52)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.ellipse(28, -54, 7, 3.2, -0.6, 0, Math.PI * 2)
-    ctx.fillStyle = LIGHT
-    ctx.fill()
-    ctx.strokeStyle = accent
-    ctx.stroke()
-  }
-}
-
-function roundTower(ctx: Ctx, x: number, y: number, hw: number, height: number): void {
-  ctx.beginPath()
-  ctx.moveTo(x - hw, y)
-  ctx.lineTo(x - hw, y - height)
-  ctx.quadraticCurveTo(x, y - height - 10, x + hw, y - height)
-  ctx.lineTo(x + hw, y)
-  ctx.closePath()
-  ctx.fill()
-  ctx.strokeStyle = INK
-  ctx.lineWidth = 1.1
-  ctx.stroke()
-}
 
 export function factorySprite(color: string, frame: number): Anchor | null {
   const key = `yard:${color}:${frame}`
@@ -677,12 +537,11 @@ function portraitOf(key: string, paint: (ctx: Ctx) => void): string {
 }
 
 export function isoKeepPortraitUrl(owner: number): string {
-  const color = PLAYER_COLOR[owner] ?? '#5ec8ff'
-  return portraitOf(`keep-icon:${color}`, (ctx) => paintKeep(ctx, color, false, false))
+  return siloPhotoPortrait(owner)
 }
 
 export function isoRuinedPortraitUrl(): string {
-  return portraitOf('keep-ruin', (ctx) => paintKeep(ctx, '#8a8070', true, false))
+  return siloPhotoRuinPortrait()
 }
 
 export function isoFactoryPortraitUrl(owner: number): string {

@@ -11,6 +11,7 @@ import {
   groundSprite,
   keepSprite,
   oreSprite,
+  siloGateOffset,
   pillarAimDir,
   pillarSprite,
   rockSprite,
@@ -441,9 +442,29 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   ctx.save()
   if (!building.complete && !building.ruined) ctx.globalAlpha = 0.45 + building.progress * 0.5
   if (building.kind === 'keep') {
-    const open = !building.ruined && building.hatch > 0.28
-    const sprite = keepSprite(color, building.ruined, open)
+    ctx.save()
+    ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
+    ctx.beginPath()
+    ctx.ellipse(at.x + 10, at.y + 16, 86, 30, -0.2, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    const sprite = keepSprite(color, building.ruined)
     if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
+    if (!building.ruined && building.hatch > 0.02) {
+      const gate = siloGateOffset()
+      const glow = Math.min(1, building.hatch / 0.7)
+      ctx.save()
+      ctx.globalAlpha = (0.35 + 0.25 * Math.sin(state.time * 9)) * glow
+      ctx.fillStyle = '#d8fbff'
+      ctx.beginPath()
+      ctx.ellipse(at.x + gate.x, at.y + gate.y, 12, 18, 0.05, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 0.45 * glow
+      ctx.strokeStyle = '#3ad4ef'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.restore()
+    }
   } else if (building.kind === 'yard') {
     const producing = building.complete && building.queue[0] != null
     const frame = Math.floor(state.time * (producing ? 2.4 : 0.7)) % 4
