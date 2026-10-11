@@ -1,6 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
-import { siloRingInsideDiamond } from './game/siloImage'
+import { siloCoversDiamond } from './game/siloImage'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
@@ -1408,7 +1408,7 @@ function clearFogCommandRevealsTheMap(): void {
 }
 
 function footprintGridCommand(): void {
-  assert(siloRingInsideDiamond(), 'the Silo ring does not sit inside the 3x3 diamond')
+  assert(siloCoversDiamond(), 'the Silo photo is not scaled evenly onto the 3x3 diamond')
   const state = createMatch(2)
   assert(!state.showGrid, 'the footprint grid starts on')
   assert(!runCommand(state, 'grid'), 'a partial grid line was accepted')

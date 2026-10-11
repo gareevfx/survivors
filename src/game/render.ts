@@ -449,59 +449,6 @@ function drawPlacement(
   ctx.restore()
 }
 
-/** Nine raised concrete diamonds under the Silo. The sprite and the dashed grid sit on this same 3×3. */
-function drawSiloFoundation(ctx: CanvasRenderingContext2D, tx: number, ty: number): void {
-  const thick = 4
-  const corner = (i: number, j: number) => worldToIso((tx + i) * TILE, (ty + j) * TILE)
-  for (let j = 0; j < 3; j++) {
-    for (let i = 0; i < 3; i++) {
-      const e = corner(i + 1, j)
-      const s = corner(i + 1, j + 1)
-      const w = corner(i, j + 1)
-      const even = (i + j) % 2 === 0
-      ctx.beginPath()
-      ctx.moveTo(w.x, w.y)
-      ctx.lineTo(s.x, s.y)
-      ctx.lineTo(s.x, s.y + thick)
-      ctx.lineTo(w.x, w.y + thick)
-      ctx.closePath()
-      ctx.fillStyle = even ? '#4a5246' : '#3f473c'
-      ctx.fill()
-      ctx.beginPath()
-      ctx.moveTo(e.x, e.y)
-      ctx.lineTo(s.x, s.y)
-      ctx.lineTo(s.x, s.y + thick)
-      ctx.lineTo(e.x, e.y + thick)
-      ctx.closePath()
-      ctx.fillStyle = even ? '#6e7668' : '#626a5c'
-      ctx.fill()
-    }
-  }
-  for (let j = 0; j < 3; j++) {
-    for (let i = 0; i < 3; i++) {
-      const n = corner(i, j)
-      const e = corner(i + 1, j)
-      const s = corner(i + 1, j + 1)
-      const w = corner(i, j + 1)
-      const even = (i + j) % 2 === 0
-      const grad = ctx.createLinearGradient(n.x, n.y, s.x, s.y)
-      grad.addColorStop(0, even ? '#d4d8ca' : '#c6cbbd')
-      grad.addColorStop(1, even ? '#8e9586' : '#808876')
-      ctx.beginPath()
-      ctx.moveTo(n.x, n.y)
-      ctx.lineTo(e.x, e.y)
-      ctx.lineTo(s.x, s.y)
-      ctx.lineTo(w.x, w.y)
-      ctx.closePath()
-      ctx.fillStyle = grad
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(36, 44, 32, 0.62)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-    }
-  }
-}
-
 function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building: Building): void {
   const stats = BUILDING_STATS[building.kind]
   const color = building.ruined ? '#8a8074' : teamColor(building.owner)
@@ -512,12 +459,11 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   if (!building.complete && !building.ruined) ctx.globalAlpha = 0.45 + building.progress * 0.5
   if (building.kind === 'keep') {
     ctx.save()
-    ctx.fillStyle = 'rgba(12, 22, 10, 0.3)'
+    ctx.fillStyle = 'rgba(12, 22, 10, 0.34)'
     ctx.beginPath()
-    ctx.ellipse(at.x, at.y + 16, 86, 20, 0, 0, Math.PI * 2)
+    ctx.ellipse(at.x, at.y + 30, 78, 18, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
-    drawSiloFoundation(ctx, building.tx, building.ty)
     const sprite = keepSprite(color, building.ruined)
     if (sprite) drawAnchored(ctx, sprite, at.x, at.y)
     if (!building.ruined && building.hatch > 0.02) {

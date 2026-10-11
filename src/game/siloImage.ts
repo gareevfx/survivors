@@ -1,40 +1,21 @@
-import { PLAYER_COLOR } from './types'
+import { PLAYER_COLOR, TILE } from './types'
 
 /**
- * The Silo sprite is the white-background render, keyed and cropped.
- * An affine maps the ring's left and right corners onto the 3×3 diamond's
- * horizontal axis and the front lip onto the bottom center line, then scales
- * about the footprint center until the whole base sits inside the diamond.
- * The octagon's side edges bow outside the triangle of those three corners,
- * so the corners land on the axis short of the diamond tips. Dome and
- * antennas may sit above the ring. Orange trim is hue-mapped. Cyan glass
- * is left alone. The foundation and shadow are drawn by the renderer.
+ * The Silo sprite is the keyed photograph, drawn as-is.
+ * It is scaled uniformly so its width matches the 3×3 footprint diamond,
+ * and the bottom center of the picture sits on the diamond's front corner.
+ * Orange trim is hue-mapped to the team color. Cyan glass is left alone.
+ * The drop shadow is drawn by the renderer, not baked into the photo.
  */
 
 const SRC = '/assets/silo.png'
-/** Footprint center inside the fitted canvas. */
-const ANCHOR_X = 58
-const ANCHOR_Y = 25
-const FIT_W = 116
-const FIT_H = 56
-/**
- * x' = a x + b y + c, y' = d x + e y + f, origin at the footprint center.
- * Ring corners on the 664×670 keyed sprite: left (2, 294.5), right (658, 292.5),
- * front lip (334, 667). Pinned to (±96, 0) and (0, 48), then scaled by 0.56833
- * so the base's widest skirt stays inside the diamond.
- */
-const FIT_A = 0.1663353535
-const FIT_B = -0.0017813692
-const FIT_C = -54.3678347924
-const FIT_D = 0.0002226712
-const FIT_E = 0.0730361392
-const FIT_F = -21.5095883277
-/** Hex gate on the unfitted sprite. */
-const GATE_SRC = { x: 321, y: 474 }
-/** Solid ring corners on the keyed sprite. */
-const RING_LEFT = { x: 2, y: 294.5 }
-const RING_RIGHT = { x: 658, y: 292.5 }
-const RING_FRONT = { x: 334, y: 667 }
+/** Iso width of the 3×3 diamond: three cells, each two tiles wide on screen. */
+const DIAMOND_W = 3 * TILE * 2
+/** Front corner of that diamond, below the footprint center. */
+const FRONT_DROP = (3 * TILE) / 2
+/** Hex gate on the front face, as a fraction of the keyed photo. */
+const GATE_X_FRAC = 0.492
+const GATE_Y_FRAC = 0.685
 
 type Anchor = { canvas: HTMLCanvasElement; ax: number; ay: number }
 
@@ -63,31 +44,36 @@ export function siloImageReady(): boolean {
   return ready
 }
 
-function fitPoint(x: number, y: number): { x: number; y: number } {
-  return { x: FIT_A * x + FIT_B * y + FIT_C, y: FIT_D * x + FIT_E * y + FIT_F }
+/** Uniform size for a source photo: diamond width, original aspect. */
+export function siloPlacement(srcW: number, srcH: number): { width: number; height: number; ax: number; ay: number } {
+  const width = DIAMOND_W
+  const height = Math.max(1, Math.round(srcH * (width / srcW)))
+  return { width, height, ax: width / 2, ay: height - FRONT_DROP }
 }
 
 /** Gate position relative to the footprint center, in sprite pixels. */
 export function siloGateOffset(): { x: number; y: number } {
-  return fitPoint(GATE_SRC.x, GATE_SRC.y)
+  const srcW = photo?.width || 664
+  const srcH = photo?.height || 670
+  const place = siloPlacement(srcW, srcH)
+  return { x: place.width * GATE_X_FRAC - place.ax, y: place.height * GATE_Y_FRAC - place.ay }
 }
 
-/** True when the fitted ring stays inside the 3×3 diamond, level at the sides. */
-export function siloRingInsideDiamond(): boolean {
-  const left = fitPoint(RING_LEFT.x, RING_LEFT.y)
-  const right = fitPoint(RING_RIGHT.x, RING_RIGHT.y)
-  const bottom = fitPoint(RING_FRONT.x, RING_FRONT.y)
-  const inside = (point: { x: number; y: number }) => Math.abs(point.x) / 96 + Math.abs(point.y) / 48 <= 1
+/** True when the photo is scaled evenly to the 3×3 diamond and sits on its front corner. */
+export function siloCoversDiamond(): boolean {
+  const square = siloPlacement(1000, 1000)
+  const tall = siloPlacement(500, 800)
+  const onFront = (place: { height: number; ay: number }) => Math.abs(place.height - place.ay - FRONT_DROP) < 0.6
   return (
-    Math.abs(left.y) < 0.6 &&
-    Math.abs(right.y) < 0.6 &&
-    Math.abs(bottom.x) < 0.6 &&
-    left.x < -50 &&
-    right.x > 50 &&
-    bottom.y > 24 &&
-    inside(left) &&
-    inside(right) &&
-    inside(bottom)
+    square.width === DIAMOND_W &&
+    tall.width === DIAMOND_W &&
+    square.width === 3 * TILE * 2 &&
+    Math.abs(square.height - square.width) <= 1 &&
+    Math.abs(tall.height / tall.width - 800 / 500) < 0.02 &&
+    Math.abs(square.ax - square.width / 2) < 0.5 &&
+    Math.abs(tall.ax - tall.width / 2) < 0.5 &&
+    onFront(square) &&
+    onFront(tall)
   )
 }
 
@@ -139,40 +125,39 @@ function portraitUrl(sprite: HTMLCanvasElement, backdrop: string): string {
   return canvas.toDataURL()
 }
 
-function fittedCanvas(image: HTMLImageElement): HTMLCanvasElement {
+function placedCanvas(image: HTMLImageElement): { canvas: HTMLCanvasElement; ax: number; ay: number } {
+  const place = siloPlacement(image.width, image.height)
   const canvas = document.createElement('canvas')
-  canvas.width = FIT_W
-  canvas.height = FIT_H
+  canvas.width = place.width
+  canvas.height = place.height
   const ctx = canvas.getContext('2d')
-  if (!ctx) return canvas
+  if (!ctx) return { canvas, ax: place.ax, ay: place.ay }
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.setTransform(FIT_A, FIT_D, FIT_B, FIT_E, ANCHOR_X + FIT_C, ANCHOR_Y + FIT_F)
-  ctx.drawImage(image, 0, 0)
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  return canvas
+  ctx.drawImage(image, 0, 0, place.width, place.height)
+  return { canvas, ax: place.ax, ay: place.ay }
 }
 
 function tintSprite(image: HTMLImageElement, color: string): Anchor {
-  const canvas = fittedCanvas(image)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
-  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const placed = placedCanvas(image)
+  const ctx = placed.canvas.getContext('2d')
+  if (!ctx) return placed
+  const frame = ctx.getImageData(0, 0, placed.canvas.width, placed.canvas.height)
   recolorTrim(frame.data, color)
   ctx.putImageData(frame, 0, 0)
-  return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
+  return placed
 }
 
 function ruinSprite(image: HTMLImageElement): Anchor {
   if (ruin) return ruin
-  const canvas = fittedCanvas(image)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
-  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  scorch(frame.data, canvas.width, canvas.height)
+  const placed = placedCanvas(image)
+  const ctx = placed.canvas.getContext('2d')
+  if (!ctx) return placed
+  const frame = ctx.getImageData(0, 0, placed.canvas.width, placed.canvas.height)
+  scorch(frame.data, placed.canvas.width, placed.canvas.height)
   ctx.putImageData(frame, 0, 0)
-  paintWreck(ctx, canvas.width, canvas.height)
-  ruin = { canvas, ax: ANCHOR_X, ay: ANCHOR_Y }
+  paintWreck(ctx, placed.canvas.width, placed.canvas.height)
+  ruin = placed
   return ruin
 }
 
@@ -228,7 +213,7 @@ function paintWreck(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.strokeStyle = 'rgba(18, 14, 12, 0.9)'
-  const mark = Math.max(0.85, width / 140)
+  const mark = width / 195
   ctx.lineWidth = 1.4 * mark
   const cracks = [
     [0.42, 0.18, 0.48, 0.28, 0.4, 0.36],
