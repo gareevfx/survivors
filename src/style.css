@@ -50,7 +50,6 @@ button, canvas { font: inherit; }
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-right: auto;
 }
 
 .brand strong {
@@ -67,6 +66,10 @@ button, canvas { font: inherit; }
   gap: 8px;
   color: var(--muted);
   font-size: 13px;
+}
+
+#topbar .brand + .readout {
+  margin-left: auto;
 }
 
 .readout b {
@@ -104,7 +107,6 @@ button, canvas { font: inherit; }
 
 .sides {
   display: flex;
-  flex: 1;
   flex-wrap: wrap;
   gap: 4px 10px;
   align-items: center;
