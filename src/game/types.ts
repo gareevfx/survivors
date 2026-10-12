@@ -19,8 +19,8 @@ export const ORE_NODE_AMOUNT = 420
 export const MINERS_PER_DEPOSIT = 3
 /** Workers chip gray rock when ordered. Bikes and tanks cannot damage it. */
 export const ROCK_HP = 28
-/** Trees block like rock and take half as many hits. */
-export const TREE_HP = ROCK_HP / 2
+/** Trees block like rock. Each starts with this many hit points. */
+export const TREE_HP = 6
 export const STARTING_ORE = 120
 /** Hard ceiling on Cells. Finished buildings still add their supply (Silo 12, Storage 8); the sum is clamped to this. */
 export const SUPPLY_MAX = 65
