@@ -272,13 +272,12 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         armed: hovers.every((unit) => unit.scanning),
         run: () => toggleScanner(state, hovers.map((unit) => unit.id)),
       })
-    }
-    if (hovers.length >= 10) {
+      const gridReady = hovers.length >= 10
       cmds.push({
         id: 'grid',
         label: 'Grid',
-        title: 'Fly to an even grid covering the map, then stay there',
-        disabled: false,
+        title: gridReady ? 'Fly to an even grid covering the map, then stay there' : 'Needs 10 Hovers selected',
+        disabled: !gridReady,
         run: () => {
           commandHoverGrid(state, state.selectedUnits)
           state.moveArmed = false
