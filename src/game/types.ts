@@ -184,7 +184,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight.',
+    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars.',
     w: 1,
     h: 1,
     hp: 160,

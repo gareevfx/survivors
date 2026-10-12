@@ -8,7 +8,7 @@ import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
 import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
 import { step } from './game/sim'
-import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
+import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
 import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
@@ -2202,6 +2202,7 @@ eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
+pillarsLeaveTwoEmptyCells()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
@@ -3327,6 +3328,48 @@ function clearPad(state: MatchState, tx0: number, ty0: number, tx1: number, ty1:
 }
 
 /** Tower range is its own sight, shared by both sides. It holds one target and will not fire through rock, trees, or fog. */
+function pillarsLeaveTwoEmptyCells(): void {
+  const state = createMatch(3)
+  state.oreHeld[0] = 2000
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'missing a Silo for Pillar spacing')
+  const tx = keep.tx
+  const span = 6
+  let ty = keep.ty + BUILDING_STATS.keep.h + 1
+  if (ty + span >= state.mapH) ty = keep.ty - span
+  assert(ty >= 1 && tx + 4 < state.mapW, 'the Silo sits too close to the map edge for the spacing pad')
+  clearPad(state, tx - 1, ty - 1, tx + 6, ty + span)
+  rebuildBlocked(state)
+  assert(PILLAR_GAP === 2, 'Pillar spacing is not two empty cells')
+  for (const [x, y] of [
+    [tx, ty],
+    [tx + 1, ty],
+    [tx + 2, ty],
+    [tx + 3, ty],
+    [tx + 2, ty + 2],
+    [tx, ty + 1],
+    [tx + 1, ty + 1],
+  ] as const) {
+    assert(canPlace(state, 'tower', x, y), `spacing pad is blocked at ${x},${y}`)
+    assert(placementAllowed(state, 0, 'tower', x, y), `spacing pad left Silo sight at ${x},${y}`)
+  }
+  const first = tryPlace(state, 0, 'tower', tx, ty, [])
+  assert(first === null, first ?? 'the first Pillar was refused')
+  const touching = tryPlace(state, 0, 'tower', tx + 1, ty, [])
+  assert(touching === 'Leave two empty cells between Pillars', touching ?? 'a touching Pillar was accepted')
+  const one = tryPlace(state, 0, 'tower', tx + 2, ty, [])
+  assert(one === 'Leave two empty cells between Pillars', one ?? 'one empty cell was enough')
+  assert(!placementAllowed(state, 0, 'tower', tx + 2, ty + 2), 'one empty cell on the diagonal was allowed')
+  assert(placementAllowed(state, 0, 'tower', tx + 3, ty), 'two empty cells were refused in the preview')
+  const second = tryPlace(state, 0, 'tower', tx + 3, ty, [])
+  assert(second === null, second ?? 'two empty cells were refused')
+  assert(placementAllowed(state, 0, 'silo', tx, ty + 1), 'a Storage was held to the Pillar gap')
+  assert(
+    BUILDING_STATS.tower.blurb.includes('Leave two empty cells between Pillars'),
+    'the Pillar tooltip omits the gap',
+  )
+}
+
 function towerFiresOutToItsSight(): void {
   const state = createMatch(8)
   const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
