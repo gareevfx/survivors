@@ -344,7 +344,7 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   if (!afford) title = `Need ${stats.cost} dumps`
   else if (!room) title = 'Cells cap reached — raise a Storage'
   const cells = stats.supply === 1 ? '1 cell' : `${stats.supply} cells`
-  const detail = stats.supply === 0 ? `${stats.cost} dumps · no cells` : `${stats.cost} dumps · ${cells}`
+  const detail = stats.supply === 0 ? `${stats.cost} dumps` : `${stats.cost} dumps · ${cells}`
   return {
     id: `train-${kind}`,
     label: stats.label,
