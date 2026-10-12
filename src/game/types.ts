@@ -31,7 +31,7 @@ export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
 /** A worker that has not moved on an order for this long is sent to the next job. */
 export const STUCK_REDIRECT_SECONDS = 4
-/** A Stalker dies after this many seconds of match time. Other units do not expire. */
+/** A Stalker's hit points drain to 0 over this many seconds. Other units do not expire. */
 export const STALKER_LIFESPAN = 5 * 60
 
 export type PlayerId = number
@@ -264,7 +264,7 @@ export interface Unit {
   repathIn: number
   /** Player Hover flying itself across black fog, then the oldest sightings. */
   scanning: boolean
-  /** Seconds this unit has been in the match. A Stalker dies at STALKER_LIFESPAN. */
+  /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
   age: number
 }
 

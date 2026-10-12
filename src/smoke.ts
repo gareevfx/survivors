@@ -9,7 +9,7 @@ import { keepEntrance } from './game/siloArt'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -31,6 +31,13 @@ import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+/** True when a Stalker's hit points match the five-minute drain and nothing else. */
+function stalkerUntouched(unit: { hp: number; age: number } | null | undefined): boolean {
+  if (!unit) return false
+  const expected = UNIT_STATS.porter.hp * (1 - Math.min(unit.age, STALKER_LIFESPAN) / STALKER_LIFESPAN)
+  return Math.abs(unit.hp - expected) < 1e-4
 }
 
 /** Hit points are numbers, so 8/3 is stored. Subtracting it from a whole value can be off by one bit. */
@@ -1419,7 +1426,6 @@ function godModeSavesNorthmark(): void {
   const sieger = makeUnit(state, 1, 'howler', 13.5 * TILE, 12.5 * TILE)
   assert(runCommand(state, 'God Mode'), 'God Mode was rejected')
   assert(state.godMode, 'God Mode did not turn on')
-  const workerHp = worker.hp
   const homeHp = home.hp
   const foeHp = foe.hp
   commandAttack(state, [foe.id], worker.id, 'unit')
@@ -1429,7 +1435,7 @@ function godModeSavesNorthmark(): void {
   const workerNow = unitById(state, worker.id)
   const homeNow = state.buildings.find((building) => building.id === home.id)
   const foeNow = unitById(state, foe.id)
-  assert(workerNow && workerNow.hp === workerHp, 'a Northmark worker took damage in God Mode')
+  assert(workerNow && stalkerUntouched(workerNow), 'a Northmark worker took damage in God Mode')
   assert(homeNow && homeNow.hp === homeHp, 'a Northmark building took damage in God Mode')
   assert(!foeNow || foeNow.hp < foeHp, 'God Mode also protected Dunmarch')
   const fresh = createMatch(12)
@@ -2042,7 +2048,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(open, [pike.id], stalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(open, 1 / 60)
   const taken = unitById(open, stalker.id)
-  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
+  assert(taken?.owner === 0 && stalkerUntouched(taken), `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
   assert(open.toasts.some((toast) => toast.text === 'Stalker captured.'), 'no stalker capture toast')
 
   const home = createMatch(4)
@@ -2054,7 +2060,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(home, [shooter.id], guarded.id, 'unit')
   for (let i = 0; i < 40; i++) step(home, 1 / 60)
   const still = unitById(home, guarded.id)
-  assert(still?.owner === 1 && still.hp === UNIT_STATS.porter.hp, `a covered stalker changed (${still?.owner}, ${still?.hp})`)
+  assert(still?.owner === 1 && stalkerUntouched(still), `a covered stalker changed (${still?.owner}, ${still?.hp})`)
 
   const far = createMatch(4)
   clearPad(far, 36, 20, 46, 32)
@@ -2065,7 +2071,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(far, [foe.id], lone.id, 'unit')
   for (let i = 0; i < 40; i++) step(far, 1 / 60)
   const safe = unitById(far, lone.id)
-  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, 'a friendly flasher did not keep the stalker')
+  assert(safe?.owner === 1 && stalkerUntouched(safe), 'a friendly flasher did not keep the stalker')
 
   assert(BUILDING_STATS.silo.sight === 150, `storage sight is ${BUILDING_STATS.silo.sight}`)
   assert(
@@ -2095,7 +2101,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 40; i++) step(sheltered, 1 / 60)
   const shelteredStill = unitById(sheltered, shelteredStalker.id)
   assert(
-    shelteredStill?.owner === 1 && shelteredStill.hp === UNIT_STATS.porter.hp,
+    shelteredStill?.owner === 1 && stalkerUntouched(shelteredStill),
     `storage sight did not keep the stalker (${shelteredStill?.owner}, ${shelteredStill?.hp})`,
   )
 
@@ -2123,7 +2129,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 40; i++) step(rising, 1 / 60)
   const risingTaken = unitById(rising, risingStalker.id)
   assert(
-    risingTaken?.owner === 0 && risingTaken.hp === UNIT_STATS.porter.hp,
+    risingTaken?.owner === 0 && stalkerUntouched(risingTaken),
     `an unfinished storage protected the stalker (${risingTaken?.owner}, ${risingTaken?.hp})`,
   )
 
@@ -2163,7 +2169,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 90; i++) step(ai, 1 / 60)
   const aiKept = unitById(ai, aiStalker.id)
   assert(
-    aiKept?.owner === 0 && aiKept.hp === UNIT_STATS.porter.hp,
+    aiKept?.owner === 0 && stalkerUntouched(aiKept),
     `SiloAI captured a stalker beside Storage (${aiKept?.owner}, ${aiKept?.hp})`,
   )
 
@@ -3238,9 +3244,9 @@ function towerFiresOutToItsSight(): void {
   }
   assert(shotSeen, 'the Tower shot was not a Bike projectile')
   assert(sameDamage(drop, BUILDING_STATS.tower.damage ?? 0), `the Tower dealt ${drop} at the edge of its sight`)
-  assert(behindRock.hp === UNIT_STATS.porter.hp, 'the Tower shot through a rock')
-  assert(behindTree.hp === UNIT_STATS.porter.hp, 'the Tower shot through a tree')
-  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower shot an enemy outside its sight')
+  assert(stalkerUntouched(behindRock), 'the Tower shot through a rock')
+  assert(stalkerUntouched(behindTree), 'the Tower shot through a tree')
+  assert(stalkerUntouched(hidden), 'the Tower shot an enemy outside its sight')
   assert(rock.hp === ROCK_HP && tree.hp === ROCK_HP, 'the Tower shot a rock or a tree')
   const near = tileAlong(2)
   const closer = makeUnit(state, 1, 'pike', (near.tx + 0.5) * TILE, (near.ty + 0.5) * TILE)
@@ -3271,7 +3277,7 @@ function towerFiresOutToItsSight(): void {
     }
   }
   assert(sameDamage(closerDrop, BUILDING_STATS.tower.damage ?? 0), `the Tower did not retarget after the kill (${closerDrop})`)
-  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower fired into the fog after retargeting')
+  assert(stalkerUntouched(hidden), 'the Tower fired into the fog after retargeting')
 
   const foeHome = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(foeHome, 'missing the Dunmarch castle')
@@ -4016,7 +4022,7 @@ function pillarCapturesAnUncoveredStalker(): void {
     if (unitById(open, stalker.id)?.owner === 0) break
   }
   const taken = unitById(open, stalker.id)
-  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
+  assert(taken?.owner === 0 && stalkerUntouched(taken), `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
 
   const sheltered = createMatch(4)
   sheltered.aiAcc = -10
@@ -4034,7 +4040,7 @@ function pillarCapturesAnUncoveredStalker(): void {
     step(sheltered, 1 / 60)
   }
   const safe = unitById(sheltered, guarded.id)
-  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, `a Pillar captured a Stalker inside finished Storage (${safe?.owner}, ${safe?.hp})`)
+  assert(safe?.owner === 1 && stalkerUntouched(safe), `a Pillar captured a Stalker inside finished Storage (${safe?.owner}, ${safe?.hp})`)
 }
 
 function siloAiPillarsWatchMinesAndAvoidEnemyPillars(): void {

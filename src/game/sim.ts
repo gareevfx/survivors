@@ -64,8 +64,11 @@ export function step(state: MatchState, dt: number): void {
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.kind === 'porter' && unit.hp > 0) {
+      const lived = unit.age
       unit.age += dt
-      if (unit.age >= STALKER_LIFESPAN) {
+      const span = Math.min(unit.age, STALKER_LIFESPAN) - Math.min(lived, STALKER_LIFESPAN)
+      unit.hp -= (UNIT_STATS.porter.hp / STALKER_LIFESPAN) * span
+      if (unit.age >= STALKER_LIFESPAN || unit.hp <= 0) {
         unit.hp = 0
         layGrave(state, unit)
       }
