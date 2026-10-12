@@ -2944,10 +2944,10 @@ function scanningHoverRevealsBlackFog(): void {
 }
 
 function hoverCostsDumpsAndNoStoreCells(): void {
-  assert(UNIT_STATS.drone.cost === 75, `hover cost is ${UNIT_STATS.drone.cost}, not 75 dumps`)
+  assert(UNIT_STATS.drone.cost === 50, `hover cost is ${UNIT_STATS.drone.cost}, not 50 dumps`)
   assert(UNIT_STATS.drone.supply === 0, 'hover still uses store cells')
   assert(
-    UNIT_STATS.drone.blurb.includes('75 dumps'),
+    UNIT_STATS.drone.blurb.includes('50 dumps'),
     'hover tooltip omits the cost',
   )
 
@@ -2960,9 +2960,9 @@ function hoverCostsDumpsAndNoStoreCells(): void {
   }
   assert(state.supplyUsed[0] === state.supplyCap[0], 'store cells were not full')
   const used = state.supplyUsed[0]
-  state.oreHeld[0] = 75
+  state.oreHeld[0] = 50
   assert(tryTrain(state, yard.id, 'drone') === null, 'a full store cells bar refused a hover')
-  assert(state.oreHeld[0] === 0, 'hover was not charged 75 dumps')
+  assert(state.oreHeld[0] === 0, 'hover was not charged 50 dumps')
   assert(state.supplyUsed[0] === used, 'queueing a hover raised store cells')
   const queued = yard.queue[0]
   assert(queued?.kind === 'drone', 'hover was not queued')
