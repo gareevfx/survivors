@@ -11,7 +11,7 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },
   { name: 'Flasher', body: 'Very fast unit;' },
   { name: 'Gorilla', body: 'Tank;' },
-  { name: 'Hover', body: 'Surface explorer;' },
+  { name: 'Hover', body: 'Surface explorer; Select 10 Hovers to activate the Grid.' },
 ]
 
 export function loreBody(name: string): string {

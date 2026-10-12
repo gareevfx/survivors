@@ -117,7 +117,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   drone: {
     label: 'Hover',
-    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 75 dumps. Flashers deal half damage; gorillas cannot attack it.',
+    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 75 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid.',
     hp: 40,
     speed: 118,
     radius: 8,
