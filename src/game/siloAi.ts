@@ -3,7 +3,6 @@ import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, ne
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
 import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
-import { hoverFleeBlocks, hoverFleeDest, HOVER_FLEE_SAFE, takeHoverFleeBias } from './scanner'
 import { depositKnown, sideTileExplored } from './vision'
 
 /**
@@ -190,7 +189,6 @@ function droneGoal(
   fromX: number,
   fromY: number,
   reserved: Array<{ x: number; y: number }>,
-  threat: { x: number; y: number } | null = null,
 ): { x: number; y: number } {
   const bikes = seenEnemyBikes(state, side)
   const castle = spottedKeep(state, side.owner)
@@ -219,7 +217,6 @@ function droneGoal(
       const fromScout = Math.hypot(x - fromX, y - fromY)
       if (fromScout < TILE * 2) continue
       if (nearBike(bikes, x, y)) continue
-      if (threat && Math.hypot(x - threat.x, y - threat.y) < HOVER_FLEE_SAFE) continue
       const share = crowded(x, y) ? 2400 : 0
       const towardEnemy = Math.hypot(x - far.x, y - far.y)
       if (!explored) {
@@ -251,24 +248,11 @@ function droneGoal(
   let bestD = -1
   for (const spot of patrol) {
     if (nearBike(bikes, spot.x, spot.y)) continue
-    if (threat && Math.hypot(spot.x - threat.x, spot.y - threat.y) < HOVER_FLEE_SAFE) continue
     const distance = Math.hypot(spot.x - fromX, spot.y - fromY) - (crowded(spot.x, spot.y) ? 10000 : 0)
     if (distance > bestD) {
       bestD = distance
       best = spot
     }
-  }
-  if (threat && Math.hypot(best.x - threat.x, best.y - threat.y) < HOVER_FLEE_SAFE) {
-    let far = best
-    let farD = -1
-    for (const spot of patrol) {
-      const distance = Math.hypot(spot.x - threat.x, spot.y - threat.y)
-      if (distance > farD) {
-        farD = distance
-        far = spot
-      }
-    }
-    return far
   }
   return best
 }
@@ -280,13 +264,6 @@ function dispatchDrones(state: MatchState, side: Brain): void {
   const bikes = seenEnemyBikes(state, side)
   const reserved: Array<{ x: number; y: number }> = []
   for (const drone of drones) {
-    if (drone.scanning || hoverFleeBlocks(drone)) {
-      const dest = hoverFleeDest(drone)
-      if (dest) reserved.push(dest)
-      else if (drone.order?.type === 'move') reserved.push({ x: drone.order.x, y: drone.order.y })
-      side.scout = drone.id
-      continue
-    }
     const order = drone.order
     const traveling = order?.type === 'move' && Math.hypot(drone.x - order.x, drone.y - order.y) > 80
     const threatened =
@@ -296,7 +273,7 @@ function dispatchDrones(state: MatchState, side: Brain): void {
       side.scout = drone.id
       continue
     }
-    const goal = droneGoal(state, side, drone.x, drone.y, reserved, takeHoverFleeBias(drone))
+    const goal = droneGoal(state, side, drone.x, drone.y, reserved)
     reserved.push(goal)
     side.scout = drone.id
     commandMove(state, [drone.id], goal.x, goal.y, false)
@@ -1113,15 +1090,7 @@ function repairPorter(state: MatchState, side: Brain, x: number, y: number): Uni
 function scoutUnchartedSite(state: MatchState, side: Brain): void {
   const chart = side.chart
   if (!chart) return
-  const drone = state.units.find(
-    (unit) =>
-      unit.owner === side.owner &&
-      unit.kind === 'drone' &&
-      unit.hp > 0 &&
-      !unit.scanning &&
-      !hoverFleeBlocks(unit) &&
-      unit.hurtTimer <= 0,
-  )
+  const drone = state.units.find((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
   if (!drone) return
   const order = drone.order
   if (order?.type === 'move' && Math.hypot(order.x - chart.x, order.y - chart.y) < 48) return
