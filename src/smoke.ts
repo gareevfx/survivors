@@ -1,6 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandMove, commandRepair, commandStop, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, playerHovers, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -2203,6 +2203,7 @@ groundUnitsNeverOverlapSolidGround()
 diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
 pillarsLeaveTwoEmptyCells()
+hoversGridAcrossTheMap()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
@@ -3368,6 +3369,116 @@ function pillarsLeaveTwoEmptyCells(): void {
     BUILDING_STATS.tower.blurb.includes('Leave two empty cells between Pillars'),
     'the Pillar tooltip omits the gap',
   )
+}
+
+function minAssignmentCost(cost: number[][]): number {
+  const n = cost.length
+  const used = new Array<boolean>(n).fill(false)
+  let best = Infinity
+  const walk = (row: number, sum: number): void => {
+    if (sum >= best) return
+    if (row === n) {
+      best = sum
+      return
+    }
+    for (let col = 0; col < n; col++) {
+      if (used[col]) continue
+      used[col] = true
+      walk(row + 1, sum + cost[row][col])
+      used[col] = false
+    }
+  }
+  walk(0, 0)
+  return best
+}
+
+function hoversGridAcrossTheMap(): void {
+  const short = createMatch(5)
+  const few: Unit[] = []
+  for (let i = 0; i < 9; i++) few.push(makeUnit(short, 0, 'drone', 2400, 180 + i * 28))
+  const porter = makeUnit(short, 0, 'porter', 2300, 200)
+  const enemy = makeUnit(short, 1, 'drone', 2200, 200)
+  const dead = makeUnit(short, 0, 'drone', 2100, 200)
+  dead.hp = 0
+  short.selectedUnits = [...few.map((unit) => unit.id), porter.id, enemy.id, dead.id]
+  assert(playerHovers(short, short.selectedUnits).length === 9, 'dead and enemy Hovers counted toward Grid')
+  commandHoverGrid(short, short.selectedUnits)
+  assert(few.every((unit) => unit.order == null), 'nine Hovers were given a grid')
+  assert(porter.order == null && enemy.order == null, 'Grid ordered a unit that is not a player Hover')
+
+  const state = createMatch(5)
+  assert(state.mapW === MAP_W && state.mapH === MAP_H, 'the grid check left the duel map')
+  const hovers: Unit[] = []
+  for (let i = 0; i < 10; i++) {
+    const hover = makeUnit(state, 0, 'drone', 2480, 160 + i * 24)
+    hover.scanning = true
+    hovers.push(hover)
+  }
+  const extra = makeUnit(state, 0, 'porter', 2300, 220)
+  const foe = makeUnit(state, 1, 'drone', 2000, 220)
+  state.selectedUnits = [...hovers.map((unit) => unit.id), extra.id, foe.id]
+  assert(playerHovers(state, state.selectedUnits).length === 10, 'ten living player Hovers were not the grid count')
+  const spots = hoverGridSpots(state.mapW, state.mapH, 10)
+  const expectedX = [256, 768, 1280, 1792, 2304]
+  const expectedY = [320, 960]
+  assert(spots.length === 10, 'ten Hovers did not get ten cells')
+  const seen = new Set(spots.map((spot) => `${spot.x},${spot.y}`))
+  assert(seen.size === 10, 'grid cells overlapped')
+  for (const spot of spots) {
+    assert(expectedX.includes(spot.x) && expectedY.includes(spot.y), `cell ${spot.x},${spot.y} is not a 5×2 center`)
+  }
+  commandHoverGrid(state, state.selectedUnits)
+  const task = (unit: Unit): Unit['order'] => unit.order
+  const cost = hovers.map((unit) => spots.map((spot) => (spot.x - unit.x) ** 2 + (spot.y - unit.y) ** 2))
+  let travel = 0
+  const usedSpots = new Set<string>()
+  for (const hover of hovers) {
+    const order = task(hover)
+    assert(order?.type === 'move', 'a Hover was not ordered to fly')
+    if (order?.type !== 'move') continue
+    const key = `${order.x},${order.y}`
+    assert(seen.has(key), `order ${key} missed the grid`)
+    assert(!usedSpots.has(key), 'two Hovers share a cell')
+    usedSpots.add(key)
+    travel += (order.x - hover.x) ** 2 + (order.y - hover.y) ** 2
+    assert(hover.scanning === false, 'Grid left a Hover scanning')
+    assert(hover.goalX === order.x && hover.goalY === order.y, 'the flight target left the cell center')
+  }
+  assert(usedSpots.size === 10, 'a grid cell was left empty')
+  assert(travel === minAssignmentCost(cost), 'the grid did not minimize travel')
+  assert(task(extra) == null && task(foe) == null, 'Grid moved a unit that is not a selected player Hover')
+
+  for (let tick = 0; tick < 30; tick++) step(state, 1)
+  for (const hover of hovers) {
+    const order = task(hover)
+    assert(order == null, 'a Hover kept its order after arriving')
+    assert(hover.scanning === false, 'a Hover resumed scanning')
+    const home = spots.find((spot) => Math.hypot(spot.x - hover.x, spot.y - hover.y) <= 3.5)
+    assert(home, `a Hover stopped at ${hover.x},${hover.y} instead of its cell`)
+  }
+  const parked = hovers.map((hover) => ({ x: hover.x, y: hover.y }))
+  for (let tick = 0; tick < 5; tick++) step(state, 1)
+  hovers.forEach((hover, index) => {
+    assert(task(hover) == null, 'a parked Hover took a new order')
+    assert(hover.x === parked[index].x && hover.y === parked[index].y, 'a parked Hover left its cell')
+  })
+
+  const wide = createMatch(6)
+  const eleven: Unit[] = []
+  for (let i = 0; i < 11; i++) eleven.push(makeUnit(wide, 0, 'drone', 400 + i * 20, 200))
+  commandHoverGrid(wide, eleven.map((unit) => unit.id))
+  const odd = hoverGridSpots(wide.mapW, wide.mapH, 11)
+  assert(odd.length === 11, 'eleven Hovers did not fill a short last row')
+  const tail = odd[10]
+  assert(tail.x === (wide.mapW * TILE) / 2, 'the leftover Hover was not centered on the last row')
+  assert(Math.abs(tail.y - 2.5 * ((wide.mapH * TILE) / 3)) < 1e-6, 'the last row is not the third band')
+  const held = new Set(eleven.map((unit) => (unit.order?.type === 'move' ? `${unit.order.x},${unit.order.y}` : '')))
+  assert(held.size === 11 && [...held].every((key) => odd.some((spot) => `${spot.x},${spot.y}` === key)), 'the short row was not assigned')
+
+  wide.paused = true
+  for (const hover of eleven) hover.order = null
+  commandHoverGrid(wide, eleven.map((unit) => unit.id))
+  assert(eleven.every((unit) => unit.order == null), 'Grid ran while the match was paused')
 }
 
 function towerFiresOutToItsSight(): void {
@@ -4714,10 +4825,10 @@ function siloAiKeepsStalkersWorking(): void {
 }
 
 function cellsBlockTrainingUntilStorage(): void {
-  assert(SUPPLY_MAX === 100, `Cells maximum is ${SUPPLY_MAX}`)
+  assert(SUPPLY_MAX === 65, `Cells maximum is ${SUPPLY_MAX}`)
   assert(
-    BUILDING_STATS.keep.supply + 11 * BUILDING_STATS.silo.supply === SUPPLY_MAX,
-    'eleven Storages do not reach the Cells maximum',
+    BUILDING_STATS.keep.supply + 11 * BUILDING_STATS.silo.supply > SUPPLY_MAX,
+    'building supply does not exceed the Cells maximum',
   )
   assert(BUILDING_STATS.tower.hp === 160, `Pillar health is ${BUILDING_STATS.tower.hp}`)
   assert(BUILDING_STATS.tower.buildTime === 7, `Pillar build time is ${BUILDING_STATS.tower.buildTime}`)
@@ -4759,7 +4870,7 @@ function cellsBlockTrainingUntilStorage(): void {
   assert(still === 'Cells cap reached — raise a Storage', `the maximum still allowed training (${still})`)
   makeBuilding(packed, 0, 'silo', 30, 16, true)
   recomputeSupply(packed)
-  assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 100')
+  assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 65')
 }
 
 function fullStorageRefusesAHaul(): void {

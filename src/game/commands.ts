@@ -398,6 +398,122 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
   noteOrder(state, units)
 }
 
+/** Living player Hovers. Dead and enemy Hovers are left out. */
+export function playerHovers(state: MatchState, ids: number[]): Unit[] {
+  return living(state, ids).filter((unit) => unit.owner === 0 && unit.kind === 'drone')
+}
+
+/** Cell centers covering the map. The last short row is spread across the full width. */
+export function hoverGridSpots(mapW: number, mapH: number, count: number): { x: number; y: number }[] {
+  const mapPxW = mapW * TILE
+  const mapPxH = mapH * TILE
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count * (mapW / mapH))))
+  const rows = Math.ceil(count / cols)
+  const spots: { x: number; y: number }[] = []
+  const fullRows = Math.floor(count / cols)
+  const remainder = count - fullRows * cols
+  for (let row = 0; row < fullRows; row++) {
+    for (let col = 0; col < cols; col++) {
+      spots.push({
+        x: (col + 0.5) * (mapPxW / cols),
+        y: (row + 0.5) * (mapPxH / rows),
+      })
+    }
+  }
+  if (remainder > 0) {
+    const row = fullRows
+    for (let col = 0; col < remainder; col++) {
+      spots.push({
+        x: (col + 0.5) * (mapPxW / remainder),
+        y: (row + 0.5) * (mapPxH / rows),
+      })
+    }
+  }
+  return spots
+}
+
+/**
+ * Minimum-cost assignment. cost is square; returns the column chosen for each row.
+ * Kuhn–Munkres, so the matching minimizes total travel rather than a greedy nearest pick.
+ */
+function minCostAssign(cost: number[][]): number[] {
+  const n = cost.length
+  const assign = new Array<number>(n).fill(-1)
+  if (n === 0) return assign
+  const u = new Array<number>(n + 1).fill(0)
+  const v = new Array<number>(n + 1).fill(0)
+  const p = new Array<number>(n + 1).fill(0)
+  const way = new Array<number>(n + 1).fill(0)
+  for (let i = 1; i <= n; i++) {
+    p[0] = i
+    let j0 = 0
+    const minv = new Array<number>(n + 1).fill(Infinity)
+    const used = new Array<boolean>(n + 1).fill(false)
+    do {
+      used[j0] = true
+      const i0 = p[j0]
+      let delta = Infinity
+      let j1 = 0
+      for (let j = 1; j <= n; j++) {
+        if (used[j]) continue
+        const cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+        if (cur < minv[j]) {
+          minv[j] = cur
+          way[j] = j0
+        }
+        if (minv[j] < delta) {
+          delta = minv[j]
+          j1 = j
+        }
+      }
+      for (let j = 0; j <= n; j++) {
+        if (used[j]) {
+          u[p[j]] += delta
+          v[j] -= delta
+        } else minv[j] -= delta
+      }
+      j0 = j1
+    } while (p[j0] !== 0)
+    do {
+      const j1 = way[j0]
+      p[j0] = p[j1]
+      j0 = j1
+    } while (j0 !== 0)
+  }
+  for (let j = 1; j <= n; j++) {
+    if (p[j] > 0) assign[p[j] - 1] = j - 1
+  }
+  return assign
+}
+
+/** Send at least ten player Hovers to a map-wide grid, then leave them there. */
+export function commandHoverGrid(state: MatchState, ids: number[]): void {
+  if (state.outcome || state.paused) return
+  const hovers = playerHovers(state, ids)
+  if (hovers.length < 10) return
+  const spots = hoverGridSpots(state.mapW, state.mapH, hovers.length)
+  const cost = hovers.map((unit) =>
+    spots.map((spot) => {
+      const dx = spot.x - unit.x
+      const dy = spot.y - unit.y
+      return dx * dx + dy * dy
+    }),
+  )
+  const assign = minCostAssign(cost)
+  hovers.forEach((unit, index) => {
+    const spot = spots[assign[index]]
+    unit.scanning = false
+    unit.order = { type: 'move', x: spot.x, y: spot.y }
+    noteProgress(unit)
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    unit.leashX = null
+    unit.leashY = null
+    setUnitDestination(state, unit, spot.x, spot.y)
+  })
+  noteOrder(state, hovers)
+}
+
 export function commandAttack(
   state: MatchState,
   ids: number[],

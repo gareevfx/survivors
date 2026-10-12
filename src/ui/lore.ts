@@ -5,7 +5,7 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Ruined Silo', body: 'A collapsed shelter. A Stalker can repair it.' },
   { name: 'Stalker', body: 'Trained shelter residents; lives for 5 minutes;' },
   { name: 'Dumps', body: 'The piles of technical debris;' },
-  { name: 'Cells', body: 'Storage units, up to 100;' },
+  { name: 'Cells', body: 'Storage units, up to 65;' },
   { name: 'Storage', body: 'Storage for Cells;' },
   { name: 'Pillar', body: 'Windmill with battle tower;' },
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },
