@@ -383,29 +383,6 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'SiloAI is giving the orders' : cmd.title
-    const iconSrc =
-      cmd.id === 'train-drone'
-        ? hoverPortraitUrl(0)
-        : cmd.id === 'train-howler'
-          ? gorillaPortraitUrl(0)
-          : cmd.id === 'train-pike'
-            ? flasherPortraitUrl(0)
-            : cmd.id === 'train-porter'
-              ? stalkerPortraitUrl(0)
-              : cmd.id === 'place-yard'
-                ? factoryPortraitUrl(0)
-                : cmd.id === 'place-silo'
-                  ? storagePortraitUrl(0)
-                  : cmd.id === 'place-tower'
-                    ? pillarPortraitUrl(0)
-                    : ''
-    if (iconSrc) {
-      const icon = document.createElement('img')
-      icon.className = 'unit-icon'
-      icon.alt = ''
-      icon.src = iconSrc
-      button.append(icon)
-    }
     const label = document.createElement('span')
     label.className = 'cmd-label'
     label.textContent = cmd.label

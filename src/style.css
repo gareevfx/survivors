@@ -296,7 +296,7 @@ button, canvas { font: inherit; }
   gap: 10px;
   align-items: stretch;
   flex-shrink: 0;
-  min-height: 210px;
+  min-height: 178.5px;
   padding: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%), var(--panel);
   border-top: 1px solid var(--line);
@@ -400,12 +400,6 @@ button, canvas { font: inherit; }
   display: inline-block;
   vertical-align: middle;
   margin-right: 6px;
-}
-
-.cmd .stalker-icon,
-.cmd .unit-icon {
-  float: left;
-  margin: -2px 6px 2px 0;
 }
 
 .cmd-detail {
