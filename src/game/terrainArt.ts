@@ -893,14 +893,55 @@ function graveSprite(): HTMLCanvasElement {
   ctx.strokeStyle = 'rgba(42, 34, 28, 0.8)'
   ctx.lineWidth = 1
   ctx.stroke()
-  ctx.strokeStyle = 'rgba(58, 46, 36, 0.75)'
-  ctx.beginPath()
-  ctx.moveTo(14, 9)
-  ctx.lineTo(14, 20)
-  ctx.moveTo(11, 13)
-  ctx.lineTo(17, 13)
-  ctx.stroke()
+  paintGraveMark(ctx)
   return canvas
+}
+
+/** The sprout cut into the tombstone, in place of the cross. */
+function paintGraveMark(ctx: CanvasRenderingContext2D): void {
+  ctx.save()
+  ctx.translate(14, 13.2)
+  ctx.scale(10 / 60, 10 / 59)
+  ctx.translate(-30, -29.5)
+  ctx.fillStyle = 'rgba(36, 28, 22, 0.94)'
+  ctx.beginPath()
+  ctx.moveTo(30, 0)
+  ctx.bezierCurveTo(48, 8, 48, 20, 44, 28)
+  ctx.bezierCurveTo(40, 35, 34, 33, 32, 32)
+  ctx.lineTo(28, 32)
+  ctx.bezierCurveTo(26, 33, 20, 35, 16, 28)
+  ctx.bezierCurveTo(12, 20, 12, 8, 30, 0)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(16, 20)
+  ctx.bezierCurveTo(6, 16, 0, 20, 1, 26)
+  ctx.bezierCurveTo(2, 32, 10, 33, 17, 29)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(44, 20)
+  ctx.bezierCurveTo(54, 16, 60, 20, 59, 26)
+  ctx.bezierCurveTo(58, 32, 50, 33, 43, 29)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillRect(28.2, 30, 3.6, 20)
+  ctx.beginPath()
+  ctx.moveTo(0, 37)
+  ctx.lineTo(26, 37)
+  ctx.lineTo(26, 53)
+  ctx.quadraticCurveTo(20, 59, 10, 58)
+  ctx.quadraticCurveTo(0, 55, 0, 45)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(34, 37)
+  ctx.lineTo(60, 37)
+  ctx.lineTo(60, 45)
+  ctx.quadraticCurveTo(60, 55, 50, 58)
+  ctx.quadraticCurveTo(40, 59, 34, 53)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
 }
 
 export function drawGraveSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, selected: boolean): void {
