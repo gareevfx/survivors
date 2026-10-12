@@ -68,9 +68,7 @@ button, canvas { font: inherit; }
   font-size: 13px;
 }
 
-#topbar .brand + .readout {
-  margin-left: auto;
-}
+.top-actions { margin-left: auto; }
 
 .readout b {
   color: var(--paper);
@@ -104,6 +102,20 @@ button, canvas { font: inherit; }
 }
 
 .top-actions { display: flex; gap: 6px; }
+
+#hud-row {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  max-width: calc(100% - 28px);
+  pointer-events: none;
+}
 
 .sides {
   display: flex;
