@@ -15,18 +15,6 @@
         <div class="brand">
           <strong>Survivors</strong>
         </div>
-        <div class="readout" title="Dumps in the Silo">
-          <span class="swatch ore"></span>
-          <span>Dumps</span>
-          <b id="ore">0</b>
-        </div>
-        <div class="readout" title="Storage units, up to 100;">
-          <span class="swatch pop"></span>
-          <span>Cells</span>
-          <b id="supply">0 / 0</b>
-        </div>
-        <div id="clock">0:00</div>
-        <div id="sides" class="sides"></div>
         <div class="top-actions">
           <button id="idle" type="button" title="Select idle stalkers (F)">Idle</button>
           <button id="pause" type="button" aria-pressed="false" title="Pause the match (Pause)">Pause</button>
@@ -40,6 +28,20 @@
       </div>
 
       <div id="stage">
+        <div id="hud-row">
+          <div class="readout" title="Dumps in the Silo">
+            <span class="swatch ore"></span>
+            <span>Dumps</span>
+            <b id="ore">0</b>
+          </div>
+          <div class="readout" title="Storage units, up to 100;">
+            <span class="swatch pop"></span>
+            <span>Cells</span>
+            <b id="supply">0 / 0</b>
+          </div>
+          <div id="clock">0:00</div>
+          <div id="sides" class="sides"></div>
+        </div>
         <canvas id="view" tabindex="0" aria-label="Survivors battlefield"></canvas>
         <div id="paused" class="hidden">Paused</div>
         <div id="ai-badge" class="hidden">SiloAI</div>
