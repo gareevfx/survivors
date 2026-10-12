@@ -22,8 +22,8 @@ export const ROCK_HP = 28
 /** Trees block like rock and take half as many hits. */
 export const TREE_HP = ROCK_HP / 2
 export const STARTING_ORE = 120
-/** Cells from buildings never rise above this. A Silo (12) and eleven Storages (8 each) reach it. */
-export const SUPPLY_MAX = 100
+/** Hard ceiling on Cells. Finished buildings still add their supply (Silo 12, Storage 8); the sum is clamped to this. */
+export const SUPPLY_MAX = 65
 /** One Storage holds this many dumps. A Silo does not. */
 export const STORAGE_CAP = 500
 export const INTERACT = 42
