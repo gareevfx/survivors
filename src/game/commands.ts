@@ -6,6 +6,7 @@ import {
   buildingRect,
   canPlace,
   makeBuilding,
+  pillarsClear,
   placementAllowed,
   pushToast,
   rebuildBlocked,
@@ -669,6 +670,7 @@ export function tryPlace(
   const stats = BUILDING_STATS[kind]
   if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} dumps`
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
+  if (kind === 'tower' && !pillarsClear(state, tx, ty)) return 'Leave two empty cells between Pillars'
   if (!placementAllowed(state, owner, kind, tx, ty)) return 'Pillars must stand inside Silo sight'
 
   const porters = state.units.filter((unit) => unit.owner === owner && unit.kind === 'porter' && unit.hp > 0)

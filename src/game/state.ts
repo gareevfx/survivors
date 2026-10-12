@@ -187,7 +187,10 @@ export function footprintInKeepSight(
   return Math.hypot(x - kx, y - ky) <= BUILDING_STATS.keep.sight + 0.5
 }
 
-/** Terrain check plus the Tower rule: the cell must sit inside that side's Castle sight. */
+/** Empty cells required between Pillar footprints. */
+export const PILLAR_GAP = 2
+
+/** Terrain check plus the Tower rules: Silo sight, and two empty cells from every other Pillar. */
 export function placementAllowed(
   state: MatchState,
   owner: PlayerId,
@@ -197,10 +200,37 @@ export function placementAllowed(
 ): boolean {
   if (!canPlace(state, kind, tx, ty)) return false
   if (kind !== 'tower') return true
+  if (!pillarsClear(state, tx, ty)) return false
   const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
   const stats = BUILDING_STATS.tower
   return footprintInKeepSight(keep.tx, keep.ty, tx, ty, stats.w, stats.h)
+}
+
+/** True when this Pillar footprint leaves at least two empty cells around every other Pillar. */
+export function pillarsClear(state: MatchState, tx: number, ty: number): boolean {
+  const stats = BUILDING_STATS.tower
+  for (const building of state.buildings) {
+    if (building.kind !== 'tower' || building.hp <= 0) continue
+    if (emptyCellsBetween(tx, ty, stats.w, stats.h, building.tx, building.ty, stats.w, stats.h) < PILLAR_GAP) return false
+  }
+  return true
+}
+
+/** Chebyshev count of open cells between two footprints. Negative when they overlap. */
+function emptyCellsBetween(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+): number {
+  const gapX = ax + aw <= bx ? bx - (ax + aw) : bx + bw <= ax ? ax - (bx + bw) : -1
+  const gapY = ay + ah <= by ? by - (ay + ah) : by + bh <= ay ? ay - (by + bh) : -1
+  return Math.max(gapX, gapY)
 }
 
 function castlePatchOwner(
