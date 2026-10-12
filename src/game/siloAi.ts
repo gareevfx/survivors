@@ -7,7 +7,7 @@ import { depositKnown, sideTileExplored } from './vision'
 
 /**
  * SiloAI plays one side from that side's own sight.
- * Computer opponents in 1 vs 1 and free-for-all use it, and so does `ai control`.
+ * Computer opponents in 1 vs 1 and free-for-all use it, and so does `siloai`.
  * Stalkers widen a corridor that pinches below two cells, then go back to the job.
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
  * A Storage that already holds 500 dumps is not a drop-off, so another is raised beside that heap.
@@ -759,7 +759,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
 }
 
 /**
- * Every computer side, and `ai control`, shares SiloAI.
+ * Every computer side, and `siloai`, shares SiloAI.
  * A side with no Silo is already eliminated, so it is skipped.
  * Units and buildings captured with that Silo belong to the captor and are ordered here on the captor's turn.
  * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, finished Storage, Flasher, and Gorilla sight.
