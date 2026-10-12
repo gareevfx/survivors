@@ -61,5 +61,4 @@ Each match is a race between scavenging and fighting. The SiloAI plays by the sa
 
 If you are interested in the game and would like to help expand its universe (or perhaps even support the development of a 3D version), please consider making a contribution by transferring funds:
 
-- Visa 4937241043468289
 - Crypto (ETH) 0x8853fae653B3b0600377928a1D528ABF43c9fe7F
