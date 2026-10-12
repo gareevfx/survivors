@@ -2226,7 +2226,7 @@ fullStorageRefusesAHaul()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
-  assert(TREE_HP === 14 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
+  assert(TREE_HP === 6 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
   for (let seed = 1; seed <= 8; seed++) {
     for (const mode of ['duel', 'ffa'] as const) {
       const field = createMatch(seed, mode)
@@ -2588,7 +2588,7 @@ function bothModesUseTheirOwnMapSize(): void {
     }
     const tree = state.rocks.find((rock) => rock.kind === 'tree')
     const stone = state.rocks.find((rock) => rock.kind !== 'tree')
-    assert(tree && tree.hp === TREE_HP, 'a free-for-all tree does not have half life')
+    assert(tree && tree.hp === TREE_HP, 'a free-for-all tree does not have 6 life')
     assert(stone && stone.hp === ROCK_HP, 'a free-for-all rock changed life')
   }
   for (const [owner, quads] of corners) {
