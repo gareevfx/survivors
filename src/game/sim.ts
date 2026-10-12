@@ -33,6 +33,7 @@ import {
   STORAGE_CAP,
   PLAYER_COLOR,
   PLAYER_NAME,
+  STALKER_LIFESPAN,
   STUCK_REDIRECT_SECONDS,
   TILE,
   UNIT_STATS,
@@ -62,6 +63,10 @@ export function step(state: MatchState, dt: number): void {
     unit.attackCd = Math.max(0, unit.attackCd - dt)
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
+    if (unit.kind === 'porter' && unit.hp > 0) {
+      unit.age += dt
+      if (unit.age >= STALKER_LIFESPAN) unit.hp = 0
+    }
     tryFire(state, unit)
   }
   for (const building of state.buildings) {
@@ -955,6 +960,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    age: 0,
   }
   state.units.push(unit)
   if (Math.hypot(building.rallyX - spot.x, building.rallyY - spot.y) > 20) {

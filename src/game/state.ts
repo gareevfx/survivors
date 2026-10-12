@@ -266,6 +266,7 @@ export function makeUnit(
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    age: 0,
   }
   state.units.push(unit)
   return unit

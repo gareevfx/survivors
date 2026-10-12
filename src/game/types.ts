@@ -31,6 +31,8 @@ export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
 /** A worker that has not moved on an order for this long is sent to the next job. */
 export const STUCK_REDIRECT_SECONDS = 4
+/** A Stalker dies after this many seconds of match time. Other units do not expire. */
+export const STALKER_LIFESPAN = 5 * 60
 
 export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
@@ -59,7 +61,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Stalker',
-    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. A unit or a Pillar captures one only when it stands outside the sight of its own Silo, a finished Storage, Flashers, and Gorillas.',
+    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. A unit or a Pillar captures one only when it stands outside the sight of its own Silo, a finished Storage, Flashers, and Gorillas. Lives for 5 minutes.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -262,6 +264,8 @@ export interface Unit {
   repathIn: number
   /** Player Hover flying itself across black fog, then the oldest sightings. */
   scanning: boolean
+  /** Seconds this unit has been in the match. A Stalker dies at STALKER_LIFESPAN. */
+  age: number
 }
 
 export interface TrainJob {
