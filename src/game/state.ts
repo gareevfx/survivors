@@ -377,6 +377,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     supplyCap: Array.from({ length: playerCount }, () => 0),
     time: 0,
     paused: false,
+    speed: 1,
     outcome: null,
     selectedUnits: [],
     selectedBuilding: null,

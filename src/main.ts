@@ -230,9 +230,10 @@ function loop(now: number): void {
     const live = match
     const ground = terrain
     if (!live.paused) {
-      acc += dt
+      const rate = live.speed === 3 ? 3 : 1
+      acc += dt * rate
       let guard = 0
-      while (acc >= STEP && guard++ < 6) {
+      while (acc >= STEP && guard++ < 6 * rate) {
         step(live, STEP)
         acc -= STEP
       }

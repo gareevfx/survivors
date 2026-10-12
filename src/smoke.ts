@@ -1365,6 +1365,29 @@ function bothCamMergesSight(): void {
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1) && !viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'off both cam did not return to Northmark')
 }
 
+function speedTriplesTheMatch(): void {
+  const state = createMatch(1)
+  const rate = (): number => state.speed
+  assert(rate() === 1, 'a match starts at triple speed')
+  assert(!runCommand(state, 'speed'), 'a partial speed line was accepted')
+  assert(rate() === 1, 'a partial line changed the speed')
+  assert(runCommand(state, '  Speed x3  '), 'speed x3 was rejected')
+  assert(rate() === 3, 'speed x3 did not triple the simulation')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is on.', 'speed x3 did not announce itself')
+  assert(runCommand(state, 'SPEED X3'), 'repeating speed x3 was rejected')
+  assert(rate() === 3, 'repeating speed x3 turned it off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is already on.', 'the repeat used the wrong notice')
+  const before = state.time
+  step(state, 1)
+  assert(Math.abs(state.time - (before + 1)) < 1e-6, 'speed x3 changed what one step means')
+  assert(runCommand(state, 'Speed x3 Off'), 'speed x3 off was rejected')
+  assert(rate() === 1, 'speed x3 off left the match sped up')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is off.', 'speed x3 off did not announce itself')
+  assert(runCommand(state, 'speed x3 off'), 'speed x3 off was rejected while already off')
+  assert(rate() === 1, 'the off command turned triple speed on')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is already off.', 'the off notice was wrong')
+}
+
 function freedomKillsEveryUnit(): void {
   const state = createMatch(4)
   const buildings = state.buildings.map((building) => building.id)
@@ -2002,6 +2025,7 @@ clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()
 freedomKillsEveryUnit()
+speedTriplesTheMatch()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()

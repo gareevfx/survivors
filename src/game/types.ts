@@ -453,6 +453,8 @@ export interface MatchState {
   time: number
   /** While set, the match clock and every simulation system stay where they are. */
   paused: boolean
+  /** Simulation rate. 3 while the `speed x3` command is on, otherwise 1. */
+  speed: number
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
   selectedBuilding: number | null

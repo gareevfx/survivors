@@ -117,6 +117,24 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'SiloAI is on.')
     return true
   }
+  if (text === 'speed x3') {
+    if (state.speed === 3) {
+      pushToast(state, 'Speed x3 is already on.')
+      return true
+    }
+    state.speed = 3
+    pushToast(state, 'Speed x3 is on.')
+    return true
+  }
+  if (text === 'speed x3 off') {
+    if (state.speed !== 3) {
+      pushToast(state, 'Speed x3 is already off.')
+      return true
+    }
+    state.speed = 1
+    pushToast(state, 'Speed x3 is off.')
+    return true
+  }
   if (text === 'siloai off') {
     if (!state.aiControl) {
       pushToast(state, 'SiloAI is already off.')
