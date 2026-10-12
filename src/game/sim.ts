@@ -1,5 +1,5 @@
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
-import { updateScanners } from './scanner'
+import { hoverFleeSpeed, noteHoverAttack, updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -483,7 +483,7 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
       }
       break
     }
-    const speed = UNIT_STATS[unit.kind].speed
+    const speed = UNIT_STATS[unit.kind].speed * (unit.kind === 'drone' ? hoverFleeSpeed(unit) : 1)
     const stepLen = Math.min(distance, speed * left)
     const desiredX = dx / distance
     const desiredY = dy / distance
@@ -1275,6 +1275,11 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     unit.hp -= dealt
     unit.hitFlash = 0.16
     unit.hurtTimer = 3.2
+    if (unit.kind === 'drone' && unit.hp > 0) {
+      const ax = source ? source.x : sourceBuilding ? buildingCenter(sourceBuilding).x : unit.x
+      const ay = source ? source.y : sourceBuilding ? buildingCenter(sourceBuilding).y : unit.y
+      noteHoverAttack(state, unit, ax, ay)
+    }
     return
   }
   const building = buildingById(state, target.id)

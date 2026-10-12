@@ -1993,6 +1993,7 @@ aiDroneNeverIdles()
 droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
+scanningHoverFleesAndResumes()
 cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
@@ -2740,6 +2741,41 @@ function scanningHoverRevealsBlackFog(): void {
     Math.hypot(memory.x - (oldTx + 0.5) * TILE, memory.y - (oldTy + 0.5) * TILE) < TILE,
     'scanner did not fly to the tile seen longest ago',
   )
+}
+
+function scanningHoverFleesAndResumes(): void {
+  const state = createMatch(33)
+  state.aiControl = true
+  const hover = makeUnit(state, 0, 'drone', 24 * TILE, 18 * TILE)
+  hover.scanning = true
+  hover.order = { type: 'move', x: 24 * TILE, y: 12 * TILE }
+  const pike = makeUnit(state, 1, 'pike', hover.x + 36, hover.y)
+  const start = Math.hypot(hover.x - pike.x, hover.y - pike.y)
+  let hit = false
+  for (let i = 0; i < 90; i++) {
+    step(state, 1 / 60)
+    if (hover.hp < UNIT_STATS.drone.hp) {
+      hit = true
+      break
+    }
+  }
+  assert(hit, 'the flasher never hit the scanning hover')
+  assert(hover.scanning, 'a hit knocked the SiloAI hover out of scanning')
+  assert(hover.order?.type === 'move', 'the hit did not send the hover away')
+  const fleeing = hover.order
+  if (fleeing?.type !== 'move') return
+  assert(Math.hypot(fleeing.x - pike.x, fleeing.y - pike.y) > start + TILE, 'the flee point is not away from the flasher')
+  for (let i = 0; i < 180; i++) step(state, 1 / 60)
+  assert(hover.scanning, 'the hover stopped scanning after it got clear')
+  assert(hover.hp > 0, 'the hover died while fleeing')
+  assert(Math.hypot(hover.x - pike.x, hover.y - pike.y) > start + TILE * 2, 'the hover did not leave the flasher')
+  const next = hover.order
+  if (next?.type === 'move') {
+    assert(
+      Math.hypot(next.x - pike.x, next.y - pike.y) > TILE * 4,
+      'the next scan flew back toward the flasher',
+    )
+  }
 }
 
 function hoverCostsDumpsAndNoStoreCells(): void {
