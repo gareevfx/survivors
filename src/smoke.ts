@@ -6,6 +6,7 @@ import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, minera
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
+import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
@@ -1365,6 +1366,78 @@ function bothCamMergesSight(): void {
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1) && !viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'off both cam did not return to Northmark')
 }
 
+function wildlifeStaysAmbient(): void {
+  for (const mode of ['duel', 'ffa'] as const) {
+    const state = createMatch(4, mode)
+    const count = (kind: 'bear' | 'moose' | 'crow' | 'eagle') => state.animals.filter((animal) => animal.kind === kind).length
+    assert(count('bear') === BEAR_COUNT, `${mode} spawned ${count('bear')} bears`)
+    assert(count('moose') === MOOSE_COUNT, `${mode} spawned ${count('moose')} moose`)
+    assert(count('crow') === CROW_COUNT, `${mode} spawned ${count('crow')} crows`)
+    assert(count('eagle') === EAGLE_COUNT, `${mode} spawned ${count('eagle')} eagles`)
+    for (const animal of state.animals) {
+      if (animal.kind !== 'bear' && animal.kind !== 'moose') continue
+      const tx = Math.floor(animal.x / TILE)
+      const ty = Math.floor(animal.y / TILE)
+      assert(isWalkable(state, tx, ty), `${animal.kind} spawned on a blocked tile`)
+    }
+  }
+
+  const state = createMatch(4)
+  state.aiAcc = -1000
+  const units = state.units.length
+  const supply = state.supplyUsed[0]
+  const graves = state.graves.length
+  const starts = state.animals.map((animal) => ({ x: animal.x, y: animal.y }))
+  for (let i = 0; i < 90; i++) step(state, 1 / 30)
+  assert(state.units.length === units, 'wildlife changed the unit list')
+  assert(state.supplyUsed[0] === supply, 'wildlife changed supply')
+  assert(state.graves.length === graves, 'wildlife left a grave')
+  let moved = false
+  for (let i = 0; i < state.animals.length; i++) {
+    const animal = state.animals[i]
+    const start = starts[i]
+    if (!animal || !start) continue
+    if (animal.kind === 'bear' || animal.kind === 'moose') {
+      assert(isWalkable(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE)), `${animal.kind} left walkable ground`)
+    }
+    if (Math.hypot(animal.x - start.x, animal.y - start.y) > 4) moved = true
+  }
+  assert(moved, 'wildlife stood still')
+
+  const eagle = state.animals.find((animal) => animal.kind === 'eagle')
+  assert(eagle, 'missing an eagle')
+  const along = Math.hypot(eagle.x - eagle.orbitX, (eagle.y - eagle.orbitY) / 0.72)
+  assert(Math.abs(along - eagle.orbitR) < 1.5, 'an eagle left its circle')
+
+  const crow = state.animals.find((animal) => animal.kind === 'crow')
+  assert(crow, 'missing a crow')
+  const keep = state.buildings.find((building) => building.kind === 'keep')
+  assert(keep, 'missing a Silo to fly over')
+  crow.x = (keep.tx + 1) * TILE
+  crow.y = (keep.ty + 1) * TILE
+  crow.facing = 0
+  const crossed = crow.y
+  step(state, 0.4)
+  assert(crow.x > (keep.tx + 1) * TILE, 'a crow did not fly')
+  assert(Math.abs(crow.y - crossed) < 1, 'a crow followed the ground')
+  assert(state.units.length === units, 'a crow joined the unit list')
+
+  const frozen = state.animals.map((animal) => ({ x: animal.x, y: animal.y }))
+  state.paused = true
+  step(state, 1)
+  for (let i = 0; i < state.animals.length; i++) {
+    const animal = state.animals[i]
+    const still = frozen[i]
+    assert(animal && still && animal.x === still.x && animal.y === still.y, 'wildlife moved while paused')
+  }
+  state.paused = false
+  const alive = state.animals.length
+  assert(runCommand(state, 'freedom'), 'freedom was rejected')
+  assert(state.units.length === 0, 'freedom left a unit')
+  assert(state.animals.length === alive, 'freedom removed wildlife')
+  assert(state.graves.length === graves, 'freedom laid a grave for wildlife')
+}
+
 function speedTriplesTheMatch(): void {
   const state = createMatch(1)
   const rate = (): number => state.speed
@@ -2026,6 +2099,7 @@ enemyCamShowsDunmarchSight()
 bothCamMergesSight()
 freedomKillsEveryUnit()
 speedTriplesTheMatch()
+wildlifeStaysAmbient()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()

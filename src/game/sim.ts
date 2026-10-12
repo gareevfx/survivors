@@ -1,3 +1,4 @@
+import { updateAnimals } from './animals'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
@@ -91,6 +92,7 @@ export function step(state: MatchState, dt: number): void {
   coverOpenSites(state)
   fillOpenGatherSlots(state)
   watchStuckUnits(state, dt)
+  updateAnimals(state, dt)
   updateVision(state)
   updateScanners(state)
   fadeEffects(state, dt)
