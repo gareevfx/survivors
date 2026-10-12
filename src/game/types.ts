@@ -127,7 +127,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     sight: 260,
     supply: 0,
     cost: 75,
-    trainTime: 11,
+    trainTime: 8,
     projectileSpeed: 0,
     projectileRadius: 0,
     flying: true,
