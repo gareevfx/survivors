@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandRepair, commandRepairNearest, commandStop, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, tryTrain } from '../game/commands'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
@@ -261,9 +261,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         },
       },
     ]
-    const hovers = state.selectedUnits
-      .map((id) => unitById(state, id))
-      .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0)
+    const hovers = playerHovers(state, state.selectedUnits)
     if (hovers.length) {
       cmds.push({
         id: 'scan',
@@ -273,6 +271,19 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
         run: () => toggleScanner(state, hovers.map((unit) => unit.id)),
+      })
+    }
+    if (hovers.length >= 10) {
+      cmds.push({
+        id: 'grid',
+        label: 'Grid',
+        title: 'Fly to an even grid covering the map, then stay there',
+        disabled: false,
+        run: () => {
+          commandHoverGrid(state, state.selectedUnits)
+          state.moveArmed = false
+          state.attackMoveArmed = false
+        },
       })
     }
     if (porters) {
