@@ -36,6 +36,11 @@ export const STALKER_LIFESPAN = 5 * 60
 
 export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
+
+/** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
+export function isCombatUnit(kind: UnitKind): boolean {
+  return kind !== 'porter'
+}
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
 export type TargetKind = 'unit' | 'building' | 'rock'
 

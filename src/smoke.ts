@@ -1438,6 +1438,70 @@ function wildlifeStaysAmbient(): void {
   assert(state.graves.length === graves, 'freedom laid a grave for wildlife')
 }
 
+function stalkerDoesNotAttackCombatUnits(): void {
+  const state = createMatch(4)
+  state.aiAcc = -1000
+  clearPad(state, 30, 12, 50, 28)
+  rebuildBlocked(state)
+  const stalker = makeUnit(state, 0, 'porter', 40.5 * TILE, 20.5 * TILE)
+  const task = (): Unit['order'] => stalker.order
+  const flasher = makeUnit(state, 1, 'pike', stalker.x + 22, stalker.y)
+  const gorilla = makeUnit(state, 1, 'howler', stalker.x + 18, stalker.y + 16)
+  const hover = makeUnit(state, 1, 'drone', stalker.x - 20, stalker.y + 8)
+  const otherStalker = makeUnit(state, 1, 'porter', stalker.x + 400, stalker.y + 400)
+  const rock = state.rocks.find((entry) => entry.hp > 0)
+  const enemyKeep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(rock && enemyKeep, 'missing a rock or Silo a Stalker can still attack')
+
+  commandAttack(state, [stalker.id], flasher.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Flasher')
+  commandAttack(state, [stalker.id], gorilla.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Gorilla')
+  commandAttack(state, [stalker.id], hover.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Hover')
+
+  const ally = makeUnit(state, 0, 'pike', stalker.x, stalker.y + 48)
+  commandAttack(state, [stalker.id, ally.id], gorilla.id, 'unit')
+  assert(task() == null, 'a Stalker joined an attack on a Gorilla')
+  assert(ally.order?.type === 'attack' && ally.order.targetId === gorilla.id, 'a Flasher was refused the same order')
+  ally.hp = 0
+
+  commandAttack(state, [stalker.id], otherStalker.id, 'unit')
+  const onStalker = task()
+  assert(
+    onStalker?.type === 'attack' && onStalker.kind === 'unit' && onStalker.targetId === otherStalker.id,
+    'a Stalker could not attack another Stalker',
+  )
+  commandAttack(state, [stalker.id], rock.id, 'rock')
+  const onRock = task()
+  assert(onRock?.type === 'attack' && onRock.kind === 'rock', 'a Stalker could not attack rock')
+  commandAttack(state, [stalker.id], enemyKeep.id, 'building')
+  const onKeep = task()
+  assert(
+    onKeep?.type === 'attack' && onKeep.kind === 'building' && onKeep.targetId === enemyKeep.id,
+    'a Stalker could not attack a Silo',
+  )
+
+  stalker.order = { type: 'attack', targetId: flasher.id, kind: 'unit' }
+  stalker.hurtTimer = 3
+  const flasherHp = flasher.hp
+  const gorillaHp = gorilla.hp
+  const hoverHp = hover.hp
+  for (let i = 0; i < 40; i++) step(state, 1 / 30)
+  assert(flasher.hp === flasherHp && gorilla.hp === gorillaHp && hover.hp === hoverHp, 'a Stalker damaged a combat unit')
+  const aimed = task()
+  const aimedUnit = aimed?.type === 'attack' && aimed.kind === 'unit' ? unitById(state, aimed.targetId) : null
+  assert(aimedUnit == null || aimedUnit.kind === 'porter', 'a Stalker kept a combat unit as its target')
+  commandMove(state, [stalker.id], flasher.x, flasher.y, true)
+  for (let i = 0; i < 20; i++) step(state, 1 / 30)
+  const moving = task()
+  const focus = moving?.type === 'attackMove' && moving.focusKind === 'unit' ? unitById(state, moving.focusId ?? -1) : null
+  const struck = moving?.type === 'attack' && moving.kind === 'unit' ? unitById(state, moving.targetId) : null
+  assert(focus == null || focus.kind === 'porter', 'attack-move locked a Stalker onto a combat unit')
+  assert(struck == null || struck.kind === 'porter', 'attack-move sent a Stalker after a combat unit')
+  assert(flasher.hp === flasherHp && gorilla.hp === gorillaHp && hover.hp === hoverHp, 'attack-move let a Stalker damage a combat unit')
+}
+
 function speedTriplesTheMatch(): void {
   const state = createMatch(1)
   const rate = (): number => state.speed
@@ -1552,8 +1616,9 @@ function godModeSavesNorthmark(): void {
   assert(state.godMode, 'God Mode did not turn on')
   const homeHp = home.hp
   const foeHp = foe.hp
+  const fighter = makeUnit(state, 0, 'pike', worker.x + 8, worker.y + 18)
   commandAttack(state, [foe.id], worker.id, 'unit')
-  commandAttack(state, [worker.id], foe.id, 'unit')
+  commandAttack(state, [fighter.id], foe.id, 'unit')
   commandAttack(state, [sieger.id], home.id, 'building')
   for (let i = 0; i < 5 * 60; i++) step(state, 1 / 60)
   const workerNow = unitById(state, worker.id)
@@ -2100,6 +2165,7 @@ bothCamMergesSight()
 freedomKillsEveryUnit()
 speedTriplesTheMatch()
 wildlifeStaysAmbient()
+stalkerDoesNotAttackCombatUnits()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()

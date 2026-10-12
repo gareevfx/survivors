@@ -38,6 +38,7 @@ import {
   STUCK_REDIRECT_SECONDS,
   TILE,
   UNIT_STATS,
+  isCombatUnit,
   type Building,
   type MatchState,
   type Order,
@@ -1154,6 +1155,7 @@ function isAttackable(unit: Unit, focus: Target): boolean {
   if (unit.kind === 'drone') return false
   if (focus.targetKind === 'rock') return unit.kind === 'porter'
   if (focus.unitKind === 'drone' && unit.kind === 'howler') return false
+  if (unit.kind === 'porter' && focus.targetKind === 'unit' && focus.unitKind !== 'porter') return false
   return focus.owner !== unit.owner
 }
 
@@ -1214,6 +1216,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   for (const other of state.units) {
     if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
+    if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
     if (other.kind === 'porter' && stalkerCovered(state, other)) continue
     const d = Math.hypot(other.x - unit.x, other.y - unit.y)
     if (d < bestD) {
