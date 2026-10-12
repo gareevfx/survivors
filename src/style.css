@@ -296,7 +296,9 @@ button, canvas { font: inherit; }
   gap: 10px;
   align-items: stretch;
   flex-shrink: 0;
+  height: 178.5px;
   min-height: 178.5px;
+  max-height: 178.5px;
   padding: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%), var(--panel);
   border-top: 1px solid var(--line);
@@ -372,7 +374,7 @@ button, canvas { font: inherit; }
 
 .cmd {
   position: relative;
-  min-height: 49px;
+  min-height: 48px;
   text-align: left;
   padding: 8px 8px 6px;
   background: #243024;
@@ -543,7 +545,9 @@ button, canvas { font: inherit; }
   #dock {
     grid-template-columns: 108px 1fr;
     grid-template-rows: auto auto;
+    height: auto;
     min-height: 0;
+    max-height: none;
   }
   #commands { grid-column: 1 / -1; }
   #minimap { height: 96px; min-height: 0; }
