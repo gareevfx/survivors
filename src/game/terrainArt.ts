@@ -20,6 +20,7 @@ let yardMask: Uint8Array | null = null
 let rocks: HTMLCanvasElement[] | null = null
 let trees: HTMLCanvasElement[] | null = null
 let ore: HTMLCanvasElement[] | null = null
+let grave: HTMLCanvasElement | null = null
 const fogCache = new Map<string, HTMLCanvasElement>()
 
 function smooth(t: number): number {
@@ -859,6 +860,62 @@ export function drawTreeSprite(ctx: CanvasRenderingContext2D, tx: number, ty: nu
   const sprite = sheet[index]
   if (!sprite) return
   ctx.drawImage(sprite, tx * TILE - 8, ty * TILE - 22)
+}
+
+function graveSprite(): HTMLCanvasElement {
+  if (grave) return grave
+  const canvas = document.createElement('canvas')
+  canvas.width = 28
+  canvas.height = 32
+  const ctx = canvas.getContext('2d')
+  grave = canvas
+  if (!ctx) return canvas
+  ctx.fillStyle = 'rgba(24, 32, 18, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(14, 28, 9, 3, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#5c6a48'
+  ctx.beginPath()
+  ctx.ellipse(14, 26, 8, 3.2, 0, 0, Math.PI * 2)
+  ctx.fill()
+  const body = ctx.createLinearGradient(6, 4, 22, 26)
+  body.addColorStop(0, '#d2c4b0')
+  body.addColorStop(0.45, '#8d7d6c')
+  body.addColorStop(1, '#4a4036')
+  ctx.fillStyle = body
+  ctx.beginPath()
+  ctx.moveTo(8, 24)
+  ctx.lineTo(8, 12)
+  ctx.arc(14, 12, 6, Math.PI, 0)
+  ctx.lineTo(20, 24)
+  ctx.closePath()
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(42, 34, 28, 0.8)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(58, 46, 36, 0.75)'
+  ctx.beginPath()
+  ctx.moveTo(14, 9)
+  ctx.lineTo(14, 20)
+  ctx.moveTo(11, 13)
+  ctx.lineTo(17, 13)
+  ctx.stroke()
+  return canvas
+}
+
+export function drawGraveSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, selected: boolean): void {
+  const x = (tx + 0.5) * TILE
+  const y = (ty + 0.5) * TILE
+  if (selected) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.ellipse(x, y + 4, 12, 7, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  }
+  ctx.drawImage(graveSprite(), x - 14, y - 18)
 }
 
 export function drawOreSprite(

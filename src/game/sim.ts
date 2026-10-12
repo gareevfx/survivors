@@ -65,7 +65,10 @@ export function step(state: MatchState, dt: number): void {
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.kind === 'porter' && unit.hp > 0) {
       unit.age += dt
-      if (unit.age >= STALKER_LIFESPAN) unit.hp = 0
+      if (unit.age >= STALKER_LIFESPAN) {
+        unit.hp = 0
+        layGrave(state, unit)
+      }
     }
     tryFire(state, unit)
   }
@@ -1299,6 +1302,13 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     const label = building.kind === 'keep' ? 'The Silo is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
     state.toasts.push({ text: label, life: 3.4 })
   }
+}
+
+/** A lifespan death leaves a grave on the tile where the Stalker was standing. */
+function layGrave(state: MatchState, unit: Unit): void {
+  const tx = Math.min(state.mapW - 1, Math.max(0, Math.floor(unit.x / TILE)))
+  const ty = Math.min(state.mapH - 1, Math.max(0, Math.floor(unit.y / TILE)))
+  state.graves.push({ id: state.nextId++, tx, ty })
 }
 
 function cleanup(state: MatchState): void {

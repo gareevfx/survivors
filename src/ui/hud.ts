@@ -482,6 +482,15 @@ export function describeSelection(state: MatchState): string {
     `
   }
 
+  const grave = state.selectedGrave != null ? state.graves.find((entry) => entry.id === state.selectedGrave) : undefined
+  if (grave && state.selectedUnits.length === 0 && state.selectedBuilding == null) {
+    return `
+      <p class="eyebrow">Neutral</p>
+      <h2>Grave</h2>
+      <p class="lore">He lived a worthy life and died a natural death.</p>
+    `
+  }
+
   const ore = state.selectedOre != null ? state.ore.find((node) => node.id === state.selectedOre) : undefined
   if (ore && state.selectedUnits.length === 0) {
     return `

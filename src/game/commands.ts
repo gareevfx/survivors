@@ -713,6 +713,7 @@ export function tryPlace(
     state.selectedBuilding = building.id
     state.selectedUnits = []
     state.selectedOre = null
+    state.selectedGrave = null
     state.events.push({ type: 'build' })
     pushToast(state, `Raising a ${stats.label}.`)
   }

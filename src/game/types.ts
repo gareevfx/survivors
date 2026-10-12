@@ -337,6 +337,13 @@ export interface Rock {
   kind?: 'rock' | 'tree'
 }
 
+/** A Stalker who died of age. It marks the tile and does not block movement. */
+export interface Grave {
+  id: number
+  tx: number
+  ty: number
+}
+
 export interface Projectile {
   id: number
   owner: PlayerId
@@ -432,6 +439,7 @@ export interface MatchState {
   aiControl: boolean
   ore: OreNode[]
   rocks: Rock[]
+  graves: Grave[]
   units: Unit[]
   buildings: Building[]
   projectiles: Projectile[]
@@ -449,6 +457,7 @@ export interface MatchState {
   selectedUnits: number[]
   selectedBuilding: number | null
   selectedOre: number | null
+  selectedGrave: number | null
   placement: BuildingKind | null
   attackMoveArmed: boolean
   moveArmed: boolean

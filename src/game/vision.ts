@@ -29,6 +29,10 @@ export function updateVision(state: MatchState): void {
     const node = state.ore.find((entry) => entry.id === state.selectedOre)
     if (!node || node.amount <= 0 || !tileExplored(state, node.tx, node.ty)) state.selectedOre = null
   }
+  if (state.selectedGrave != null) {
+    const grave = state.graves.find((entry) => entry.id === state.selectedGrave)
+    if (!grave || !viewGroundShown(state, grave.tx, grave.ty)) state.selectedGrave = null
+  }
 }
 
 function exploredGrid(state: MatchState, owner: PlayerId): Uint8Array {

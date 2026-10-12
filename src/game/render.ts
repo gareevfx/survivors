@@ -8,7 +8,7 @@ import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
-import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
+import { drawGraveSprite, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -120,6 +120,14 @@ export function renderWorld(
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
     drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
+  }
+
+  for (const grave of state.graves) {
+    if (!viewGroundShown(state, grave.tx, grave.ty)) continue
+    const x = (grave.tx + 0.5) * TILE
+    const y = (grave.ty + 0.5) * TILE
+    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
+    drawGraveSprite(ctx, grave.tx, grave.ty, state.selectedGrave === grave.id)
   }
 
   if (state.tutorial) drawOreHint(ctx, state)
