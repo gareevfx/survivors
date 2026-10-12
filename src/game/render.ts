@@ -1,3 +1,4 @@
+import { drawAnimal } from './animalArt'
 import type { Camera } from './camera'
 import { buildingCenter, buildingRect, getTarget, placementAllowed, playerKeep } from './state'
 import { flasherSprite } from './flasherArt'
@@ -8,7 +9,7 @@ import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
-import { drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
+import { drawGraveSprite, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
 import {
   BUILDING_STATS,
@@ -122,6 +123,14 @@ export function renderWorld(
     drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
   }
 
+  for (const grave of state.graves) {
+    if (!viewGroundShown(state, grave.tx, grave.ty)) continue
+    const x = (grave.tx + 0.5) * TILE
+    const y = (grave.ty + 0.5) * TILE
+    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
+    drawGraveSprite(ctx, grave.tx, grave.ty, state.selectedGrave === grave.id)
+  }
+
   if (state.tutorial) drawOreHint(ctx, state)
 
   const buildings = state.buildings.slice().sort((a, b) => a.ty - b.ty)
@@ -136,12 +145,28 @@ export function renderWorld(
 
   const selected = new Set(state.selectedUnits)
   const units = state.units.slice().sort((a, b) => a.y - b.y)
+  const ground = state.animals
+    .filter((animal) => animal.kind === 'bear' || animal.kind === 'moose')
+    .sort((a, b) => a.y - b.y)
+  let groundAt = 0
+  const drawGroundUntil = (y: number) => {
+    while (groundAt < ground.length) {
+      const animal = ground[groundAt]
+      if (!animal || animal.y > y) break
+      groundAt += 1
+      if (animal.x < view.l || animal.y < view.t || animal.x > view.r || animal.y > view.b) continue
+      if (!viewTileVisible(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE))) continue
+      drawAnimal(ctx, animal)
+    }
+  }
   for (const unit of units) {
+    drawGroundUntil(unit.y)
     if (!viewUnitSeen(state, unit)) continue
     if (unit.x < view.l || unit.y < view.t || unit.x > view.r || unit.y > view.b) continue
     if (selected.has(unit.id)) drawOrderLine(ctx, unit)
     drawUnit(ctx, state, unit, selected.has(unit.id))
   }
+  drawGroundUntil(Number.POSITIVE_INFINITY)
 
   const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
   for (const shot of state.projectiles) {
@@ -175,6 +200,7 @@ export function renderWorld(
     ctx.globalAlpha = 1
   }
 
+  drawBirds(ctx, state, view)
   drawFog(ctx, state, view)
   if (state.bothCam) drawBothSight(ctx, state, view)
 
@@ -255,6 +281,19 @@ function fogSide(state: MatchState, tx: number, ty: number, black: boolean): num
   if (viewTileVisible(state, tx, ty)) return 2
   if (black && viewTileExplored(state, tx, ty)) return 1
   return 0
+}
+
+function drawBirds(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  view: { l: number; t: number; r: number; b: number },
+): void {
+  for (const animal of state.animals) {
+    if (animal.kind !== 'crow' && animal.kind !== 'eagle') continue
+    if (animal.x < view.l || animal.y < view.t || animal.x > view.r || animal.y > view.b) continue
+    if (!viewTileVisible(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE))) continue
+    drawAnimal(ctx, animal)
+  }
 }
 
 function drawFog(

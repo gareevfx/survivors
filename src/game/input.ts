@@ -114,6 +114,7 @@ function clearSelection(state: MatchState): void {
   state.selectedUnits = []
   state.selectedBuilding = null
   state.selectedOre = null
+  state.selectedGrave = null
 }
 
   function selectUnit(state: MatchState, id: number, shift: boolean): void {
@@ -124,6 +125,7 @@ function clearSelection(state: MatchState): void {
     }
     state.selectedBuilding = null
     state.selectedOre = null
+    state.selectedGrave = null
     if (shift) {
       const index = state.selectedUnits.indexOf(id)
       if (index >= 0) state.selectedUnits.splice(index, 1)
@@ -218,6 +220,7 @@ function clearSelection(state: MatchState): void {
             .map((other) => other.id)
           state.selectedBuilding = null
           state.selectedOre = null
+          state.selectedGrave = null
           state.events.push({ type: 'select' })
         }
       } else {
@@ -232,6 +235,7 @@ function clearSelection(state: MatchState): void {
         state.selectedBuilding = building.id
         state.selectedUnits = []
         state.selectedOre = null
+        state.selectedGrave = null
         state.events.push({ type: 'select' })
         lastClick = { t: performance.now(), id: -1 }
         return
@@ -243,6 +247,16 @@ function clearSelection(state: MatchState): void {
       state.selectedOre = hit.id
       state.selectedUnits = []
       state.selectedBuilding = null
+      state.selectedGrave = null
+      state.events.push({ type: 'select' })
+      lastClick = { t: performance.now(), id: -1 }
+      return
+    }
+    if (hit.type === 'grave') {
+      state.selectedGrave = hit.id
+      state.selectedUnits = []
+      state.selectedBuilding = null
+      state.selectedOre = null
       state.events.push({ type: 'select' })
       lastClick = { t: performance.now(), id: -1 }
     }
@@ -337,10 +351,12 @@ function clearSelection(state: MatchState): void {
     if (ids.length) {
       state.selectedBuilding = null
       state.selectedOre = null
+      state.selectedGrave = null
       state.events.push({ type: 'select' })
     } else if (!shift) {
       state.selectedBuilding = null
       state.selectedOre = null
+      state.selectedGrave = null
     }
   }
 
@@ -645,6 +661,7 @@ function clearSelection(state: MatchState): void {
       state.selectedUnits = ids.slice()
       state.selectedBuilding = null
       state.selectedOre = null
+      state.selectedGrave = null
       state.events.push({ type: 'select' })
       if (lastClick.id === -100 - n && performance.now() - lastClick.t < 350) {
         const members = ids
@@ -712,7 +729,7 @@ function pick(
   state: MatchState,
   x: number,
   y: number,
-): { type: 'unit' | 'building' | 'ore' | 'rock'; id: number } | null {
+): { type: 'unit' | 'building' | 'ore' | 'rock' | 'grave'; id: number } | null {
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     const cx = (node.tx + 0.5) * TILE
@@ -745,5 +762,14 @@ function pick(
   const ty = Math.floor(y / TILE)
   const rock = viewGroundShown(state, tx, ty) ? rockAt(state, tx, ty) : undefined
   if (rock) return { type: 'rock', id: rock.id }
+  let graveHit: { id: number; d: number } | null = null
+  for (const grave of state.graves) {
+    if (!viewGroundShown(state, grave.tx, grave.ty)) continue
+    const cx = (grave.tx + 0.5) * TILE
+    const cy = (grave.ty + 0.5) * TILE
+    const d = Math.hypot(cx - x, cy - y)
+    if (d <= 12 && (!graveHit || d < graveHit.d)) graveHit = { id: grave.id, d }
+  }
+  if (graveHit) return { type: 'grave', id: graveHit.id }
   return null
 }

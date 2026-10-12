@@ -19,6 +19,7 @@ import {
   SILO_REPAIR_COST,
   TILE,
   UNIT_STATS,
+  isCombatUnit,
   type Building,
   type BuildingKind,
   type MatchState,
@@ -433,6 +434,7 @@ export function commandAttack(
     if (unit.kind === 'drone') return false
     if (kind === 'rock' && unit.kind !== 'porter') return false
     if (victimKind === 'drone' && unit.kind === 'howler') return false
+    if (unit.kind === 'porter' && victimKind != null && isCombatUnit(victimKind)) return false
     return neutral || unit.owner !== owner
   })
   if (!units.length) return
@@ -713,6 +715,7 @@ export function tryPlace(
     state.selectedBuilding = building.id
     state.selectedUnits = []
     state.selectedOre = null
+    state.selectedGrave = null
     state.events.push({ type: 'build' })
     pushToast(state, `Raising a ${stats.label}.`)
   }

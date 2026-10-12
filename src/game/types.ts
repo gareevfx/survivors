@@ -31,9 +31,16 @@ export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
 /** A worker that has not moved on an order for this long is sent to the next job. */
 export const STUCK_REDIRECT_SECONDS = 4
+/** A Stalker's hit points drain to 0 over this many seconds. Other units do not expire. */
+export const STALKER_LIFESPAN = 5 * 60
 
 export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
+
+/** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
+export function isCombatUnit(kind: UnitKind): boolean {
+  return kind !== 'porter'
+}
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
 export type TargetKind = 'unit' | 'building' | 'rock'
 
@@ -59,7 +66,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Stalker',
-    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. A unit or a Pillar captures one only when it stands outside the sight of its own Silo, a finished Storage, Flashers, and Gorillas.',
+    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. A unit or a Pillar captures one only when it stands outside the sight of its own Silo, a finished Storage, Flashers, and Gorillas. Lives for 5 minutes.',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -262,6 +269,8 @@ export interface Unit {
   repathIn: number
   /** Player Hover flying itself across black fog, then the oldest sightings. */
   scanning: boolean
+  /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
+  age: number
 }
 
 export interface TrainJob {
@@ -331,6 +340,34 @@ export interface Rock {
   hitFlash: number
   /** Trees block, hide behind fog, and break the same way as stone. */
   kind?: 'rock' | 'tree'
+}
+
+/** A Stalker who died of age. It marks the tile and does not block movement. */
+export interface Grave {
+  id: number
+  tx: number
+  ty: number
+}
+
+/** Ambient Surface wildlife. Not a unit: it cannot be selected, ordered, or attacked. */
+export type AnimalKind = 'bear' | 'moose' | 'crow' | 'eagle'
+
+export interface Animal {
+  kind: AnimalKind
+  x: number
+  y: number
+  facing: number
+  /** Wander point for a bear or moose. Birds ignore it. */
+  goalX: number
+  goalY: number
+  /** Eagle circle. Crows leave these at zero. */
+  orbitX: number
+  orbitY: number
+  orbitR: number
+  /** Walk cycle or wing beat. */
+  phase: number
+  /** Bumps each time a wanderer or a crow picks a new heading. */
+  turn: number
 }
 
 export interface Projectile {
@@ -428,6 +465,9 @@ export interface MatchState {
   aiControl: boolean
   ore: OreNode[]
   rocks: Rock[]
+  graves: Grave[]
+  /** Bears, moose, crows, and eagles. Ambient only. */
+  animals: Animal[]
   units: Unit[]
   buildings: Building[]
   projectiles: Projectile[]
@@ -441,10 +481,13 @@ export interface MatchState {
   time: number
   /** While set, the match clock and every simulation system stay where they are. */
   paused: boolean
+  /** Simulation rate. 3 while the `speed x3` command is on, otherwise 1. */
+  speed: number
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
   selectedBuilding: number | null
   selectedOre: number | null
+  selectedGrave: number | null
   placement: BuildingKind | null
   attackMoveArmed: boolean
   moveArmed: boolean

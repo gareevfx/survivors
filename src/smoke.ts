@@ -6,10 +6,11 @@ import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, minera
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { keepEntrance } from './game/siloArt'
+import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -31,6 +32,13 @@ import { describeSelection } from './ui/hud'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+/** True when a Stalker's hit points match the five-minute drain and nothing else. */
+function stalkerUntouched(unit: { hp: number; age: number } | null | undefined): boolean {
+  if (!unit) return false
+  const expected = UNIT_STATS.porter.hp * (1 - Math.min(unit.age, STALKER_LIFESPAN) / STALKER_LIFESPAN)
+  return Math.abs(unit.hp - expected) < 1e-4
 }
 
 /** Hit points are numbers, so 8/3 is stored. Subtracting it from a whole value can be off by one bit. */
@@ -180,10 +188,12 @@ function northmarkPlaysItself(): void {
   assert(!state.aiControl, 'a match starts under AI control')
   assert(!runCommand(state, 'ai'), 'a partial line turned AI control on')
   assert(!state.aiControl, 'a partial line changed AI control')
-  assert(runCommand(state, 'AI Control'), 'AI Control was rejected')
+  assert(!runCommand(state, 'ai control'), 'the old ai control command was still accepted')
+  assert(!state.aiControl, 'the old command turned SiloAI on')
+  assert(runCommand(state, 'SiloAI'), 'siloai was rejected')
   assert(state.aiControl, 'AI Control did not turn on')
   assert(state.toasts[state.toasts.length - 1]?.text === 'SiloAI is on.', 'SiloAI did not announce itself')
-  assert(runCommand(state, 'ai control'), 'repeating AI control was rejected')
+  assert(runCommand(state, 'siloai'), 'repeating siloai was rejected')
   assert(state.aiControl, 'repeating AI control turned it off')
   assert(state.toasts[state.toasts.length - 1]?.text === 'SiloAI is already on.', 'the repeat used the wrong notice')
 
@@ -252,7 +262,7 @@ function northmarkPlaysItself(): void {
   })
   assert(strikers.length > 0, 'Northmark did not march on the Dunmarch Castle')
 
-  assert(runCommand(state, 'Off AI Control'), 'off ai control was rejected')
+  assert(runCommand(state, 'SiloAI Off'), 'siloai off was rejected')
   assert(!state.aiControl, 'AI control stayed on')
   const idle = porters.find((unit) => unit.hp > 0 && unit.order?.type !== 'construct')
   const mover = porters.find((unit) => unit.hp > 0 && unit.id !== idle?.id && unit.order?.type !== 'construct')
@@ -273,9 +283,10 @@ function northmarkPlaysItself(): void {
 
   const fresh = createMatch(9)
   assert(!fresh.aiControl, 'a new match kept AI control')
-  assert(runCommand(fresh, 'OFF AI CONTROL'), 'off ai control was rejected while already off')
+  assert(runCommand(fresh, 'SILOAI OFF'), 'siloai off was rejected while already off')
   assert(!fresh.aiControl, 'the off command turned AI control on')
   assert(fresh.toasts[fresh.toasts.length - 1]?.text === 'SiloAI is already off.', 'the off notice was wrong')
+  assert(!runCommand(fresh, 'off ai control'), 'the old off ai control command was still accepted')
 }
 
 function castleYardsStayOpen(): void {
@@ -1295,11 +1306,13 @@ function bothCamMergesSight(): void {
   assert(!state.bothCam, 'a match started on both cam')
   assert(!runCommand(state, 'both'), 'a partial both cam line was accepted')
   assert(!state.bothCam, 'a partial line turned both cam on')
-  assert(runCommand(state, '  Both Cam  '), 'both cam was rejected')
-  assert(state.bothCam && !state.enemyCam && !state.fogCleared, 'both cam did not replace the normal view')
-  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is on.', 'both cam did not announce itself')
-  assert(runCommand(state, 'BOTH CAM'), 'repeating both cam was rejected')
-  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is already on.', 'the repeat used the wrong notice')
+  assert(!runCommand(state, 'both cam'), 'the old both cam command was still accepted')
+  assert(!state.bothCam, 'the old command turned all cams on')
+  assert(runCommand(state, '  All Cams  '), 'all cams was rejected')
+  assert(state.bothCam && !state.enemyCam && !state.fogCleared, 'all cams did not replace the normal view')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'All cams is on.', 'all cams did not announce itself')
+  assert(runCommand(state, 'ALL CAMS'), 'repeating all cams was rejected')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'All cams is already on.', 'the repeat used the wrong notice')
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark went dark on both cam')
   assert(viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed dark on both cam')
   assert(viewBuildingSeen(state, keep) && viewBuildingSeen(state, enemy), 'a castle was hidden on both cam')
@@ -1333,7 +1346,7 @@ function bothCamMergesSight(): void {
   assert(runCommand(state, 'show enemy cam'), 'enemy cam was rejected while both cam was on')
   assert(state.enemyCam && !state.bothCam && !state.fogCleared, 'enemy cam did not replace both cam')
   assert(!viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark stayed lit after switching to enemy cam')
-  assert(runCommand(state, 'both cam'), 'both cam was rejected after enemy cam')
+  assert(runCommand(state, 'all cams'), 'all cams was rejected after enemy cam')
   assert(state.bothCam && !state.enemyCam, 'both cam did not replace enemy cam')
   assert(runCommand(state, 'off fow'), 'off fow was rejected while both cam was on')
   assert(state.fogCleared && !state.bothCam && !state.enemyCam, 'off fow did not replace both cam')
@@ -1345,11 +1358,193 @@ function bothCamMergesSight(): void {
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'the normal view lost Northmark')
   assert(!viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the normal view kept Dunmarch lit')
   assert(!tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'fow left the enemy castle explored')
-  assert(runCommand(state, 'off both cam'), 'off both cam was rejected while already off')
-  assert(state.toasts[state.toasts.length - 1]?.text === 'Both cam is already off.', 'the off notice was wrong')
-  assert(runCommand(state, 'both cam') && runCommand(state, 'Off Both Cam'), 'off both cam was rejected')
+  assert(!runCommand(state, 'off both cam'), 'the old off both cam command was still accepted')
+  assert(runCommand(state, 'all cams off'), 'all cams off was rejected while already off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'All cams is already off.', 'the off notice was wrong')
+  assert(runCommand(state, 'all cams') && runCommand(state, 'All Cams Off'), 'all cams off was rejected')
   assert(!state.bothCam && !state.enemyCam && !state.fogCleared, 'off both cam left a special view on')
   assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1) && !viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'off both cam did not return to Northmark')
+}
+
+function wildlifeStaysAmbient(): void {
+  for (const mode of ['duel', 'ffa'] as const) {
+    const state = createMatch(4, mode)
+    const count = (kind: 'bear' | 'moose' | 'crow' | 'eagle') => state.animals.filter((animal) => animal.kind === kind).length
+    assert(count('bear') === BEAR_COUNT, `${mode} spawned ${count('bear')} bears`)
+    assert(count('moose') === MOOSE_COUNT, `${mode} spawned ${count('moose')} moose`)
+    assert(count('crow') === CROW_COUNT, `${mode} spawned ${count('crow')} crows`)
+    assert(count('eagle') === EAGLE_COUNT, `${mode} spawned ${count('eagle')} eagles`)
+    for (const animal of state.animals) {
+      if (animal.kind !== 'bear' && animal.kind !== 'moose') continue
+      const tx = Math.floor(animal.x / TILE)
+      const ty = Math.floor(animal.y / TILE)
+      assert(isWalkable(state, tx, ty), `${animal.kind} spawned on a blocked tile`)
+    }
+  }
+
+  const state = createMatch(4)
+  state.aiAcc = -1000
+  const units = state.units.length
+  const supply = state.supplyUsed[0]
+  const graves = state.graves.length
+  const starts = state.animals.map((animal) => ({ x: animal.x, y: animal.y }))
+  for (let i = 0; i < 90; i++) step(state, 1 / 30)
+  assert(state.units.length === units, 'wildlife changed the unit list')
+  assert(state.supplyUsed[0] === supply, 'wildlife changed supply')
+  assert(state.graves.length === graves, 'wildlife left a grave')
+  let moved = false
+  for (let i = 0; i < state.animals.length; i++) {
+    const animal = state.animals[i]
+    const start = starts[i]
+    if (!animal || !start) continue
+    if (animal.kind === 'bear' || animal.kind === 'moose') {
+      assert(isWalkable(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE)), `${animal.kind} left walkable ground`)
+    }
+    if (Math.hypot(animal.x - start.x, animal.y - start.y) > 4) moved = true
+  }
+  assert(moved, 'wildlife stood still')
+
+  const eagle = state.animals.find((animal) => animal.kind === 'eagle')
+  assert(eagle, 'missing an eagle')
+  const along = Math.hypot(eagle.x - eagle.orbitX, (eagle.y - eagle.orbitY) / 0.72)
+  assert(Math.abs(along - eagle.orbitR) < 1.5, 'an eagle left its circle')
+
+  const crow = state.animals.find((animal) => animal.kind === 'crow')
+  assert(crow, 'missing a crow')
+  const keep = state.buildings.find((building) => building.kind === 'keep')
+  assert(keep, 'missing a Silo to fly over')
+  crow.x = (keep.tx + 1) * TILE
+  crow.y = (keep.ty + 1) * TILE
+  crow.facing = 0
+  const crossed = crow.y
+  step(state, 0.4)
+  assert(crow.x > (keep.tx + 1) * TILE, 'a crow did not fly')
+  assert(Math.abs(crow.y - crossed) < 1, 'a crow followed the ground')
+  assert(state.units.length === units, 'a crow joined the unit list')
+
+  const frozen = state.animals.map((animal) => ({ x: animal.x, y: animal.y }))
+  state.paused = true
+  step(state, 1)
+  for (let i = 0; i < state.animals.length; i++) {
+    const animal = state.animals[i]
+    const still = frozen[i]
+    assert(animal && still && animal.x === still.x && animal.y === still.y, 'wildlife moved while paused')
+  }
+  state.paused = false
+  const alive = state.animals.length
+  assert(runCommand(state, 'freedom'), 'freedom was rejected')
+  assert(state.units.length === 0, 'freedom left a unit')
+  assert(state.animals.length === alive, 'freedom removed wildlife')
+  assert(state.graves.length === graves, 'freedom laid a grave for wildlife')
+}
+
+function stalkerDoesNotAttackCombatUnits(): void {
+  const state = createMatch(4)
+  state.aiAcc = -1000
+  clearPad(state, 30, 12, 50, 28)
+  rebuildBlocked(state)
+  const stalker = makeUnit(state, 0, 'porter', 40.5 * TILE, 20.5 * TILE)
+  const task = (): Unit['order'] => stalker.order
+  const flasher = makeUnit(state, 1, 'pike', stalker.x + 22, stalker.y)
+  const gorilla = makeUnit(state, 1, 'howler', stalker.x + 18, stalker.y + 16)
+  const hover = makeUnit(state, 1, 'drone', stalker.x - 20, stalker.y + 8)
+  const otherStalker = makeUnit(state, 1, 'porter', stalker.x + 400, stalker.y + 400)
+  const rock = state.rocks.find((entry) => entry.hp > 0)
+  const enemyKeep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(rock && enemyKeep, 'missing a rock or Silo a Stalker can still attack')
+
+  commandAttack(state, [stalker.id], flasher.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Flasher')
+  commandAttack(state, [stalker.id], gorilla.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Gorilla')
+  commandAttack(state, [stalker.id], hover.id, 'unit')
+  assert(task() == null, 'a Stalker was ordered onto a Hover')
+
+  const ally = makeUnit(state, 0, 'pike', stalker.x, stalker.y + 48)
+  commandAttack(state, [stalker.id, ally.id], gorilla.id, 'unit')
+  assert(task() == null, 'a Stalker joined an attack on a Gorilla')
+  assert(ally.order?.type === 'attack' && ally.order.targetId === gorilla.id, 'a Flasher was refused the same order')
+  ally.hp = 0
+
+  commandAttack(state, [stalker.id], otherStalker.id, 'unit')
+  const onStalker = task()
+  assert(
+    onStalker?.type === 'attack' && onStalker.kind === 'unit' && onStalker.targetId === otherStalker.id,
+    'a Stalker could not attack another Stalker',
+  )
+  commandAttack(state, [stalker.id], rock.id, 'rock')
+  const onRock = task()
+  assert(onRock?.type === 'attack' && onRock.kind === 'rock', 'a Stalker could not attack rock')
+  commandAttack(state, [stalker.id], enemyKeep.id, 'building')
+  const onKeep = task()
+  assert(
+    onKeep?.type === 'attack' && onKeep.kind === 'building' && onKeep.targetId === enemyKeep.id,
+    'a Stalker could not attack a Silo',
+  )
+
+  stalker.order = { type: 'attack', targetId: flasher.id, kind: 'unit' }
+  stalker.hurtTimer = 3
+  const flasherHp = flasher.hp
+  const gorillaHp = gorilla.hp
+  const hoverHp = hover.hp
+  for (let i = 0; i < 40; i++) step(state, 1 / 30)
+  assert(flasher.hp === flasherHp && gorilla.hp === gorillaHp && hover.hp === hoverHp, 'a Stalker damaged a combat unit')
+  const aimed = task()
+  const aimedUnit = aimed?.type === 'attack' && aimed.kind === 'unit' ? unitById(state, aimed.targetId) : null
+  assert(aimedUnit == null || aimedUnit.kind === 'porter', 'a Stalker kept a combat unit as its target')
+  commandMove(state, [stalker.id], flasher.x, flasher.y, true)
+  for (let i = 0; i < 20; i++) step(state, 1 / 30)
+  const moving = task()
+  const focus = moving?.type === 'attackMove' && moving.focusKind === 'unit' ? unitById(state, moving.focusId ?? -1) : null
+  const struck = moving?.type === 'attack' && moving.kind === 'unit' ? unitById(state, moving.targetId) : null
+  assert(focus == null || focus.kind === 'porter', 'attack-move locked a Stalker onto a combat unit')
+  assert(struck == null || struck.kind === 'porter', 'attack-move sent a Stalker after a combat unit')
+  assert(flasher.hp === flasherHp && gorilla.hp === gorillaHp && hover.hp === hoverHp, 'attack-move let a Stalker damage a combat unit')
+}
+
+function speedTriplesTheMatch(): void {
+  const state = createMatch(1)
+  const rate = (): number => state.speed
+  assert(rate() === 1, 'a match starts at triple speed')
+  assert(!runCommand(state, 'speed'), 'a partial speed line was accepted')
+  assert(rate() === 1, 'a partial line changed the speed')
+  assert(runCommand(state, '  Speed x3  '), 'speed x3 was rejected')
+  assert(rate() === 3, 'speed x3 did not triple the simulation')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is on.', 'speed x3 did not announce itself')
+  assert(runCommand(state, 'SPEED X3'), 'repeating speed x3 was rejected')
+  assert(rate() === 3, 'repeating speed x3 turned it off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is already on.', 'the repeat used the wrong notice')
+  const before = state.time
+  step(state, 1)
+  assert(Math.abs(state.time - (before + 1)) < 1e-6, 'speed x3 changed what one step means')
+  assert(runCommand(state, 'Speed x3 Off'), 'speed x3 off was rejected')
+  assert(rate() === 1, 'speed x3 off left the match sped up')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is off.', 'speed x3 off did not announce itself')
+  assert(runCommand(state, 'speed x3 off'), 'speed x3 off was rejected while already off')
+  assert(rate() === 1, 'the off command turned triple speed on')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Speed x3 is already off.', 'the off notice was wrong')
+}
+
+function freedomKillsEveryUnit(): void {
+  const state = createMatch(4)
+  const buildings = state.buildings.map((building) => building.id)
+  const stalkers = state.units.filter((unit) => unit.kind === 'porter')
+  assert(stalkers.length > 0, 'the map has no Stalkers')
+  makeUnit(state, 1, 'pike', 18.5 * TILE, 18.5 * TILE)
+  state.selectedUnits = state.units.filter((unit) => unit.owner === 0).map((unit) => unit.id)
+  const graves = state.graves.length
+  assert(runCommand(state, '  Freedom  '), 'freedom was rejected')
+  assert(state.units.length === 0, 'freedom left a unit on the map')
+  assert(state.selectedUnits.length === 0, 'freedom kept a selected unit')
+  assert(state.buildings.every((building) => buildings.includes(building.id)), 'freedom removed a building')
+  assert(state.graves.length === graves, 'freedom left a grave')
+  assert(state.supplyUsed.every((used) => used === 0), 'freedom kept Cells reserved for a dead unit')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'All units are dead.', 'freedom did not announce itself')
+  step(state, 2)
+  assert(state.graves.length === graves, 'a later step built graves for the units freedom killed')
+  assert(runCommand(state, 'freedom'), 'freedom was rejected on an empty map')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'No units left.', 'an empty map used the wrong notice')
+  assert(!runCommand(state, 'free'), 'a partial freedom line was accepted')
 }
 
 function fogHidesUnexploredGround(): void {
@@ -1419,17 +1614,17 @@ function godModeSavesNorthmark(): void {
   const sieger = makeUnit(state, 1, 'howler', 13.5 * TILE, 12.5 * TILE)
   assert(runCommand(state, 'God Mode'), 'God Mode was rejected')
   assert(state.godMode, 'God Mode did not turn on')
-  const workerHp = worker.hp
   const homeHp = home.hp
   const foeHp = foe.hp
+  const fighter = makeUnit(state, 0, 'pike', worker.x + 8, worker.y + 18)
   commandAttack(state, [foe.id], worker.id, 'unit')
-  commandAttack(state, [worker.id], foe.id, 'unit')
+  commandAttack(state, [fighter.id], foe.id, 'unit')
   commandAttack(state, [sieger.id], home.id, 'building')
   for (let i = 0; i < 5 * 60; i++) step(state, 1 / 60)
   const workerNow = unitById(state, worker.id)
   const homeNow = state.buildings.find((building) => building.id === home.id)
   const foeNow = unitById(state, foe.id)
-  assert(workerNow && workerNow.hp === workerHp, 'a Northmark worker took damage in God Mode')
+  assert(workerNow && stalkerUntouched(workerNow), 'a Northmark worker took damage in God Mode')
   assert(homeNow && homeNow.hp === homeHp, 'a Northmark building took damage in God Mode')
   assert(!foeNow || foeNow.hp < foeHp, 'God Mode also protected Dunmarch')
   const fresh = createMatch(12)
@@ -1967,6 +2162,10 @@ fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()
+freedomKillsEveryUnit()
+speedTriplesTheMatch()
+wildlifeStaysAmbient()
+stalkerDoesNotAttackCombatUnits()
 godModeSavesNorthmark()
 fogAndGodModeTurnOff()
 northmarkPlaysItself()
@@ -2042,7 +2241,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(open, [pike.id], stalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(open, 1 / 60)
   const taken = unitById(open, stalker.id)
-  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
+  assert(taken?.owner === 0 && stalkerUntouched(taken), `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
   assert(open.toasts.some((toast) => toast.text === 'Stalker captured.'), 'no stalker capture toast')
 
   const home = createMatch(4)
@@ -2054,7 +2253,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(home, [shooter.id], guarded.id, 'unit')
   for (let i = 0; i < 40; i++) step(home, 1 / 60)
   const still = unitById(home, guarded.id)
-  assert(still?.owner === 1 && still.hp === UNIT_STATS.porter.hp, `a covered stalker changed (${still?.owner}, ${still?.hp})`)
+  assert(still?.owner === 1 && stalkerUntouched(still), `a covered stalker changed (${still?.owner}, ${still?.hp})`)
 
   const far = createMatch(4)
   clearPad(far, 36, 20, 46, 32)
@@ -2065,7 +2264,7 @@ function captureHarvestAndPassages(): void {
   commandAttack(far, [foe.id], lone.id, 'unit')
   for (let i = 0; i < 40; i++) step(far, 1 / 60)
   const safe = unitById(far, lone.id)
-  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, 'a friendly flasher did not keep the stalker')
+  assert(safe?.owner === 1 && stalkerUntouched(safe), 'a friendly flasher did not keep the stalker')
 
   assert(BUILDING_STATS.silo.sight === 150, `storage sight is ${BUILDING_STATS.silo.sight}`)
   assert(
@@ -2095,7 +2294,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 40; i++) step(sheltered, 1 / 60)
   const shelteredStill = unitById(sheltered, shelteredStalker.id)
   assert(
-    shelteredStill?.owner === 1 && shelteredStill.hp === UNIT_STATS.porter.hp,
+    shelteredStill?.owner === 1 && stalkerUntouched(shelteredStill),
     `storage sight did not keep the stalker (${shelteredStill?.owner}, ${shelteredStill?.hp})`,
   )
 
@@ -2123,7 +2322,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 40; i++) step(rising, 1 / 60)
   const risingTaken = unitById(rising, risingStalker.id)
   assert(
-    risingTaken?.owner === 0 && risingTaken.hp === UNIT_STATS.porter.hp,
+    risingTaken?.owner === 0 && stalkerUntouched(risingTaken),
     `an unfinished storage protected the stalker (${risingTaken?.owner}, ${risingTaken?.hp})`,
   )
 
@@ -2163,7 +2362,7 @@ function captureHarvestAndPassages(): void {
   for (let i = 0; i < 90; i++) step(ai, 1 / 60)
   const aiKept = unitById(ai, aiStalker.id)
   assert(
-    aiKept?.owner === 0 && aiKept.hp === UNIT_STATS.porter.hp,
+    aiKept?.owner === 0 && stalkerUntouched(aiKept),
     `SiloAI captured a stalker beside Storage (${aiKept?.owner}, ${aiKept?.hp})`,
   )
 
@@ -3238,9 +3437,9 @@ function towerFiresOutToItsSight(): void {
   }
   assert(shotSeen, 'the Tower shot was not a Bike projectile')
   assert(sameDamage(drop, BUILDING_STATS.tower.damage ?? 0), `the Tower dealt ${drop} at the edge of its sight`)
-  assert(behindRock.hp === UNIT_STATS.porter.hp, 'the Tower shot through a rock')
-  assert(behindTree.hp === UNIT_STATS.porter.hp, 'the Tower shot through a tree')
-  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower shot an enemy outside its sight')
+  assert(stalkerUntouched(behindRock), 'the Tower shot through a rock')
+  assert(stalkerUntouched(behindTree), 'the Tower shot through a tree')
+  assert(stalkerUntouched(hidden), 'the Tower shot an enemy outside its sight')
   assert(rock.hp === ROCK_HP && tree.hp === ROCK_HP, 'the Tower shot a rock or a tree')
   const near = tileAlong(2)
   const closer = makeUnit(state, 1, 'pike', (near.tx + 0.5) * TILE, (near.ty + 0.5) * TILE)
@@ -3271,7 +3470,7 @@ function towerFiresOutToItsSight(): void {
     }
   }
   assert(sameDamage(closerDrop, BUILDING_STATS.tower.damage ?? 0), `the Tower did not retarget after the kill (${closerDrop})`)
-  assert(hidden.hp === UNIT_STATS.porter.hp, 'the Tower fired into the fog after retargeting')
+  assert(stalkerUntouched(hidden), 'the Tower fired into the fog after retargeting')
 
   const foeHome = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(foeHome, 'missing the Dunmarch castle')
@@ -4016,7 +4215,7 @@ function pillarCapturesAnUncoveredStalker(): void {
     if (unitById(open, stalker.id)?.owner === 0) break
   }
   const taken = unitById(open, stalker.id)
-  assert(taken?.owner === 0 && taken.hp === UNIT_STATS.porter.hp, `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
+  assert(taken?.owner === 0 && stalkerUntouched(taken), `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
 
   const sheltered = createMatch(4)
   sheltered.aiAcc = -10
@@ -4034,7 +4233,7 @@ function pillarCapturesAnUncoveredStalker(): void {
     step(sheltered, 1 / 60)
   }
   const safe = unitById(sheltered, guarded.id)
-  assert(safe?.owner === 1 && safe.hp === UNIT_STATS.porter.hp, `a Pillar captured a Stalker inside finished Storage (${safe?.owner}, ${safe?.hp})`)
+  assert(safe?.owner === 1 && stalkerUntouched(safe), `a Pillar captured a Stalker inside finished Storage (${safe?.owner}, ${safe?.hp})`)
 }
 
 function siloAiPillarsWatchMinesAndAvoidEnemyPillars(): void {

@@ -1,3 +1,4 @@
+import { spawnAnimals } from './animals'
 import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
@@ -266,6 +267,7 @@ export function makeUnit(
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    age: 0,
   }
   state.units.push(unit)
   return unit
@@ -363,6 +365,8 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     aiControl: false,
     ore: [],
     rocks: [],
+    graves: [],
+    animals: [],
     units: [],
     buildings: [],
     projectiles: [],
@@ -375,10 +379,12 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     supplyCap: Array.from({ length: playerCount }, () => 0),
     time: 0,
     paused: false,
+    speed: 1,
     outcome: null,
     selectedUnits: [],
     selectedBuilding: null,
     selectedOre: null,
+    selectedGrave: null,
     placement: null,
     attackMoveArmed: false,
     moveArmed: false,
@@ -445,6 +451,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
   rebuildBlocked(state)
   recomputeSupply(state)
   updateVision(state)
+  spawnAnimals(state)
   return state
 }
 

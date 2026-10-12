@@ -153,6 +153,7 @@ function selectIdlePorters(): void {
   match.selectedUnits = ids
   match.selectedBuilding = null
   match.selectedOre = null
+  match.selectedGrave = null
   match.events.push({ type: 'select' })
   const first = unitById(match, ids[0] ?? -1)
   if (first) focus(first.x, first.y)
@@ -229,9 +230,10 @@ function loop(now: number): void {
     const live = match
     const ground = terrain
     if (!live.paused) {
-      acc += dt
+      const rate = live.speed === 3 ? 3 : 1
+      acc += dt * rate
       let guard = 0
-      while (acc >= STEP && guard++ < 6) {
+      while (acc >= STEP && guard++ < 6 * rate) {
         step(live, STEP)
         acc -= STEP
       }

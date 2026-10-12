@@ -20,6 +20,7 @@ let yardMask: Uint8Array | null = null
 let rocks: HTMLCanvasElement[] | null = null
 let trees: HTMLCanvasElement[] | null = null
 let ore: HTMLCanvasElement[] | null = null
+let grave: HTMLCanvasElement | null = null
 const fogCache = new Map<string, HTMLCanvasElement>()
 
 function smooth(t: number): number {
@@ -859,6 +860,103 @@ export function drawTreeSprite(ctx: CanvasRenderingContext2D, tx: number, ty: nu
   const sprite = sheet[index]
   if (!sprite) return
   ctx.drawImage(sprite, tx * TILE - 8, ty * TILE - 22)
+}
+
+function graveSprite(): HTMLCanvasElement {
+  if (grave) return grave
+  const canvas = document.createElement('canvas')
+  canvas.width = 28
+  canvas.height = 32
+  const ctx = canvas.getContext('2d')
+  grave = canvas
+  if (!ctx) return canvas
+  ctx.fillStyle = 'rgba(24, 32, 18, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(14, 28, 9, 3, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#5c6a48'
+  ctx.beginPath()
+  ctx.ellipse(14, 26, 8, 3.2, 0, 0, Math.PI * 2)
+  ctx.fill()
+  const body = ctx.createLinearGradient(6, 4, 22, 26)
+  body.addColorStop(0, '#d2c4b0')
+  body.addColorStop(0.45, '#8d7d6c')
+  body.addColorStop(1, '#4a4036')
+  ctx.fillStyle = body
+  ctx.beginPath()
+  ctx.moveTo(8, 24)
+  ctx.lineTo(8, 12)
+  ctx.arc(14, 12, 6, Math.PI, 0)
+  ctx.lineTo(20, 24)
+  ctx.closePath()
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(42, 34, 28, 0.8)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+  paintGraveMark(ctx)
+  return canvas
+}
+
+/** The sprout cut into the tombstone, in place of the cross. */
+function paintGraveMark(ctx: CanvasRenderingContext2D): void {
+  ctx.save()
+  ctx.translate(14, 13.2)
+  ctx.scale(10 / 60, 10 / 59)
+  ctx.translate(-30, -29.5)
+  ctx.fillStyle = 'rgba(36, 28, 22, 0.94)'
+  ctx.beginPath()
+  ctx.moveTo(30, 0)
+  ctx.bezierCurveTo(48, 8, 48, 20, 44, 28)
+  ctx.bezierCurveTo(40, 35, 34, 33, 32, 32)
+  ctx.lineTo(28, 32)
+  ctx.bezierCurveTo(26, 33, 20, 35, 16, 28)
+  ctx.bezierCurveTo(12, 20, 12, 8, 30, 0)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(16, 20)
+  ctx.bezierCurveTo(6, 16, 0, 20, 1, 26)
+  ctx.bezierCurveTo(2, 32, 10, 33, 17, 29)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(44, 20)
+  ctx.bezierCurveTo(54, 16, 60, 20, 59, 26)
+  ctx.bezierCurveTo(58, 32, 50, 33, 43, 29)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillRect(28.2, 30, 3.6, 20)
+  ctx.beginPath()
+  ctx.moveTo(0, 37)
+  ctx.lineTo(26, 37)
+  ctx.lineTo(26, 53)
+  ctx.quadraticCurveTo(20, 59, 10, 58)
+  ctx.quadraticCurveTo(0, 55, 0, 45)
+  ctx.closePath()
+  ctx.fill()
+  ctx.beginPath()
+  ctx.moveTo(34, 37)
+  ctx.lineTo(60, 37)
+  ctx.lineTo(60, 45)
+  ctx.quadraticCurveTo(60, 55, 50, 58)
+  ctx.quadraticCurveTo(40, 59, 34, 53)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
+
+export function drawGraveSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, selected: boolean): void {
+  const x = (tx + 0.5) * TILE
+  const y = (ty + 0.5) * TILE
+  if (selected) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(244, 241, 196, 0.95)'
+    ctx.lineWidth = 1.6
+    ctx.beginPath()
+    ctx.ellipse(x, y + 4, 12, 7, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  }
+  ctx.drawImage(graveSprite(), x - 14, y - 18)
 }
 
 export function drawOreSprite(

@@ -1,4 +1,4 @@
-import { pushToast } from './state'
+import { pushToast, recomputeSupply } from './state'
 import type { MatchState } from './types'
 import { clearFog, restoreFog } from './vision'
 
@@ -76,26 +76,35 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'Enemy cam is off.')
     return true
   }
-  if (text === 'both cam') {
+  if (text === 'all cams') {
     if (state.bothCam && !state.enemyCam && !state.fogCleared) {
-      pushToast(state, 'Both cam is already on.')
+      pushToast(state, 'All cams is already on.')
       return true
     }
     leaveViews(state, 'both')
     state.bothCam = true
-    pushToast(state, 'Both cam is on.')
+    pushToast(state, 'All cams is on.')
     return true
   }
-  if (text === 'off both cam') {
+  if (text === 'all cams off') {
     if (!state.bothCam) {
-      pushToast(state, 'Both cam is already off.')
+      pushToast(state, 'All cams is already off.')
       return true
     }
     state.bothCam = false
-    pushToast(state, 'Both cam is off.')
+    pushToast(state, 'All cams is off.')
     return true
   }
-  if (text === 'ai control') {
+  if (text === 'freedom') {
+    for (const unit of state.units) unit.hp = 0
+    const any = state.units.length > 0
+    state.units = []
+    state.selectedUnits = []
+    recomputeSupply(state)
+    pushToast(state, any ? 'All units are dead.' : 'No units left.')
+    return true
+  }
+  if (text === 'siloai') {
     if (state.aiControl) {
       pushToast(state, 'SiloAI is already on.')
       return true
@@ -108,7 +117,25 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'SiloAI is on.')
     return true
   }
-  if (text === 'off ai control') {
+  if (text === 'speed x3') {
+    if (state.speed === 3) {
+      pushToast(state, 'Speed x3 is already on.')
+      return true
+    }
+    state.speed = 3
+    pushToast(state, 'Speed x3 is on.')
+    return true
+  }
+  if (text === 'speed x3 off') {
+    if (state.speed !== 3) {
+      pushToast(state, 'Speed x3 is already off.')
+      return true
+    }
+    state.speed = 1
+    pushToast(state, 'Speed x3 is off.')
+    return true
+  }
+  if (text === 'siloai off') {
     if (!state.aiControl) {
       pushToast(state, 'SiloAI is already off.')
       return true

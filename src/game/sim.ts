@@ -1,3 +1,4 @@
+import { updateAnimals } from './animals'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
@@ -33,9 +34,11 @@ import {
   STORAGE_CAP,
   PLAYER_COLOR,
   PLAYER_NAME,
+  STALKER_LIFESPAN,
   STUCK_REDIRECT_SECONDS,
   TILE,
   UNIT_STATS,
+  isCombatUnit,
   type Building,
   type MatchState,
   type Order,
@@ -62,6 +65,16 @@ export function step(state: MatchState, dt: number): void {
     unit.attackCd = Math.max(0, unit.attackCd - dt)
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
+    if (unit.kind === 'porter' && unit.hp > 0) {
+      const lived = unit.age
+      unit.age += dt
+      const span = Math.min(unit.age, STALKER_LIFESPAN) - Math.min(lived, STALKER_LIFESPAN)
+      unit.hp -= (UNIT_STATS.porter.hp / STALKER_LIFESPAN) * span
+      if (unit.age >= STALKER_LIFESPAN || unit.hp <= 0) {
+        unit.hp = 0
+        layGrave(state, unit)
+      }
+    }
     tryFire(state, unit)
   }
   for (const building of state.buildings) {
@@ -80,6 +93,7 @@ export function step(state: MatchState, dt: number): void {
   coverOpenSites(state)
   fillOpenGatherSlots(state)
   watchStuckUnits(state, dt)
+  updateAnimals(state, dt)
   updateVision(state)
   updateScanners(state)
   fadeEffects(state, dt)
@@ -955,6 +969,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    age: 0,
   }
   state.units.push(unit)
   if (Math.hypot(building.rallyX - spot.x, building.rallyY - spot.y) > 20) {
@@ -1140,6 +1155,7 @@ function isAttackable(unit: Unit, focus: Target): boolean {
   if (unit.kind === 'drone') return false
   if (focus.targetKind === 'rock') return unit.kind === 'porter'
   if (focus.unitKind === 'drone' && unit.kind === 'howler') return false
+  if (unit.kind === 'porter' && focus.targetKind === 'unit' && focus.unitKind !== 'porter') return false
   return focus.owner !== unit.owner
 }
 
@@ -1200,6 +1216,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   for (const other of state.units) {
     if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
+    if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
     if (other.kind === 'porter' && stalkerCovered(state, other)) continue
     const d = Math.hypot(other.x - unit.x, other.y - unit.y)
     if (d < bestD) {
@@ -1293,6 +1310,13 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     const label = building.kind === 'keep' ? 'The Silo is under attack.' : `Your ${BUILDING_STATS[building.kind].label} is under attack.`
     state.toasts.push({ text: label, life: 3.4 })
   }
+}
+
+/** A lifespan death leaves a grave on the tile where the Stalker was standing. */
+function layGrave(state: MatchState, unit: Unit): void {
+  const tx = Math.min(state.mapW - 1, Math.max(0, Math.floor(unit.x / TILE)))
+  const ty = Math.min(state.mapH - 1, Math.max(0, Math.floor(unit.y / TILE)))
+  state.graves.push({ id: state.nextId++, tx, ty })
 }
 
 function cleanup(state: MatchState): void {
