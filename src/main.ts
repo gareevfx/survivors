@@ -4,9 +4,7 @@ import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
 import { localOwner, mp, multiplayer } from './game/mpRole'
-import { formatWait, type LobbyAd } from './game/mpLobby'
-import { advertiseRoom, lobbyPhase, lobbyRooms, refreshListing, startListing, stopListing } from './game/mpLobbyClient'
-import { endMp, hostRoom, joinRoom, pumpNet, roomCode } from './game/mpSession'
+import { endMp, hostRoom, joinRoom, pumpNet } from './game/mpSession'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
@@ -252,7 +250,6 @@ function showMp(open: boolean): void {
     document.querySelector(id)?.classList.toggle('hidden', open)
   }
   if (menuResume) menuResume.classList.toggle('hidden', open || !match || match.outcome != null)
-  if (!open) showHosts(false)
 }
 
 function setMpStatus(text: string, live: boolean): void {
@@ -269,7 +266,6 @@ function mpHooks() {
     onCode: (code: string) => {
       if (mpRoomCode) mpRoomCode.textContent = code
       mpRoom?.classList.remove('hidden')
-      advertiseRoom({ code, name: PLAYER_NAME[0], since: Date.now() })
     },
     onReady: (seed: number) => startMatch('duel', seed),
     onDrop: (message: string) => leaveOnline(message),
@@ -284,7 +280,6 @@ function leaveOnline(message: string): void {
   terrain = null
   menuOpen = true
   menu?.classList.remove('hidden')
-  showHosts(false)
   showMp(true)
   if (mpRoom) mpRoom.classList.add('hidden')
   if (mpCode) mpCode.value = ''
@@ -297,14 +292,14 @@ document.querySelector('#menu-mp')?.addEventListener('click', () => {
   showMp(true)
   if (mpRoom) mpRoom.classList.add('hidden')
   if (mpCode) mpCode.value = ''
-  setMpStatus('Host a room, pick one from the list, or join with a code.', false)
+  setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
 })
 document.querySelector('#mp-back')?.addEventListener('click', () => {
   if (multiplayer()) leaveOnline('You left the match.')
   else {
     endMp()
     showMp(false)
-    setMpStatus('Host a room, pick one from the list, or join with a code.', false)
+    setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
   }
 })
 document.querySelector('#mp-host')?.addEventListener('click', () => {
@@ -319,89 +314,10 @@ mpCode?.addEventListener('keydown', (event) => {
   event.preventDefault()
   joinRoom(mpCode.value, mpHooks())
 })
-const hostsList = document.querySelector<HTMLElement>('#mp-hosts-list')
-let hostsTimer = 0
-let hostsListen: ((rooms: LobbyAd[]) => void) | null = null
-
-function renderHosts(): void {
-  if (!hostsList) return
-  hostsList.replaceChildren()
-  const phase = lobbyPhase()
-  const mine = roomCode()
-  const rooms = lobbyRooms().filter((row) => row.code !== mine)
-  if (phase === 'down') {
-    hostsList.append(hostsNote('The lobby broker did not answer. Join with a code.'))
-    return
-  }
-  if (phase !== 'up' && rooms.length === 0) {
-    hostsList.append(hostsNote('Looking for open rooms…'))
-    return
-  }
-  if (rooms.length === 0) {
-    hostsList.append(hostsNote('No open rooms. Host one, or join with a code.'))
-    return
-  }
-  const now = Date.now()
-  for (const row of rooms) {
-    const line = document.createElement('div')
-    line.className = 'mp-host-row'
-    line.setAttribute('aria-label', `${row.name}, room ${row.code}, waiting ${formatWait(row.since, now)}`)
-    const name = document.createElement('span')
-    name.textContent = row.name
-    const meta = document.createElement('span')
-    meta.className = 'meta'
-    const code = document.createElement('b')
-    code.textContent = row.code
-    meta.append(code, document.createTextNode(` · waiting ${formatWait(row.since, now)}`))
-    const join = document.createElement('button')
-    join.type = 'button'
-    join.textContent = 'Join'
-    join.addEventListener('click', () => {
-      showHosts(false)
-      if (mpCode) mpCode.value = row.code
-      joinRoom(row.code, mpHooks())
-    })
-    line.append(name, meta, join)
-    hostsList.append(line)
-  }
-}
-
-function hostsNote(text: string): HTMLElement {
-  const note = document.createElement('p')
-  note.className = 'meta'
-  note.textContent = text
-  return note
-}
-
-function showHosts(open: boolean): void {
-  document.querySelector('#mp-hosts-page')?.classList.toggle('hidden', !open)
-  document.querySelector('#mp-home')?.classList.toggle('hidden', open)
-  if (hostsTimer) window.clearInterval(hostsTimer)
-  hostsTimer = 0
-  if (hostsListen) {
-    stopListing(hostsListen)
-    hostsListen = null
-  }
-  if (!open) return
-  hostsListen = () => renderHosts()
-  startListing(hostsListen)
-  renderHosts()
-  hostsTimer = window.setInterval(() => {
-    renderHosts()
-    void refreshListing()
-  }, 4000)
-}
-
-document.querySelector('#mp-hosts')?.addEventListener('click', () => showHosts(true))
-document.querySelector('#mp-hosts-back')?.addEventListener('click', () => showHosts(false))
-document.querySelector('#mp-hosts-refresh')?.addEventListener('click', () => {
-  void refreshListing().then(() => renderHosts())
-})
-
 document.querySelector('#mp-copy')?.addEventListener('click', () => {
   const code = mpRoomCode?.textContent?.trim() ?? ''
   if (!code) return
-  const done = () => setMpStatus(`Copied ${code}. Waiting for opponent.`, false)
+  const done = () => setMpStatus(`Copied ${code}. Waiting for the other PC.`, false)
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(code).then(done).catch(done)
     return

@@ -1,33 +1,21 @@
-/** Public STUN plus the Metered open relay. No API key, no server of our own. */
-export const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  {
-    urls: [
-      'stun:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:80?transport=tcp',
-      'turn:openrelay.metered.ca:443',
-      'turn:openrelay.metered.ca:443?transport=tcp',
-      'turns:openrelay.metered.ca:443?transport=tcp',
-    ],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-]
-
+/**
+ * LAN only. An empty server list gathers host candidates, including the
+ * mDNS .local names browsers use on a home network. No STUN and no TURN,
+ * so a guest on another network cannot open the data channel.
+ * PeerJS is used only to exchange those candidates.
+ */
 export const CONNECT_MS = 20000
 export const GUEST_TRIES = 3
 
-export const RELAY_FAIL = 'Could not open a direct or relayed connection. Check the code and try again.'
+export const LAN_FAIL = 'Could not reach that PC on this network. Use the same Wi-Fi and check the code.'
 
-export type LinkPath = 'Connecting…' | 'Direct' | 'Relayed'
+export type LinkPath = 'Connecting…' | 'On the LAN'
 export type GuestFail = 'timeout' | 'drop' | 'missing' | 'other'
 
 export function peerOptions(): { debug: 0; config: RTCConfiguration } {
   return {
     debug: 0,
-    config: { iceServers: ICE_SERVERS, iceTransportPolicy: 'all' },
+    config: { iceServers: [] },
   }
 }
 
@@ -48,7 +36,7 @@ export interface IceStat {
   candidateType?: string
 }
 
-/** Relay if the nominated pair's local candidate is a TURN relay. Otherwise direct. */
+/** The match counts as local only when the nominated pair is a host candidate. */
 export function pathFromStats(reports: Iterable<IceStat>): LinkPath {
   const locals = new Map<string, string>()
   let best: IceStat | undefined
@@ -62,7 +50,6 @@ export function pathFromStats(reports: Iterable<IceStat>): LinkPath {
     else if (!best && report.state === 'succeeded') best = report
   }
   const kind = best?.localCandidateId ? locals.get(best.localCandidateId) : undefined
-  if (kind === 'relay') return 'Relayed'
-  if (kind === 'host' || kind === 'srflx' || kind === 'prflx') return 'Direct'
+  if (kind === 'host') return 'On the LAN'
   return 'Connecting…'
 }

@@ -3,7 +3,7 @@ import { setGuestSender } from './mpLink'
 import {
   CONNECT_MS,
   GUEST_TRIES,
-  RELAY_FAIL,
+  LAN_FAIL,
   guestShouldRetry,
   pathFromStats,
   peerOptions,
@@ -11,7 +11,6 @@ import {
   type IceStat,
   type LinkPath,
 } from './mpIce'
-import { stopAdvertising } from './mpLobbyClient'
 import { mp } from './mpRole'
 import {
   acceptSnapshot,
@@ -84,7 +83,6 @@ export function endMp(): void {
   } catch {
     /* already destroyed */
   }
-  void stopAdvertising()
 }
 
 export function hostRoom(next: MpHooks): void {
@@ -145,7 +143,7 @@ function openHost(mine: number, attempt: number): void {
     if (retired || mine !== ticket) return
     room = code
     hooks?.onCode(code)
-    hooks?.onStatus(`Waiting for opponent. Code ${code}.`, false)
+    hooks?.onStatus(`Waiting for the other PC. Code ${code}.`, false)
   })
   host.on('connection', (incoming) => {
     if (retired || mine !== ticket) return
@@ -237,7 +235,7 @@ function joinAttempt(code: string, mine: number, attempt: number): void {
     fail(mine, message)
   }
   const timer = window.setTimeout(() => {
-    finish('timeout', RELAY_FAIL)
+    finish('timeout', LAN_FAIL)
   }, CONNECT_MS)
   guest.on('open', () => {
     if (attemptDone || mine !== ticket) return
@@ -265,7 +263,7 @@ function joinAttempt(code: string, mine: number, attempt: number): void {
       finish('other', errorText(err))
       return
     }
-    finish('drop', RELAY_FAIL)
+    finish('drop', LAN_FAIL)
   })
   guest.on('disconnected', () => {
     if (mine !== ticket || !attemptDone) return
@@ -309,7 +307,6 @@ function bind(
         matched = true
         matchSeed = (Math.random() * 1_000_000_000) | 0
         mp.role = 'host'
-        void stopAdvertising()
         hooks?.onStatus(onlineLine(PLAYER_NAME[0]), true)
         hooks?.onReady(matchSeed)
       }
@@ -322,11 +319,11 @@ function bind(
     if (mine !== ticket || link !== conn) return
     if (side === 'host' && !matched) {
       link = null
-      hooks?.onStatus(`Waiting for opponent. Code ${room}.`, false)
+      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
       return
     }
     if (side === 'guest' && mp.role !== 'guest') {
-      onGuestFail?.('drop', RELAY_FAIL)
+      onGuestFail?.('drop', LAN_FAIL)
       return
     }
     fail(mine, 'Opponent left.')
@@ -340,11 +337,11 @@ function bind(
       } catch {
         /* already closed */
       }
-      hooks?.onStatus(`Waiting for opponent. Code ${room}.`, false)
+      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
       return
     }
     if (side === 'guest' && mp.role !== 'guest') {
-      onGuestFail?.('drop', RELAY_FAIL)
+      onGuestFail?.('drop', LAN_FAIL)
       return
     }
     fail(mine, 'The connection dropped.')
