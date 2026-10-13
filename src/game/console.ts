@@ -1,3 +1,4 @@
+import { multiplayer } from './mpRole'
 import { pushToast, recomputeSupply } from './state'
 import type { MatchState } from './types'
 import { clearFog, restoreFog } from './vision'
@@ -20,6 +21,10 @@ function leaveViews(state: MatchState, keep: 'normal' | 'clear' | 'enemy' | 'bot
 export function runCommand(state: MatchState, raw: string): boolean {
   const text = raw.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!text) return false
+  if (multiplayer()) {
+    pushToast(state, 'Commands are off in multiplayer.')
+    return true
+  }
   if (text === 'off fow' || text === 'off fog of war') {
     if (state.fogCleared && !state.enemyCam && !state.bothCam) {
       pushToast(state, 'FOW is already off.')

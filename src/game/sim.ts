@@ -1,4 +1,5 @@
 import { updateAnimals } from './animals'
+import { multiplayer } from './mpRole'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
@@ -1185,6 +1186,7 @@ function pickFireTarget(state: MatchState, unit: Unit): Target | null {
 }
 
 function siloControlled(state: MatchState, unit: Unit): boolean {
+  if (multiplayer()) return false
   return unit.owner === 0 ? state.aiControl : unit.owner > 0
 }
 
@@ -1230,8 +1232,9 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   }
   if (!best && buildingsToo) {
     const castleFirst =
-      (unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
-      (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0))
+      !multiplayer() &&
+      ((unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
+        (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0)))
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
       if (castleFirst && building.kind !== 'keep') continue

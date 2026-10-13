@@ -1,3 +1,5 @@
+import { guestSend } from './mpLink'
+import { multiplayer } from './mpRole'
 import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { depositKnown } from './vision'
 import {
@@ -348,6 +350,7 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
 }
 
 export function commandStop(state: MatchState, ids: number[]): void {
+  if (guestSend({ op: 'stop', ids })) return
   if (state.outcome || state.paused) return
   for (const unit of living(state, ids)) {
     noteProgress(unit)
@@ -360,6 +363,7 @@ export function commandStop(state: MatchState, ids: number[]): void {
 }
 
 export function commandMove(state: MatchState, ids: number[], x: number, y: number, attackMove: boolean): void {
+  if (guestSend({ op: 'move', ids, x, y, attackMove })) return
   if (state.outcome || state.paused) return
   const units = living(state, ids)
   if (!units.length) return
@@ -400,8 +404,8 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
 }
 
 /** Living player Hovers. Dead and enemy Hovers are left out. */
-export function playerHovers(state: MatchState, ids: number[]): Unit[] {
-  return living(state, ids).filter((unit) => unit.owner === 0 && unit.kind === 'drone')
+export function playerHovers(state: MatchState, ids: number[], actor: PlayerId = 0): Unit[] {
+  return living(state, ids).filter((unit) => unit.owner === actor && unit.kind === 'drone')
 }
 
 /** Cell centers covering the map. The last short row is spread across the full width. */
@@ -488,9 +492,10 @@ function minCostAssign(cost: number[][]): number[] {
 }
 
 /** Send at least ten player Hovers to a map-wide grid, then leave them there. */
-export function commandHoverGrid(state: MatchState, ids: number[]): void {
+export function commandHoverGrid(state: MatchState, ids: number[], actor: PlayerId = 0): void {
+  if (guestSend({ op: 'grid', ids })) return
   if (state.outcome || state.paused) return
-  const hovers = playerHovers(state, ids)
+  const hovers = playerHovers(state, ids, actor)
   if (hovers.length < 10) return
   const spots = hoverGridSpots(state.mapW, state.mapH, hovers.length)
   const cost = hovers.map((unit) =>
@@ -522,6 +527,7 @@ export function commandAttack(
   targetId: number,
   kind: TargetKind,
 ): void {
+  if (guestSend({ op: 'attack', ids, targetId, kind })) return
   if (state.outcome || state.paused) return
   let owner: PlayerId | null = null
   let x = 0
@@ -592,6 +598,7 @@ export function debitDumps(state: MatchState, owner: number, amount: number): vo
  * Returns false when there is nothing to haul, so the caller can attack instead.
  */
 export function commandHarvestOrAttack(state: MatchState, ids: number[], buildingId: number): boolean {
+  if (guestSend({ op: 'harvest', ids, buildingId })) return true
   if (state.outcome || state.paused) return false
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0 || building.kind !== 'silo' || building.stock <= 0) return false
@@ -619,6 +626,7 @@ export function commandHarvestOrAttack(state: MatchState, ids: number[], buildin
 }
 
 export function commandGather(state: MatchState, ids: number[], nodeId: number): void {
+  if (guestSend({ op: 'gather', ids, nodeId })) return
   if (state.outcome || state.paused) return
   const node = state.ore.find((entry) => entry.id === nodeId && entry.amount > 0)
   if (!node) return
@@ -649,6 +657,7 @@ export function commandGather(state: MatchState, ids: number[], nodeId: number):
 
 /** Send workers back to an unfinished building. Progress already on the site is kept. */
 export function commandConstruct(state: MatchState, ids: number[], buildingId: number): void {
+  if (guestSend({ op: 'construct', ids, buildingId })) return
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0 || building.complete) return
@@ -666,6 +675,7 @@ export function commandConstruct(state: MatchState, ids: number[], buildingId: n
 
 /** Send these Stalkers to the nearest ruined Silo. */
 export function commandRepairNearest(state: MatchState, ids: number[]): string | null {
+  if (guestSend({ op: 'repairNearest', ids })) return null
   const crew = living(state, ids).filter((unit) => unit.kind === 'porter')
   if (!crew.length) return 'You need a stalker to repair'
   let x = 0
@@ -693,6 +703,7 @@ export function commandRepairNearest(state: MatchState, ids: number[]): string |
 
 /** Send Stalkers to rebuild a ruined Silo. The cost is paid when work starts. */
 export function commandRepair(state: MatchState, ids: number[], buildingId: number): string | null {
+  if (guestSend({ op: 'repair', ids, buildingId })) return null
   if (state.paused) return null
   if (state.outcome) return 'The battle is over'
   const building = buildingById(state, buildingId)
@@ -716,9 +727,11 @@ export function commandRepair(state: MatchState, ids: number[], buildingId: numb
 }
 
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
+  if (guestSend({ op: 'rally', buildingId, x, y })) return
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
-  if (!building || building.owner !== 0 || building.hp <= 0) return
+  if (!building || building.hp <= 0) return
+  if (building.owner !== 0 && !(multiplayer() && building.owner === 1)) return
   building.rallyX = x
   building.rallyY = y
   state.pings.push({ x, y, life: 0.5, max: 0.5, color: '#9fd8ff' })
@@ -726,6 +739,7 @@ export function commandRally(state: MatchState, buildingId: number, x: number, y
 }
 
 export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind): string | null {
+  if (guestSend({ op: 'train', buildingId, kind })) return null
   if (state.paused) return null
   if (state.outcome) return 'The battle is over'
   const building = buildingById(state, buildingId)
@@ -748,6 +762,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
 }
 
 export function cancelTrain(state: MatchState, buildingId: number): void {
+  if (guestSend({ op: 'cancelTrain', buildingId })) return
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.queue.length === 0) return
@@ -782,6 +797,10 @@ export function tryPlace(
   ty: number,
   preferredPorterIds: number[],
 ): string | null {
+  if (guestSend({ op: 'place', kind, tx, ty, porters: preferredPorterIds })) {
+    state.placement = null
+    return null
+  }
   if (state.paused) return null
   if (state.outcome) return 'The battle is over'
   if (kind === 'keep') return 'The Silo is already standing'
@@ -843,6 +862,7 @@ export function tryPlace(
 }
 
 export function cancelBuilding(state: MatchState, buildingId: number): void {
+  if (guestSend({ op: 'cancelBuild', buildingId })) return
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
   if (!building || building.complete || building.kind === 'keep') return

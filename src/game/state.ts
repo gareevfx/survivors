@@ -1,4 +1,5 @@
 import { spawnAnimals } from './animals'
+import { localOwner } from './mpRole'
 import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
@@ -508,7 +509,8 @@ function aimRally(building: Building): void {
 }
 
 export function playerKeep(state: MatchState): Building | undefined {
-  return state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  const owner = localOwner()
+  return state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
 export function nearestOre(state: MatchState, x: number, y: number): { id: number; tx: number; ty: number } | null {

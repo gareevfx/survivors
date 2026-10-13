@@ -1,3 +1,5 @@
+import { localOwner, mp, multiplayer } from './game/mpRole'
+import { acceptSnapshot, applyNetCmd, applySnapshot, captureSnapshot, parseCmd, setGuestBlend } from './game/mpProtocol'
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, playerHovers, tryPlace, tryTrain } from './game/commands'
@@ -2226,6 +2228,7 @@ siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
+multiplayerSnapshotAndCommands()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -5187,4 +5190,104 @@ function fullStorageRefusesAHaul(): void {
     `the replacement Storage is ${gap} tiles from the heap`,
   )
   assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
+}
+
+function multiplayerSnapshotAndCommands(): void {
+  assert(localOwner() === 0 && !multiplayer(), 'single player no longer starts as Silo 01')
+  const host = createMatch(42, 'duel')
+  const guest = createMatch(42, 'duel')
+  const mover = host.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const bystander = host.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  const attacker = host.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && unit.id !== mover?.id)
+  assert(mover && bystander && attacker, 'the duel did not seat both sides')
+  const parked = { x: bystander.x, y: bystander.y }
+  const move = {
+    op: 'move' as const,
+    ids: [mover.id, bystander.id],
+    x: mover.x + 90,
+    y: mover.y + 12,
+    attackMove: false,
+  }
+  const wired = parseCmd(JSON.parse(JSON.stringify(move)))
+  assert(wired?.op === 'move', 'a move command did not survive the wire')
+  assert(applyNetCmd(host, wired) == null, 'the host rejected a guest move')
+  const moved = unitById(host, mover.id)
+  assert(moved?.order?.type === 'move', 'Silo 02 did not take the move')
+  const still = unitById(host, bystander.id)
+  assert(still && still.order == null && still.x === parked.x && still.y === parked.y, 'a guest command moved Silo 01')
+  const attack = parseCmd(JSON.parse(JSON.stringify({ op: 'attack', ids: [attacker.id, bystander.id], targetId: bystander.id, kind: 'unit' })))
+  assert(attack?.op === 'attack', 'an attack command did not survive the wire')
+  assert(applyNetCmd(host, attack) == null, 'the host rejected a guest attack')
+  assert(unitById(host, attacker.id)?.order?.type === 'attack', 'Silo 02 did not take the attack')
+  assert(unitById(host, bystander.id)?.order == null, 'the attack order landed on Silo 01')
+
+  const keep = host.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'Silo 02 has no Silo')
+  const bank = host.oreHeld[0] ?? 0
+  host.oreHeld[1] = 800
+  const before = host.oreHeld[1]
+  const train = parseCmd(JSON.parse(JSON.stringify({ op: 'train', buildingId: keep.id, kind: 'porter' })))
+  assert(train?.op === 'train', 'a train command did not survive the wire')
+  assert(applyNetCmd(host, train) == null, 'the host rejected a guest train order')
+  assert(keep.queue[0]?.kind === 'porter', 'Silo 02 did not queue a Stalker')
+  assert(host.oreHeld[1] === before - UNIT_STATS.porter.cost, 'Silo 02 did not pay for the Stalker')
+  assert(host.oreHeld[0] === bank, 'Silo 01 paid for a guest Stalker')
+
+  let placed = false
+  for (let ty = keep.ty - 8; ty <= keep.ty + 8 && !placed; ty++) {
+    for (let tx = keep.tx - 8; tx <= keep.tx + 8 && !placed; tx++) {
+      const beforeCount = host.buildings.length
+      const err = applyNetCmd(host, { op: 'place', kind: 'silo', tx, ty, porters: [] })
+      if (err == null && host.buildings.length > beforeCount) placed = true
+    }
+  }
+  assert(placed, 'a guest place command did not raise a Storage')
+  const site = host.buildings.find((building) => building.owner === 1 && building.kind === 'silo')
+  assert(site && !site.complete, 'the guest Storage was not under construction')
+
+  moved.hp = 17
+  host.explored[0] = 1
+  host.visible[3] = 1
+  host.aiExplored[5] = 1
+  const snap = JSON.parse(JSON.stringify(captureSnapshot(host)))
+  guest.selectedUnits = [bystander.id]
+  guest.tutorial = true
+  applySnapshot(guest, snap)
+  const ghost = unitById(guest, mover.id)
+  const ghostKeep = guest.buildings.find((building) => building.id === keep.id)
+  const ghostSite = guest.buildings.find((building) => building.id === site.id)
+  assert(ghost?.hp === 17 && ghost.order?.type === 'move', 'the snapshot did not copy the Stalker')
+  assert(ghostKeep?.queue[0]?.kind === 'porter', 'the snapshot dropped the training queue')
+  assert(ghostSite && ghostSite.owner === 1 && !ghostSite.complete, 'the snapshot dropped the Storage')
+  assert(guest.oreHeld[1] === host.oreHeld[1] && guest.oreHeld[0] === host.oreHeld[0], 'the snapshot dropped the banks')
+  assert(guest.explored[0] === 1 && guest.visible[3] === 1 && guest.aiExplored[5] === 1, 'the snapshot dropped the fog')
+  assert(guest.tutorial === true, 'the snapshot cleared the guest hint')
+  assert(guest.selectedUnits.includes(bystander.id), 'single-player snapshot apply dropped Silo 01 selection')
+
+  const seenAt = ghost.x
+  moved.x = seenAt + 40
+  acceptSnapshot(guest, JSON.parse(JSON.stringify(captureSnapshot(host))))
+  const easing = unitById(guest, mover.id)
+  assert(easing && Math.abs(easing.x - seenAt) < 0.01, 'the guest jumped to the new snapshot')
+  setGuestBlend(guest, 1)
+  assert(Math.abs(easing.x - (seenAt + 40)) < 0.01, 'the guest did not reach the snapshot')
+
+  host.outcome = 'win'
+  mp.role = 'guest'
+  try {
+    assert(localOwner() === 1, 'the guest is not Silo 02')
+    guest.selectedUnits = [bystander.id]
+    applySnapshot(guest, captureSnapshot(host))
+    assert(guest.outcome === 'lose', 'a host win did not become a guest loss')
+    assert(!guest.selectedUnits.includes(bystander.id), 'the guest kept a Silo 01 unit selected')
+    const online = createMatch(1, 'duel')
+    assert(runCommand(online, 'speed x3') && online.speed === 1, 'speed x3 worked in multiplayer')
+    assert(runCommand(online, 'god mode') && online.godMode === false, 'god mode worked in multiplayer')
+    assert(runCommand(online, 'siloai') && online.aiControl === false, 'siloai worked in multiplayer')
+  } finally {
+    mp.role = 'off'
+  }
+  assert(localOwner() === 0 && !multiplayer(), 'multiplayer leaked into single player')
+  const solo = createMatch(1, 'duel')
+  assert(runCommand(solo, 'speed x3') && solo.speed === 3, 'single player speed x3 broke')
 }

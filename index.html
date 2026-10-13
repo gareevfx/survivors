@@ -16,6 +16,7 @@
           <strong>Survivors</strong>
         </div>
         <div class="top-actions">
+          <div id="mp-live" class="hidden"></div>
           <button id="idle" type="button" title="Select idle stalkers (F)">Idle</button>
           <button id="pause" type="button" aria-pressed="false" title="Pause the match (Pause)">Pause</button>
           <button id="menu-btn" type="button" title="Pause and return to the menu">Menu</button>
@@ -100,6 +101,20 @@
           <p class="meta" id="menu-duel-note"></p>
           <button id="menu-ffa" type="button">Free for all (4 players)</button>
           <p class="meta" id="menu-ffa-note"></p>
+          <button id="menu-mp" type="button">Multiplayer</button>
+          <div id="mp-panel" class="hidden">
+            <p class="meta" id="mp-status">Host a room and send the code, or join with one. The host plays Silo 01. The guest plays Silo 02.</p>
+            <button id="mp-host" type="button">Host</button>
+            <label class="meta" for="mp-code">Room code</label>
+            <input id="mp-code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD" aria-label="Room code" />
+            <button id="mp-join" type="button">Join</button>
+            <p class="mp-room hidden" id="mp-room">
+              <span>Room</span>
+              <b id="mp-room-code">----</b>
+              <button id="mp-copy" type="button">Copy</button>
+            </p>
+            <button id="mp-back" type="button">Back</button>
+          </div>
           <button id="menu-resume" type="button" class="hidden">Resume</button>
           <button id="menu-about" type="button">About the Game</button>
           <button id="menu-donat" type="button">Donat</button>
