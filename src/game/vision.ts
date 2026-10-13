@@ -124,7 +124,15 @@ export function viewGroundShown(state: MatchState, tx: number, ty: number): bool
   return viewTileExplored(state, tx, ty)
 }
 
+/** True when this camera includes that side, so the side still sees its own cloaked Hovers. */
+function viewerOwns(state: MatchState, owner: PlayerId): boolean {
+  if (state.bothCam) return true
+  if (state.enemyCam) return owner !== 0
+  return owner === 0
+}
+
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
+  if (unit.cloak > 0 && !viewerOwns(state, unit.owner)) return false
   if (!state.bothCam && !state.enemyCam && unit.owner === 0) return true
   if (!state.bothCam && state.enemyCam && unit.owner !== 0) return true
   return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
@@ -160,6 +168,7 @@ export function depositKnown(state: MatchState, owner: PlayerId, tx: number, ty:
 }
 
 export function unitSeen(state: MatchState, unit: Unit): boolean {
+  if (unit.cloak > 0 && unit.owner !== 0) return false
   if (unit.owner === 0) return true
   return tileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }

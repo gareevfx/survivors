@@ -16,6 +16,7 @@ import {
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
+  GRID_CLOAK_SECONDS,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -276,7 +277,9 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       cmds.push({
         id: 'grid',
         label: 'Grid',
-        title: gridReady ? 'Fly to an even grid covering the map, then stay there' : 'Needs 10 Hovers selected',
+        title: gridReady
+          ? `Fly to an even grid covering the map, stay there, and turn invisible for ${GRID_CLOAK_SECONDS} seconds`
+          : 'Needs 10 Hovers selected',
         disabled: !gridReady,
         run: () => {
           commandHoverGrid(state, state.selectedUnits)
@@ -545,6 +548,7 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
+      ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }

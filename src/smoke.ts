@@ -10,7 +10,7 @@ import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -29,6 +29,7 @@ import {
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
 import { describeSelection } from './ui/hud'
+import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -2204,6 +2205,7 @@ diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
 pillarsLeaveTwoEmptyCells()
 hoversGridAcrossTheMap()
+gridCloakHidesHovers()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
@@ -3479,6 +3481,71 @@ function hoversGridAcrossTheMap(): void {
   for (const hover of eleven) hover.order = null
   commandHoverGrid(wide, eleven.map((unit) => unit.id))
   assert(eleven.every((unit) => unit.order == null), 'Grid ran while the match was paused')
+}
+
+function gridCloakHidesHovers(): void {
+  assert(GRID_CLOAK_SECONDS === 45, `Grid invisibility is ${GRID_CLOAK_SECONDS}s`)
+  assert(
+    loreBody('Hover').includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
+    'the Hover lore omits Grid invisibility',
+  )
+  assert(
+    UNIT_STATS.drone.blurb.includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
+    'the Hover tooltip omits Grid invisibility',
+  )
+
+  const few = createMatch(9)
+  few.eliminated[1] = true
+  few.units = []
+  const short: Unit[] = []
+  for (let i = 0; i < 9; i++) short.push(makeUnit(few, 0, 'drone', 400 + i * 24, 400))
+  commandHoverGrid(few, short.map((unit) => unit.id))
+  assert(short.every((unit) => unit.cloak === 0), 'fewer than ten Hovers were hidden')
+
+  const state = createMatch(11)
+  state.eliminated[1] = true
+  state.units = []
+  const hovers: Unit[] = []
+  for (let i = 0; i < 10; i++) hovers.push(makeUnit(state, 0, 'drone', 480 + i * 28, 420))
+  const porter = makeUnit(state, 0, 'porter', 80, 80)
+  const pike = makeUnit(state, 1, 'pike', hovers[0].x + 16, hovers[0].y)
+  commandHoverGrid(state, [...hovers.map((unit) => unit.id), porter.id])
+  assert(hovers.every((unit) => unit.cloak === GRID_CLOAK_SECONDS), 'Grid did not hide every Hover it sent')
+  assert(porter.cloak === 0, 'Grid hid a unit that is not a Hover')
+  state.selectedUnits = [hovers[0].id]
+  assert(describeSelection(state).includes(`Invisible ${GRID_CLOAK_SECONDS}s`), 'the Hover panel omitted the cloak timer')
+  assert(viewUnitSeen(state, hovers[0]), 'the owner could not see a hidden Hover')
+  state.enemyCam = true
+  assert(!viewUnitSeen(state, hovers[0]), 'enemy cam drew a hidden Hover')
+  state.enemyCam = false
+
+  const hp = hovers[0].hp
+  commandAttack(state, [pike.id], hovers[0].id, 'unit')
+  const task = (): Unit['order'] => pike.order
+  assert(task() == null, 'an enemy was ordered onto a hidden Hover')
+  step(state, 1)
+  assert(hovers[0].hp === hp, 'a hidden Hover took damage')
+  assert(task() == null, 'an enemy acquired a hidden Hover')
+
+  state.paused = true
+  step(state, 5)
+  const left = (): number => hovers[0].cloak
+  assert(left() === GRID_CLOAK_SECONDS - 1, 'the cloak timer moved while the match was paused')
+  state.paused = false
+  step(state, 10)
+  assert(left() === GRID_CLOAK_SECONDS - 11, 'the cloak timer did not follow match time')
+  commandHoverGrid(state, hovers.map((unit) => unit.id))
+  assert(hovers.every((unit) => unit.cloak === GRID_CLOAK_SECONDS), 'pressing Grid again did not reset the timer')
+  step(state, GRID_CLOAK_SECONDS)
+  assert(hovers.every((unit) => unit.cloak === 0), 'a Hover stayed hidden after 45 seconds')
+  hovers[0].x = pike.x + 16
+  hovers[0].y = pike.y
+  updateVision(state)
+  state.enemyCam = true
+  assert(viewUnitSeen(state, hovers[0]), 'a Hover stayed invisible to enemies after the timer ended')
+  state.enemyCam = false
+  commandAttack(state, [pike.id], hovers[0].id, 'unit')
+  assert(task()?.type === 'attack', 'an enemy could not attack the Hover once it was visible')
 }
 
 function towerFiresOutToItsSight(): void {

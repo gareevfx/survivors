@@ -126,6 +126,7 @@ export function unitTarget(unit: Unit): Target {
     hp: unit.hp,
     targetKind: 'unit',
     unitKind: unit.kind,
+    cloaked: unit.cloak > 0,
   }
 }
 
@@ -297,6 +298,7 @@ export function makeUnit(
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    cloak: 0,
     age: 0,
   }
   state.units.push(unit)

@@ -584,6 +584,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
 
   ctx.save()
   ctx.translate(unit.x, unit.y + bob)
+  if (unit.cloak > 0) ctx.globalAlpha = 0.45
   if (unit.kind === 'porter') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
     ctx.beginPath()
@@ -660,6 +661,21 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
 
   const showHp = selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
   if (showHp) bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
+
+  if (unit.cloak > 0) {
+    const label = `${Math.ceil(unit.cloak)}s`
+    ctx.save()
+    ctx.font = 'bold 11px "Segoe UI", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.lineWidth = 3
+    ctx.strokeStyle = '#2a2a2a'
+    ctx.fillStyle = '#f4f1c4'
+    const labelY = unit.y - stats.radius - 16
+    ctx.strokeText(label, unit.x, labelY)
+    ctx.fillText(label, unit.x, labelY)
+    ctx.restore()
+  }
 
   if (unit.owner === 0 && unit.kind === 'porter' && !unit.order) {
     ctx.fillStyle = '#f0c857'
@@ -827,7 +843,9 @@ export function renderMinimap(
     ctx.fillStyle = teamColor(unit.owner)
     const px = ox + (unit.x / TILE) * sx
     const py = oy + (unit.y / TILE) * sy
+    if (unit.cloak > 0) ctx.globalAlpha = 0.45
     ctx.fillRect(px - 1, py - 1, 2.2, 2.2)
+    if (unit.cloak > 0) ctx.globalAlpha = 1
   }
   ctx.strokeStyle = '#f4f1c4'
   ctx.lineWidth = 1

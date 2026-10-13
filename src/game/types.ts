@@ -21,6 +21,8 @@ export const MINERS_PER_DEPOSIT = 3
 export const ROCK_HP = 28
 /** Trees block like rock. Each starts with this many hit points. */
 export const TREE_HP = 6
+/** Seconds a Hover stays invisible after Grid sends it. Match time, not wall time. */
+export const GRID_CLOAK_SECONDS = 45
 export const STARTING_ORE = 120
 /** Hard ceiling on Cells. Finished buildings still add their supply (Silo 12, Storage 8); the sum is clamped to this. */
 export const SUPPLY_MAX = 65
@@ -117,7 +119,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   drone: {
     label: 'Hover',
-    blurb: 'Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid.',
+    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds.`,
     hp: 80,
     speed: 118,
     radius: 8,
@@ -269,6 +271,8 @@ export interface Unit {
   repathIn: number
   /** Player Hover flying itself across black fog, then the oldest sightings. */
   scanning: boolean
+  /** Seconds of Grid invisibility left. Enemies cannot see or attack while this is above zero. */
+  cloak: number
   /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
   age: number
 }
@@ -517,4 +521,6 @@ export interface Target {
     targetKind: TargetKind
     /** Set when the target is a unit, so weapons can tell a Drone from a Bike. */
     unitKind?: UnitKind
+    /** Grid invisibility. Weapons refuse a cloaked unit. */
+    cloaked?: boolean
 }

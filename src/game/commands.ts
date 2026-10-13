@@ -18,6 +18,7 @@ import {
   BUILDING_STATS,
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
+  GRID_CLOAK_SECONDS,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -503,6 +504,7 @@ export function commandHoverGrid(state: MatchState, ids: number[]): void {
   hovers.forEach((unit, index) => {
     const spot = spots[assign[index]]
     unit.scanning = false
+    unit.cloak = GRID_CLOAK_SECONDS
     unit.order = { type: 'move', x: spot.x, y: spot.y }
     noteProgress(unit)
     unit.idleAcquire = false
@@ -528,7 +530,7 @@ export function commandAttack(
   let victimKind: UnitKind | null = null
   if (kind === 'unit') {
     const target = unitById(state, targetId)
-    if (!target || target.hp <= 0) return
+    if (!target || target.hp <= 0 || target.cloak > 0) return
     owner = target.owner
     victimKind = target.kind
     x = target.x
