@@ -1,6 +1,6 @@
 import { updateAnimals } from './animals'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
-import { updateScanners } from './scanner'
+import { revealCloakedByScanners, updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -50,12 +50,14 @@ export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
   state.time += dt
   updateSiloAi(state, dt)
+  revealCloakedByScanners(state)
 
   for (const unit of state.units) refreshUnit(state, unit, dt)
   releaseFromTerrain(state)
   for (const unit of state.units) moveUnit(state, unit, dt)
   separate(state)
   releaseFromTerrain(state)
+  revealCloakedByScanners(state)
   advanceGather(state, dt)
   advanceConstruct(state, dt)
   advanceRepair(state, dt)

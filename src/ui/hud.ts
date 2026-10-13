@@ -268,7 +268,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         id: 'scan',
         label: 'Scanner',
         hotkey: 'C',
-        title: 'Fly to the nearest black fog, then the tiles seen longest ago',
+        title: 'Fly to the nearest black fog, then the tiles seen longest ago. Reveals an invisible enemy Hover inside sight.',
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
         run: () => toggleScanner(state, hovers.map((unit) => unit.id)),

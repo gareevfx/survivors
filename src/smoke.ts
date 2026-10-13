@@ -2206,6 +2206,7 @@ towerFitsInsideCastleSightAndShoots()
 pillarsLeaveTwoEmptyCells()
 hoversGridAcrossTheMap()
 gridCloakHidesHovers()
+scannerEndsHoverCloak()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
@@ -3546,6 +3547,76 @@ function gridCloakHidesHovers(): void {
   state.enemyCam = false
   commandAttack(state, [pike.id], hovers[0].id, 'unit')
   assert(task()?.type === 'attack', 'an enemy could not attack the Hover once it was visible')
+}
+
+function scannerEndsHoverCloak(): void {
+  assert(
+    loreBody('Hover').includes('scanning Hover reveals an invisible enemy Hover'),
+    'the Hover lore omits the Scanner reveal',
+  )
+  assert(
+    UNIT_STATS.drone.blurb.includes('scanning Hover reveals an invisible enemy Hover'),
+    'the Hover tooltip omits the Scanner reveal',
+  )
+
+  const state = createMatch(12)
+  state.eliminated[1] = true
+  state.units = []
+  const hidden = makeUnit(state, 0, 'drone', 800, 400)
+  hidden.cloak = GRID_CLOAK_SECONDS
+  const quiet = makeUnit(state, 1, 'drone', hidden.x + 40, hidden.y)
+  step(state, 1)
+  const cloak = (): number => hidden.cloak
+  assert(cloak() === GRID_CLOAK_SECONDS - 1, 'a Hover that is not scanning removed the cloak')
+
+  const friend = makeUnit(state, 0, 'drone', hidden.x + 30, hidden.y)
+  friend.scanning = true
+  step(state, 1)
+  assert(cloak() === GRID_CLOAK_SECONDS - 2, 'a friendly scanner removed the cloak')
+
+  quiet.x = hidden.x + UNIT_STATS.drone.sight + 8
+  quiet.y = hidden.y
+  quiet.scanning = true
+  const outside = cloak()
+  step(state, 1)
+  assert(cloak() === outside - 1, 'a scanner outside sight removed the cloak')
+
+  quiet.x = hidden.x + UNIT_STATS.drone.sight
+  quiet.y = hidden.y
+  step(state, 1)
+  assert(cloak() === 0, 'a scanning Hover inside sight left the cloak on')
+  quiet.x = hidden.x + UNIT_STATS.drone.sight + 80
+  step(state, 1)
+  assert(cloak() === 0, 'the cloak returned after the scanner left')
+
+  hidden.cloak = GRID_CLOAK_SECONDS
+  quiet.scanning = false
+  step(state, 1)
+  assert(cloak() === GRID_CLOAK_SECONDS - 1, 'Scanner off still removed the cloak')
+  quiet.scanning = true
+  quiet.x = hidden.x + 20
+  step(state, 1)
+  assert(cloak() === 0, 'turning Scanner back on inside sight left the cloak on')
+
+  friend.hp = 0
+  quiet.x = 80
+  quiet.y = 80
+  const pike = makeUnit(state, 1, 'pike', hidden.x + 18, hidden.y)
+  commandAttack(state, [pike.id], hidden.id, 'unit')
+  const task = (): Unit['order'] => pike.order
+  assert(task()?.type === 'attack', 'a revealed Hover could not be attacked')
+
+  const ai = createMatch(13)
+  ai.units = []
+  const scout = makeUnit(ai, 1, 'drone', 900, 500)
+  ai.aiAcc = 0
+  updateSiloAi(ai, 0.5)
+  assert(scout.scanning, 'SiloAI did not put its Hover in Scanner mode')
+  const prey = makeUnit(ai, 0, 'drone', scout.x + 40, scout.y)
+  prey.cloak = GRID_CLOAK_SECONDS
+  ai.eliminated[1] = true
+  step(ai, 1)
+  assert(prey.cloak === 0, 'a SiloAI scanner left an enemy Hover hidden')
 }
 
 function towerFiresOutToItsSight(): void {

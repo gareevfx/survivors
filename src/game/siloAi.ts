@@ -271,12 +271,14 @@ function dispatchDrones(state: MatchState, side: Brain): void {
     if (traveling && !threatened) {
       reserved.push({ x: order.x, y: order.y })
       side.scout = drone.id
+      drone.scanning = true
       continue
     }
     const goal = droneGoal(state, side, drone.x, drone.y, reserved)
     reserved.push(goal)
     side.scout = drone.id
     commandMove(state, [drone.id], goal.x, goal.y, false)
+    drone.scanning = true
   }
 }
 

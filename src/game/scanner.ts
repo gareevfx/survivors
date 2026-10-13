@@ -1,6 +1,6 @@
 import { setUnitDestination, stopMoving } from './nav'
 import { unitById } from './state'
-import { TILE, type MatchState, type Unit } from './types'
+import { TILE, UNIT_STATS, type MatchState, type Unit } from './types'
 import { tileExplored } from './vision'
 
 /** Keep a flight until the Hover is this close, matching the AI Drone scout. */
@@ -24,6 +24,26 @@ export function toggleScanner(state: MatchState, ids: number[]): void {
     stopMoving(hover)
   }
   if (!allOn) updateScanners(state)
+}
+
+/**
+ * A scanning Hover ends Grid invisibility on enemy Hovers inside its sight.
+ * The cloak stays off after the scanner leaves. A later Grid order can hide them again.
+ */
+export function revealCloakedByScanners(state: MatchState): void {
+  const sight = UNIT_STATS.drone.sight
+  const scanners = state.units.filter((unit) => unit.kind === 'drone' && unit.hp > 0 && unit.scanning)
+  if (!scanners.length) return
+  for (const hidden of state.units) {
+    if (hidden.kind !== 'drone' || hidden.hp <= 0 || hidden.cloak <= 0) continue
+    for (const scanner of scanners) {
+      if (scanner.owner === hidden.owner) continue
+      if (Math.hypot(scanner.x - hidden.x, scanner.y - hidden.y) <= sight) {
+        hidden.cloak = 0
+        break
+      }
+    }
+  }
 }
 
 /** Keep each scanning Hover on a flight. Black fog first, then the oldest sighting. */

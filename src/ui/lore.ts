@@ -13,7 +13,7 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },
   { name: 'Flasher', body: 'Very fast unit;' },
   { name: 'Gorilla', body: 'Tank;' },
-  { name: 'Hover', body: `Surface explorer; Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds.` },
+  { name: 'Hover', body: `Surface explorer; Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight.` },
 ]
 
 export function loreBody(name: string): string {
