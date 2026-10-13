@@ -467,6 +467,13 @@ export interface MatchState {
   godMode: boolean
   /** When set, SiloAI plays Silo 01 from Silo 01's own sight. */
   aiControl: boolean
+  /**
+   * Hot-seat. The player commands any seated side and sees that side's fog.
+   * Silo 01 still decides the match, god mode, `siloai`, and enemy cam.
+   */
+  doubleGame: boolean
+  /** Side commanded while double game is on. Zero while it is off. */
+  control: PlayerId
   ore: OreNode[]
   rocks: Rock[]
   graves: Grave[]

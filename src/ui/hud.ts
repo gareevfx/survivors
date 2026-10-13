@@ -1,4 +1,5 @@
 import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, tryTrain } from '../game/commands'
+import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
@@ -46,6 +47,7 @@ interface Cmd {
 }
 
 let commandKey = ''
+let sideKey = ''
 
 export function syncHud(state: MatchState, actions: HudActions): void {
   const ore = document.querySelector('#ore')
@@ -66,18 +68,22 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const endCopy = document.querySelector('#end-copy')
   const endSeed = document.querySelector('#end-seed')
   const sides = document.querySelector('#sides')
+  const side = controlledSide(state)
+  const held = state.oreHeld[side] ?? 0
+  const used = state.supplyUsed[side] ?? 0
+  const cap = state.supplyCap[side] ?? 0
 
-  if (ore) ore.textContent = String(state.oreHeld[0])
-  const supplyText = `${state.supplyUsed[0]} / ${state.supplyCap[0]}`
+  if (ore) ore.textContent = String(held)
+  const supplyText = `${used} / ${cap}`
   if (supply) {
     supply.textContent = supplyText
-    supply.classList.toggle('tight', state.supplyCap[0] - state.supplyUsed[0] <= 1)
+    supply.classList.toggle('tight', cap - used <= 1)
     const cells = supply.closest('.readout')
     if (cells instanceof HTMLElement) cells.title = loreBody('Cells')
   }
   if (clock) clock.textContent = formatTime(state.time)
   const idleCount = state.units.filter(
-    (unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
+    (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
@@ -116,7 +122,8 @@ export function syncHud(state: MatchState, actions: HudActions): void {
       const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
       const color = PLAYER_COLOR[owner] ?? '#ffffff'
       const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
-      return `<span class="${gone && owner !== 0 ? 'out' : ''}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
+      const you = state.doubleGame && owner === side ? ' you' : ''
+      return `<span class="${gone && owner !== 0 ? 'out' : ''}${you}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
     }).join('')
   }
 
@@ -141,16 +148,42 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     endSeed.textContent = `Field ${state.seed}`
   }
 
+  syncSideSwitch(state)
+
   const commands = buildCommands(state, actions)
-  const key = `${state.aiControl ? 'ai' : 'player'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
+  const locked = handsOff(state)
+  const key = `${locked ? 'ai' : 'player'}|${state.doubleGame ? side : 'home'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
   if (key !== commandKey) {
     commandKey = key
-    paintCommands(commands, state.aiControl)
+    paintCommands(commands, locked)
   }
+}
+
+function syncSideSwitch(state: MatchState): void {
+  const root = document.querySelector('#side-switch')
+  if (!root) return
+  root.classList.toggle('hidden', !state.doubleGame)
+  if (!state.doubleGame) return
+  const side = controlledSide(state)
+  const marks = Array.from({ length: state.playerCount }, (_, owner) => {
+    const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+    return gone ? '0' : '1'
+  }).join('')
+  const key = `${side}|${marks}`
+  if (key === sideKey) return
+  sideKey = key
+  root.innerHTML = Array.from({ length: state.playerCount }, (_, owner) => {
+    const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
+    const color = PLAYER_COLOR[owner] ?? '#ffffff'
+    const gone = marks[owner] === '0'
+    const pressed = owner === side
+    return `<button type="button" data-side="${owner}" aria-pressed="${pressed ? 'true' : 'false'}" class="${gone ? 'out' : ''}" title="${pressed ? 'Cycle side (Tab)' : `Command ${escapeHtml(name)}`}"><i style="background:${color}"></i>${escapeHtml(name)}</button>`
+  }).join('')
 }
 
 export function resetHudCache(): void {
   commandKey = '\0'
+  sideKey = '\0'
 }
 
 function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
@@ -172,7 +205,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
 
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building?.ruined && state.selectedUnits.length === 0) {
-    const afford = building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST
+    const afford = building.repairPaid || (state.oreHeld[controlledSide(state)] ?? 0) >= SILO_REPAIR_COST
     const porter = nearestPlayerPorter(state, building)
     return [
       {
@@ -194,7 +227,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       },
     ]
   }
-  if (building && building.owner === 0 && state.selectedUnits.length === 0) {
+  if (building && building.owner === controlledSide(state) && state.selectedUnits.length === 0) {
     if (!building.complete) {
       return [
         {
@@ -309,7 +342,7 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
 
 function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions): Cmd {
   const stats = BUILDING_STATS[kind]
-  const afford = state.oreHeld[0] >= stats.cost
+  const afford = (state.oreHeld[controlledSide(state)] ?? 0) >= stats.cost
   return {
     id: `place-${kind}`,
     label: stats.label,
@@ -325,11 +358,12 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
 function repairButton(state: MatchState): Cmd {
   const porters = state.selectedUnits.filter((id) => {
     const unit = unitById(state, id)
-    return !!unit && unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0
+    return !!unit && unit.owner === controlledSide(state) && unit.kind === 'porter' && unit.hp > 0
   })
   const ruin = state.buildings.some((building) => building.ruined)
+  const bank = state.oreHeld[controlledSide(state)] ?? 0
   const afford = state.buildings.some(
-    (building) => building.ruined && (building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST),
+    (building) => building.ruined && (building.repairPaid || bank >= SILO_REPAIR_COST),
   )
   let title = 'Repair the nearest ruined Silo'
   if (!porters.length) title = 'You need a stalker to repair'
@@ -351,8 +385,9 @@ function repairButton(state: MatchState): Cmd {
 
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
-  const afford = state.oreHeld[0] >= stats.cost
-  const room = stats.supply === 0 || state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
+  const side = controlledSide(state)
+  const afford = (state.oreHeld[side] ?? 0) >= stats.cost
+  const room = stats.supply === 0 || (state.supplyUsed[side] ?? 0) + stats.supply <= (state.supplyCap[side] ?? 0)
   let title = stats.blurb
   if (!afford) title = `Need ${stats.cost} dumps`
   else if (!room) title = 'Cells cap reached — raise a Storage'
@@ -431,7 +466,7 @@ function nearestPlayerPorter(state: MatchState, building: Building): { id: numbe
   let best: { id: number } | undefined
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== 0 || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== controlledSide(state) || unit.kind !== 'porter' || unit.hp <= 0) continue
     const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
     if (distance < bestD) {
       bestD = distance
@@ -507,7 +542,7 @@ export function describeSelection(state: MatchState): string {
   const ore = state.selectedOre != null ? state.ore.find((node) => node.id === state.selectedOre) : undefined
   if (ore && state.selectedUnits.length === 0) {
     return `
-      <p class="eyebrow">${PLAYER_NAME[0]}</p>
+      <p class="eyebrow">${PLAYER_NAME[controlledSide(state)] ?? 'Silo'}</p>
       <h2>Dumps</h2>
       <p class="meta">${ore.amount} remaining</p>
       <p class="lore">${escapeHtml(loreBody('Dumps'))}</p>
@@ -519,7 +554,7 @@ export function describeSelection(state: MatchState): string {
     .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.hp > 0)
   if (!units.length) {
     return `
-      <p class="eyebrow">${PLAYER_NAME[0]}</p>
+      <p class="eyebrow">${PLAYER_NAME[controlledSide(state)] ?? 'Silo'}</p>
       <h2>Surface</h2>
       <p class="lore">${escapeHtml(loreBody('Surface'))}</p>
     `
@@ -556,18 +591,19 @@ export function describeSelection(state: MatchState): string {
   for (const unit of units) counts.set(UNIT_STATS[unit.kind].label, (counts.get(UNIT_STATS[unit.kind].label) ?? 0) + 1)
   const summary = [...counts.entries()].map(([label, count]) => `${count} ${label}${count > 1 ? 's' : ''}`).join(', ')
   const scanning = units.some((unit) => unit.scanning)
+  const portraitOwner = units[0]?.owner ?? controlledSide(state)
   const groupPortrait = units.some((unit) => unit.kind === 'porter')
-    ? stalkerPortraitUrl(0)
+    ? stalkerPortraitUrl(portraitOwner)
     : units.some((unit) => unit.kind === 'pike')
-      ? flasherPortraitUrl(0)
+      ? flasherPortraitUrl(portraitOwner)
       : units.some((unit) => unit.kind === 'howler')
-        ? gorillaPortraitUrl(0)
+        ? gorillaPortraitUrl(portraitOwner)
         : units.some((unit) => unit.kind === 'drone')
-          ? hoverPortraitUrl(0)
+          ? hoverPortraitUrl(portraitOwner)
           : ''
   const portrait = groupPortrait ? `<img class="unit-icon" alt="" src="${groupPortrait}" />` : ''
   return `
-    <p class="eyebrow">${PLAYER_NAME[0]}</p>
+    <p class="eyebrow">${PLAYER_NAME[portraitOwner] ?? 'Silo'}</p>
     <h2>${portrait}${units.length} selected</h2>
     <p class="meta">${escapeHtml(summary)}</p>
     ${scanning ? '<p class="meta">Scanning</p>' : ''}

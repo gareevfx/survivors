@@ -1,7 +1,7 @@
+import { controlledSide, handsOff } from './control'
 import { setUnitDestination, stopMoving } from './nav'
 import { unitById } from './state'
-import { TILE, UNIT_STATS, type MatchState, type Unit } from './types'
-import { tileExplored } from './vision'
+import { TILE, UNIT_STATS, type MatchState, type PlayerId, type Unit } from './types'
 
 /** Keep a flight until the Hover is this close, matching the AI Drone scout. */
 const HOLD = 80
@@ -46,26 +46,30 @@ export function revealCloakedByScanners(state: MatchState): void {
   }
 }
 
-/** Keep each scanning Hover on a flight. Black fog first, then the oldest sighting. */
+/** Keep each scanning Hover of the controlled side on a flight. Black fog first, then the oldest sighting. */
 export function updateScanners(state: MatchState): void {
-  if (state.outcome || state.paused || state.aiControl) return
+  if (state.outcome || state.paused || handsOff(state)) return
+  const side = controlledSide(state)
   const hovers = state.units.filter(
-    (unit) => unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0 && unit.scanning,
+    (unit) => unit.owner === side && unit.kind === 'drone' && unit.hp > 0 && unit.scanning,
   )
   if (!hovers.length) return
-  const black = blackRemains(state)
+  const sight = sightGrids(state, side)
+  const black = blackRemains(sight.explored)
   const reserved: Array<{ x: number; y: number }> = []
   for (const hover of hovers) {
     const order = hover.order
     if (order?.type === 'move') {
       const dist = Math.hypot(hover.x - order.x, hover.y - order.y)
-      const revealed = black && tileExplored(state, Math.floor(order.x / TILE), Math.floor(order.y / TILE))
+      const tx = Math.floor(order.x / TILE)
+      const ty = Math.floor(order.y / TILE)
+      const revealed = black && tx >= 0 && ty >= 0 && ty < state.mapH && tx < state.mapW && sight.explored[ty * state.mapW + tx] === 1
       if (dist > HOLD && !revealed) {
         reserved.push({ x: order.x, y: order.y })
         continue
       }
     }
-    const goal = scanGoal(state, hover.x, hover.y, reserved, black)
+    const goal = scanGoal(state, hover.x, hover.y, reserved, black, sight, side === 0)
     reserved.push(goal)
     hover.order = { type: 'move', x: goal.x, y: goal.y }
     hover.idleAcquire = false
@@ -76,17 +80,27 @@ export function updateScanners(state: MatchState): void {
 }
 
 function playerHovers(state: MatchState, ids: number[]): Unit[] {
+  const side = controlledSide(state)
   const hovers: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0) hovers.push(unit)
+    if (unit && unit.owner === side && unit.kind === 'drone' && unit.hp > 0) hovers.push(unit)
   }
   return hovers
 }
 
-function blackRemains(state: MatchState): boolean {
-  for (let i = 0; i < state.explored.length; i++) {
-    if (state.explored[i] === 0) return true
+function sightGrids(state: MatchState, owner: PlayerId): { explored: Uint8Array; visible: Uint8Array } {
+  if (owner === 0) return { explored: state.explored, visible: state.visible }
+  if (owner === 1) return { explored: state.aiExplored, visible: state.aiVisible }
+  return {
+    explored: state.sideExplored[owner] ?? state.explored,
+    visible: state.sideVisible[owner] ?? state.visible,
+  }
+}
+
+function blackRemains(explored: Uint8Array): boolean {
+  for (let i = 0; i < explored.length; i++) {
+    if (explored[i] === 0) return true
   }
   return false
 }
@@ -105,6 +119,8 @@ function scanGoal(
   fromY: number,
   reserved: Array<{ x: number; y: number }>,
   black: boolean,
+  sight: { explored: Uint8Array; visible: Uint8Array },
+  remember: boolean,
 ): { x: number; y: number } {
   let nearest: { x: number; y: number; d: number } | null = null
   let oldest: { x: number; y: number; score: number } | null = null
@@ -117,12 +133,13 @@ function scanGoal(
       if (from < TILE * 2) continue
       if (crowded(reserved, x, y)) continue
       if (black) {
-        if (state.explored[index] !== 0) continue
+        if (sight.explored[index] !== 0) continue
         if (!nearest || from < nearest.d) nearest = { x, y, d: from }
         continue
       }
-      if (state.visible[index] === 1) continue
-      const score = state.seenAt[index] * 100000 + from
+      if (sight.visible[index] === 1) continue
+      const age = remember ? state.seenAt[index] : 0
+      const score = age * 100000 + from
       if (!oldest || score < oldest.score) oldest = { x, y, score }
     }
   }

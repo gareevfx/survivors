@@ -3,6 +3,7 @@ import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, ne
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
 import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
 /**
@@ -773,7 +774,8 @@ export function updateSiloAi(state: MatchState, dt: number): void {
 
   state.aiAcc += dt
   if (state.aiAcc >= think) {
-    if (state.eliminated[1] || !keepStands(state, 1)) state.aiAcc = 0
+    if (aiSuspended(state, 1)) state.aiAcc = think
+    else if (state.eliminated[1] || !keepStands(state, 1)) state.aiAcc = 0
     else if (budget > 0) {
       state.aiAcc = 0
       budget -= 1
@@ -783,6 +785,10 @@ export function updateSiloAi(state: MatchState, dt: number): void {
   for (let owner = 2; owner < state.playerCount; owner++) {
     state.sideAcc[owner] = (state.sideAcc[owner] ?? 0) + dt
     if ((state.sideAcc[owner] ?? 0) < think) continue
+    if (aiSuspended(state, owner)) {
+      state.sideAcc[owner] = think
+      continue
+    }
     if (state.eliminated[owner] || !keepStands(state, owner)) {
       state.sideAcc[owner] = 0
       continue
@@ -795,7 +801,7 @@ export function updateSiloAi(state: MatchState, dt: number): void {
     budget -= 1
     runSide(state, owner)
   }
-  if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0)) return
+  if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0) || aiSuspended(state, 0)) return
   state.playerAiAcc += dt
   if (state.playerAiAcc < think) return
   state.playerAiAcc = 0

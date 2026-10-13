@@ -1,3 +1,4 @@
+import { clearHands } from './control'
 import { pushToast, recomputeSupply } from './state'
 import type { MatchState } from './types'
 import { clearFog, restoreFog } from './vision'
@@ -133,6 +134,28 @@ export function runCommand(state: MatchState, raw: string): boolean {
     }
     state.speed = 1
     pushToast(state, 'Speed x3 is off.')
+    return true
+  }
+  if (text === 'double game') {
+    if (state.doubleGame) {
+      pushToast(state, 'Double game is already on.')
+      return true
+    }
+    state.doubleGame = true
+    state.control = 0
+    clearHands(state)
+    pushToast(state, 'Double game is on. Tab changes side.')
+    return true
+  }
+  if (text === 'double game off') {
+    if (!state.doubleGame) {
+      pushToast(state, 'Double game is already off.')
+      return true
+    }
+    state.doubleGame = false
+    state.control = 0
+    clearHands(state)
+    pushToast(state, 'Double game is off.')
     return true
   }
   if (text === 'siloai off') {

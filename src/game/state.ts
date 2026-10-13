@@ -395,6 +395,8 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     bothCam: false,
     godMode: false,
     aiControl: false,
+    doubleGame: false,
+    control: 0,
     ore: [],
     rocks: [],
     graves: [],
@@ -507,8 +509,20 @@ function aimRally(building: Building): void {
   building.rallyY = mouth.y
 }
 
+export function sideKeep(state: MatchState, owner: PlayerId): Building | undefined {
+  return state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+}
+
+/** Living Silo of a side, or its ruin when the Silo has already fallen. */
+export function sideAnchor(state: MatchState, owner: PlayerId): Building | undefined {
+  return (
+    sideKeep(state, owner) ??
+    state.buildings.find((building) => building.owner === owner && building.kind === 'keep')
+  )
+}
+
 export function playerKeep(state: MatchState): Building | undefined {
-  return state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  return sideKeep(state, 0)
 }
 
 export function nearestOre(state: MatchState, x: number, y: number): { id: number; tx: number; ty: number } | null {

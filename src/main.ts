@@ -2,10 +2,11 @@ import './style.css'
 import { Sfx } from './game/audio'
 import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
+import { controlledSide, cycleSide, handsOff, takeSide } from './game/control'
 import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
-import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
+import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
 import { FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
@@ -141,21 +142,30 @@ const input = attachInput({
   focusPoint: focus,
 })
 
-function selectIdlePorters(): void {
+function lookAtSide(owner: number): void {
   if (!match) return
-  const ids = match.units
-    .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
+  const keep = sideAnchor(match, owner)
+  if (!keep) return
+  const center = buildingCenter(keep)
+  focus(center.x, center.y)
+}
+
+function selectIdlePorters(): void {
+  const live = match
+  if (!live) return
+  const ids = live.units
+    .filter((unit) => unit.owner === controlledSide(live) && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
     .map((unit) => unit.id)
   if (!ids.length) {
-    pushToast(match, 'Every stalker is already busy.')
+    pushToast(live, 'Every stalker is already busy.')
     return
   }
-  match.selectedUnits = ids
-  match.selectedBuilding = null
-  match.selectedOre = null
-  match.selectedGrave = null
-  match.events.push({ type: 'select' })
-  const first = unitById(match, ids[0] ?? -1)
+  live.selectedUnits = ids
+  live.selectedBuilding = null
+  live.selectedOre = null
+  live.selectedGrave = null
+  live.events.push({ type: 'select' })
+  const first = unitById(live, ids[0] ?? -1)
   if (first) focus(first.x, first.y)
 }
 
@@ -194,6 +204,16 @@ again?.addEventListener('click', () => boot())
 idle?.addEventListener('click', () => {
   sfx.unlock()
   selectIdlePorters()
+})
+document.querySelector('#side-switch')?.addEventListener('click', (event) => {
+  if (!match?.doubleGame || match.outcome) return
+  const button = event.target instanceof Element ? event.target.closest('button') : null
+  if (!(button instanceof HTMLButtonElement)) return
+  const owner = Number(button.dataset.side)
+  if (!Number.isInteger(owner)) return
+  if (owner === match.control) cycleSide(match)
+  else takeSide(match, owner)
+  lookAtSide(match.control)
 })
 
 let miniDrag = false
@@ -246,19 +266,19 @@ function loop(now: number): void {
     renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
     syncHud(live, {
       armPlace: (kind) => {
-        if (live.paused || live.aiControl) return
+        if (live.paused || handsOff(live)) return
         live.placement = live.placement === kind ? null : kind
         live.attackMoveArmed = false
         live.moveArmed = false
       },
       armMove: () => {
-        if (live.paused || live.aiControl) return
+        if (live.paused || handsOff(live)) return
         live.moveArmed = !live.moveArmed
         live.attackMoveArmed = false
         live.placement = null
       },
       armAttack: () => {
-        if (live.paused || live.aiControl) return
+        if (live.paused || handsOff(live)) return
         live.attackMoveArmed = !live.attackMoveArmed
         live.moveArmed = false
         live.placement = null
