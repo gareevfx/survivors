@@ -103,17 +103,26 @@
           <p class="meta" id="menu-ffa-note"></p>
           <button id="menu-mp" type="button">Multiplayer</button>
           <div id="mp-panel" class="hidden">
-            <p class="meta" id="mp-status">Host a room and send the code, or join with one. The host plays Silo 01. The guest plays Silo 02.</p>
-            <button id="mp-host" type="button">Host</button>
-            <label class="meta" for="mp-code">Room code</label>
-            <input id="mp-code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD" aria-label="Room code" />
-            <button id="mp-join" type="button">Join</button>
-            <p class="mp-room hidden" id="mp-room">
-              <span>Room</span>
-              <b id="mp-room-code">----</b>
-              <button id="mp-copy" type="button">Copy</button>
-            </p>
-            <button id="mp-back" type="button">Back</button>
+            <p class="meta" id="mp-status">Host a room, pick one from the list, or join with a code. The host plays Silo 01. The guest plays Silo 02.</p>
+            <div id="mp-home">
+              <button id="mp-host" type="button">Host</button>
+              <button id="mp-hosts" type="button">Hosts</button>
+              <label class="meta" id="mp-code-label" for="mp-code">Room code</label>
+              <input id="mp-code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD" aria-label="Room code" />
+              <button id="mp-join" type="button">Join</button>
+              <p class="mp-room hidden" id="mp-room">
+                <span>Room</span>
+                <b id="mp-room-code">----</b>
+                <button id="mp-copy" type="button">Copy</button>
+              </p>
+              <button id="mp-back" type="button">Back</button>
+            </div>
+            <div id="mp-hosts-page" class="hidden">
+              <p class="meta" id="mp-hosts-note">Open rooms. Pick one, or go back and enter a code.</p>
+              <button id="mp-hosts-refresh" type="button">Refresh</button>
+              <div id="mp-hosts-list"></div>
+              <button id="mp-hosts-back" type="button">Back</button>
+            </div>
           </div>
           <button id="menu-resume" type="button" class="hidden">Resume</button>
           <button id="menu-about" type="button">About the Game</button>

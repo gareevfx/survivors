@@ -1,3 +1,5 @@
+import { CONNECT_MS, GUEST_TRIES, ICE_SERVERS, guestShouldRetry, pathFromStats } from './game/mpIce'
+import { LOBBY_PREFIX, LOBBY_STALE_MS, decodeLobby, encodeLobby, formatWait, lobbyTopic } from './game/mpLobby'
 import { localOwner, mp, multiplayer } from './game/mpRole'
 import { acceptSnapshot, applyNetCmd, applySnapshot, captureSnapshot, parseCmd, setGuestBlend } from './game/mpProtocol'
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
@@ -2229,6 +2231,7 @@ siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
 multiplayerSnapshotAndCommands()
+multiplayerTurnAndLobby()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -5190,6 +5193,34 @@ function fullStorageRefusesAHaul(): void {
     `the replacement Storage is ${gap} tiles from the heap`,
   )
   assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
+}
+
+function multiplayerTurnAndLobby(): void {
+  const urls = ICE_SERVERS.flatMap((server) => (Array.isArray(server.urls) ? server.urls : [server.urls]))
+  assert(urls.some((url) => url.includes('stun:stun.l.google.com:19302')), 'Google STUN is missing')
+  assert(urls.some((url) => url.includes('stun:stun1.l.google.com:19302')), 'a second Google STUN is missing')
+  assert(urls.includes('turns:openrelay.metered.ca:443?transport=tcp'), 'the TCP relay on 443 is missing')
+  assert(CONNECT_MS === 20000 && GUEST_TRIES === 3, 'the guest retry budget changed')
+  assert(guestShouldRetry(0, 'timeout') && guestShouldRetry(1, 'drop') && !guestShouldRetry(2, 'timeout'), 'a dropped channel should retry twice')
+  assert(guestShouldRetry(0, 'missing') && !guestShouldRetry(1, 'missing'), 'a missing room should retry once')
+  assert(!guestShouldRetry(0, 'other'), 'a hard failure should stop')
+  const relayed = pathFromStats([
+    { type: 'local-candidate', id: 'relay', candidateType: 'relay' },
+    { type: 'candidate-pair', nominated: true, state: 'succeeded', localCandidateId: 'relay' },
+  ])
+  const direct = pathFromStats([
+    { type: 'local-candidate', id: 'host', candidateType: 'host' },
+    { type: 'candidate-pair', selected: true, localCandidateId: 'host' },
+  ])
+  assert(relayed === 'Relayed' && direct === 'Direct' && pathFromStats([]) === 'Connecting…', 'the ICE path was misread')
+  const now = 1_700_000_000_000
+  const ad = decodeLobby(encodeLobby({ code: 'AB23', name: 'Silo 01', since: now - 12_000, beat: now - 1000 }), now)
+  assert(ad?.code === 'AB23' && ad.name === 'Silo 01', 'a lobby listing did not round-trip')
+  assert(decodeLobby('', now) == null, 'an empty listing should clear the room')
+  const stale = encodeLobby({ code: 'AB23', name: 'Silo 01', since: now - 1000, beat: now - LOBBY_STALE_MS - 1 })
+  assert(decodeLobby(stale, now) == null, 'a stale heartbeat should drop the room')
+  assert(formatWait(now - 12_000, now) === '12s' && formatWait(now - 75_000, now) === '1:15', 'the wait label is wrong')
+  assert(lobbyTopic('AB23') === `${LOBBY_PREFIX}/AB23`, 'the lobby topic moved')
 }
 
 function multiplayerSnapshotAndCommands(): void {
