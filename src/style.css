@@ -140,11 +140,6 @@ button, canvas { font: inherit; }
 .sides i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .sides .out { opacity: 0.4; text-decoration: line-through; }
 
-.top-actions button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .top-actions button,
 #hint button,
 #again,
@@ -548,54 +543,7 @@ button, canvas { font: inherit; }
   padding: 20px;
 }
 
-#mp-live {
-  color: #c7d7b0;
-  font-size: 13px;
-  align-self: center;
-}
-
-.menu-card {
-  width: min(520px, 100%);
-  max-height: calc(100vh - 40px);
-  overflow: auto;
-}
-.menu-card input[type='text'],
-.menu-card textarea {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  box-sizing: border-box;
-  background: #161b12;
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 12px 14px;
-  font-size: 18px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
-.menu-card textarea {
-  min-height: 88px;
-  resize: vertical;
-  letter-spacing: 0;
-  text-transform: none;
-  font-size: 13px;
-  line-height: 1.35;
-  font-family: ui-monospace, monospace;
-}
-.mp-steps {
-  margin: 8px 0 0;
-  padding-left: 1.2em;
-  color: var(--text);
-}
-.mp-steps li { margin-top: 4px; }
-.mp-qr {
-  display: block;
-  margin: 12px auto 0;
-  max-width: 100%;
-  height: auto;
-  background: #f4f1e4;
-}
+.menu-card { width: min(520px, 100%); }
 .menu-card button {
   display: block;
   width: 100%;

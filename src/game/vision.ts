@@ -1,4 +1,3 @@
-import { localOwner, multiplayer } from './mpRole'
 import { BUILDING_STATS, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './types'
 
 /** Refresh every side's sight. Off Fog of War reveals the map for Silo 01 only. */
@@ -24,14 +23,6 @@ export function updateVision(state: MatchState): void {
   const now = state.time
   for (let i = 0; i < state.visible.length; i++) {
     if (state.visible[i] === 1) state.seenAt[i] = now
-  }
-  if (multiplayer()) {
-    if (!state.aiSeenAt || state.aiSeenAt.length !== state.aiVisible.length) {
-      state.aiSeenAt = new Float32Array(state.aiVisible.length)
-    }
-    for (let i = 0; i < state.aiVisible.length; i++) {
-      if (state.aiVisible[i] === 1) state.aiSeenAt[i] = now
-    }
   }
   rememberSightings(state)
   if (state.selectedOre != null) {
@@ -113,14 +104,12 @@ export function groundShown(state: MatchState, tx: number, ty: number): boolean 
 /** Sight used for drawing. Both cam merges every side. Enemy cam shows every side but Silo 01. */
 export function viewTileVisible(state: MatchState, tx: number, ty: number): boolean {
   if (state.bothCam) return anySideBit(state, tx, ty, false, true)
-  if (state.enemyCam) return anySideBit(state, tx, ty, true, true)
-  return localOwner() === 0 ? tileVisible(state, tx, ty) : aiTileVisible(state, tx, ty)
+  return state.enemyCam ? anySideBit(state, tx, ty, true, true) : tileVisible(state, tx, ty)
 }
 
 export function viewTileExplored(state: MatchState, tx: number, ty: number): boolean {
   if (state.bothCam) return anySideBit(state, tx, ty, false, false)
-  if (state.enemyCam) return anySideBit(state, tx, ty, true, false)
-  return localOwner() === 0 ? tileExplored(state, tx, ty) : aiTileExplored(state, tx, ty)
+  return state.enemyCam ? anySideBit(state, tx, ty, true, false) : tileExplored(state, tx, ty)
 }
 
 function anySideBit(state: MatchState, tx: number, ty: number, enemiesOnly: boolean, current: boolean): boolean {
@@ -139,19 +128,19 @@ export function viewGroundShown(state: MatchState, tx: number, ty: number): bool
 function viewerOwns(state: MatchState, owner: PlayerId): boolean {
   if (state.bothCam) return true
   if (state.enemyCam) return owner !== 0
-  return owner === localOwner()
+  return owner === 0
 }
 
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
   if (unit.cloak > 0 && !viewerOwns(state, unit.owner)) return false
-  if (!state.bothCam && !state.enemyCam && unit.owner === localOwner()) return true
+  if (!state.bothCam && !state.enemyCam && unit.owner === 0) return true
   if (!state.bothCam && state.enemyCam && unit.owner !== 0) return true
   return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
 
 export function viewBuildingSeen(state: MatchState, building: Building): boolean {
   if (building.ruined) return viewRuinShown(state, building)
-  if (!state.bothCam && !state.enemyCam && building.owner === localOwner()) return true
+  if (!state.bothCam && !state.enemyCam && building.owner === 0) return true
   if (!state.bothCam && state.enemyCam && building.owner !== 0) return true
   const stats = BUILDING_STATS[building.kind]
   for (let y = 0; y < stats.h; y++) {
