@@ -1,3 +1,5 @@
+import { localOwner, mp, multiplayer } from './game/mpRole'
+import { acceptSnapshot, applyNetCmd, applySnapshot, captureSnapshot, parseCmd, setGuestBlend } from './game/mpProtocol'
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, playerHovers, tryPlace, tryTrain } from './game/commands'
@@ -10,7 +12,7 @@ import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -29,6 +31,7 @@ import {
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
 import { describeSelection } from './ui/hud'
+import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -2204,6 +2207,8 @@ diagonalMovesCannotSqueeze()
 towerFitsInsideCastleSightAndShoots()
 pillarsLeaveTwoEmptyCells()
 hoversGridAcrossTheMap()
+gridCloakHidesHovers()
+scannerEndsHoverCloak()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
@@ -2223,6 +2228,7 @@ siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
+multiplayerSnapshotAndCommands()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -3479,6 +3485,141 @@ function hoversGridAcrossTheMap(): void {
   for (const hover of eleven) hover.order = null
   commandHoverGrid(wide, eleven.map((unit) => unit.id))
   assert(eleven.every((unit) => unit.order == null), 'Grid ran while the match was paused')
+}
+
+function gridCloakHidesHovers(): void {
+  assert(GRID_CLOAK_SECONDS === 45, `Grid invisibility is ${GRID_CLOAK_SECONDS}s`)
+  assert(
+    loreBody('Hover').includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
+    'the Hover lore omits Grid invisibility',
+  )
+  assert(
+    UNIT_STATS.drone.blurb.includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
+    'the Hover tooltip omits Grid invisibility',
+  )
+
+  const few = createMatch(9)
+  few.eliminated[1] = true
+  few.units = []
+  const short: Unit[] = []
+  for (let i = 0; i < 9; i++) short.push(makeUnit(few, 0, 'drone', 400 + i * 24, 400))
+  commandHoverGrid(few, short.map((unit) => unit.id))
+  assert(short.every((unit) => unit.cloak === 0), 'fewer than ten Hovers were hidden')
+
+  const state = createMatch(11)
+  state.eliminated[1] = true
+  state.units = []
+  const hovers: Unit[] = []
+  for (let i = 0; i < 10; i++) hovers.push(makeUnit(state, 0, 'drone', 480 + i * 28, 420))
+  const porter = makeUnit(state, 0, 'porter', 80, 80)
+  const pike = makeUnit(state, 1, 'pike', hovers[0].x + 16, hovers[0].y)
+  commandHoverGrid(state, [...hovers.map((unit) => unit.id), porter.id])
+  assert(hovers.every((unit) => unit.cloak === GRID_CLOAK_SECONDS), 'Grid did not hide every Hover it sent')
+  assert(porter.cloak === 0, 'Grid hid a unit that is not a Hover')
+  state.selectedUnits = [hovers[0].id]
+  assert(describeSelection(state).includes(`Invisible ${GRID_CLOAK_SECONDS}s`), 'the Hover panel omitted the cloak timer')
+  assert(viewUnitSeen(state, hovers[0]), 'the owner could not see a hidden Hover')
+  state.enemyCam = true
+  assert(!viewUnitSeen(state, hovers[0]), 'enemy cam drew a hidden Hover')
+  state.enemyCam = false
+
+  const hp = hovers[0].hp
+  commandAttack(state, [pike.id], hovers[0].id, 'unit')
+  const task = (): Unit['order'] => pike.order
+  assert(task() == null, 'an enemy was ordered onto a hidden Hover')
+  step(state, 1)
+  assert(hovers[0].hp === hp, 'a hidden Hover took damage')
+  assert(task() == null, 'an enemy acquired a hidden Hover')
+
+  state.paused = true
+  step(state, 5)
+  const left = (): number => hovers[0].cloak
+  assert(left() === GRID_CLOAK_SECONDS - 1, 'the cloak timer moved while the match was paused')
+  state.paused = false
+  step(state, 10)
+  assert(left() === GRID_CLOAK_SECONDS - 11, 'the cloak timer did not follow match time')
+  commandHoverGrid(state, hovers.map((unit) => unit.id))
+  assert(hovers.every((unit) => unit.cloak === GRID_CLOAK_SECONDS), 'pressing Grid again did not reset the timer')
+  step(state, GRID_CLOAK_SECONDS)
+  assert(hovers.every((unit) => unit.cloak === 0), 'a Hover stayed hidden after 45 seconds')
+  hovers[0].x = pike.x + 16
+  hovers[0].y = pike.y
+  updateVision(state)
+  state.enemyCam = true
+  assert(viewUnitSeen(state, hovers[0]), 'a Hover stayed invisible to enemies after the timer ended')
+  state.enemyCam = false
+  commandAttack(state, [pike.id], hovers[0].id, 'unit')
+  assert(task()?.type === 'attack', 'an enemy could not attack the Hover once it was visible')
+}
+
+function scannerEndsHoverCloak(): void {
+  assert(
+    loreBody('Hover').includes('scanning Hover reveals an invisible enemy Hover'),
+    'the Hover lore omits the Scanner reveal',
+  )
+  assert(
+    UNIT_STATS.drone.blurb.includes('scanning Hover reveals an invisible enemy Hover'),
+    'the Hover tooltip omits the Scanner reveal',
+  )
+
+  const state = createMatch(12)
+  state.eliminated[1] = true
+  state.units = []
+  const hidden = makeUnit(state, 0, 'drone', 800, 400)
+  hidden.cloak = GRID_CLOAK_SECONDS
+  const quiet = makeUnit(state, 1, 'drone', hidden.x + 40, hidden.y)
+  step(state, 1)
+  const cloak = (): number => hidden.cloak
+  assert(cloak() === GRID_CLOAK_SECONDS - 1, 'a Hover that is not scanning removed the cloak')
+
+  const friend = makeUnit(state, 0, 'drone', hidden.x + 30, hidden.y)
+  friend.scanning = true
+  step(state, 1)
+  assert(cloak() === GRID_CLOAK_SECONDS - 2, 'a friendly scanner removed the cloak')
+
+  quiet.x = hidden.x + UNIT_STATS.drone.sight + 8
+  quiet.y = hidden.y
+  quiet.scanning = true
+  const outside = cloak()
+  step(state, 1)
+  assert(cloak() === outside - 1, 'a scanner outside sight removed the cloak')
+
+  quiet.x = hidden.x + UNIT_STATS.drone.sight
+  quiet.y = hidden.y
+  step(state, 1)
+  assert(cloak() === 0, 'a scanning Hover inside sight left the cloak on')
+  quiet.x = hidden.x + UNIT_STATS.drone.sight + 80
+  step(state, 1)
+  assert(cloak() === 0, 'the cloak returned after the scanner left')
+
+  hidden.cloak = GRID_CLOAK_SECONDS
+  quiet.scanning = false
+  step(state, 1)
+  assert(cloak() === GRID_CLOAK_SECONDS - 1, 'Scanner off still removed the cloak')
+  quiet.scanning = true
+  quiet.x = hidden.x + 20
+  step(state, 1)
+  assert(cloak() === 0, 'turning Scanner back on inside sight left the cloak on')
+
+  friend.hp = 0
+  quiet.x = 80
+  quiet.y = 80
+  const pike = makeUnit(state, 1, 'pike', hidden.x + 18, hidden.y)
+  commandAttack(state, [pike.id], hidden.id, 'unit')
+  const task = (): Unit['order'] => pike.order
+  assert(task()?.type === 'attack', 'a revealed Hover could not be attacked')
+
+  const ai = createMatch(13)
+  ai.units = []
+  const scout = makeUnit(ai, 1, 'drone', 900, 500)
+  ai.aiAcc = 0
+  updateSiloAi(ai, 0.5)
+  assert(scout.scanning, 'SiloAI did not put its Hover in Scanner mode')
+  const prey = makeUnit(ai, 0, 'drone', scout.x + 40, scout.y)
+  prey.cloak = GRID_CLOAK_SECONDS
+  ai.eliminated[1] = true
+  step(ai, 1)
+  assert(prey.cloak === 0, 'a SiloAI scanner left an enemy Hover hidden')
 }
 
 function towerFiresOutToItsSight(): void {
@@ -5049,4 +5190,104 @@ function fullStorageRefusesAHaul(): void {
     `the replacement Storage is ${gap} tiles from the heap`,
   )
   assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
+}
+
+function multiplayerSnapshotAndCommands(): void {
+  assert(localOwner() === 0 && !multiplayer(), 'single player no longer starts as Silo 01')
+  const host = createMatch(42, 'duel')
+  const guest = createMatch(42, 'duel')
+  const mover = host.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const bystander = host.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  const attacker = host.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0 && unit.id !== mover?.id)
+  assert(mover && bystander && attacker, 'the duel did not seat both sides')
+  const parked = { x: bystander.x, y: bystander.y }
+  const move = {
+    op: 'move' as const,
+    ids: [mover.id, bystander.id],
+    x: mover.x + 90,
+    y: mover.y + 12,
+    attackMove: false,
+  }
+  const wired = parseCmd(JSON.parse(JSON.stringify(move)))
+  assert(wired?.op === 'move', 'a move command did not survive the wire')
+  assert(applyNetCmd(host, wired) == null, 'the host rejected a guest move')
+  const moved = unitById(host, mover.id)
+  assert(moved?.order?.type === 'move', 'Silo 02 did not take the move')
+  const still = unitById(host, bystander.id)
+  assert(still && still.order == null && still.x === parked.x && still.y === parked.y, 'a guest command moved Silo 01')
+  const attack = parseCmd(JSON.parse(JSON.stringify({ op: 'attack', ids: [attacker.id, bystander.id], targetId: bystander.id, kind: 'unit' })))
+  assert(attack?.op === 'attack', 'an attack command did not survive the wire')
+  assert(applyNetCmd(host, attack) == null, 'the host rejected a guest attack')
+  assert(unitById(host, attacker.id)?.order?.type === 'attack', 'Silo 02 did not take the attack')
+  assert(unitById(host, bystander.id)?.order == null, 'the attack order landed on Silo 01')
+
+  const keep = host.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(keep, 'Silo 02 has no Silo')
+  const bank = host.oreHeld[0] ?? 0
+  host.oreHeld[1] = 800
+  const before = host.oreHeld[1]
+  const train = parseCmd(JSON.parse(JSON.stringify({ op: 'train', buildingId: keep.id, kind: 'porter' })))
+  assert(train?.op === 'train', 'a train command did not survive the wire')
+  assert(applyNetCmd(host, train) == null, 'the host rejected a guest train order')
+  assert(keep.queue[0]?.kind === 'porter', 'Silo 02 did not queue a Stalker')
+  assert(host.oreHeld[1] === before - UNIT_STATS.porter.cost, 'Silo 02 did not pay for the Stalker')
+  assert(host.oreHeld[0] === bank, 'Silo 01 paid for a guest Stalker')
+
+  let placed = false
+  for (let ty = keep.ty - 8; ty <= keep.ty + 8 && !placed; ty++) {
+    for (let tx = keep.tx - 8; tx <= keep.tx + 8 && !placed; tx++) {
+      const beforeCount = host.buildings.length
+      const err = applyNetCmd(host, { op: 'place', kind: 'silo', tx, ty, porters: [] })
+      if (err == null && host.buildings.length > beforeCount) placed = true
+    }
+  }
+  assert(placed, 'a guest place command did not raise a Storage')
+  const site = host.buildings.find((building) => building.owner === 1 && building.kind === 'silo')
+  assert(site && !site.complete, 'the guest Storage was not under construction')
+
+  moved.hp = 17
+  host.explored[0] = 1
+  host.visible[3] = 1
+  host.aiExplored[5] = 1
+  const snap = JSON.parse(JSON.stringify(captureSnapshot(host)))
+  guest.selectedUnits = [bystander.id]
+  guest.tutorial = true
+  applySnapshot(guest, snap)
+  const ghost = unitById(guest, mover.id)
+  const ghostKeep = guest.buildings.find((building) => building.id === keep.id)
+  const ghostSite = guest.buildings.find((building) => building.id === site.id)
+  assert(ghost?.hp === 17 && ghost.order?.type === 'move', 'the snapshot did not copy the Stalker')
+  assert(ghostKeep?.queue[0]?.kind === 'porter', 'the snapshot dropped the training queue')
+  assert(ghostSite && ghostSite.owner === 1 && !ghostSite.complete, 'the snapshot dropped the Storage')
+  assert(guest.oreHeld[1] === host.oreHeld[1] && guest.oreHeld[0] === host.oreHeld[0], 'the snapshot dropped the banks')
+  assert(guest.explored[0] === 1 && guest.visible[3] === 1 && guest.aiExplored[5] === 1, 'the snapshot dropped the fog')
+  assert(guest.tutorial === true, 'the snapshot cleared the guest hint')
+  assert(guest.selectedUnits.includes(bystander.id), 'single-player snapshot apply dropped Silo 01 selection')
+
+  const seenAt = ghost.x
+  moved.x = seenAt + 40
+  acceptSnapshot(guest, JSON.parse(JSON.stringify(captureSnapshot(host))))
+  const easing = unitById(guest, mover.id)
+  assert(easing && Math.abs(easing.x - seenAt) < 0.01, 'the guest jumped to the new snapshot')
+  setGuestBlend(guest, 1)
+  assert(Math.abs(easing.x - (seenAt + 40)) < 0.01, 'the guest did not reach the snapshot')
+
+  host.outcome = 'win'
+  mp.role = 'guest'
+  try {
+    assert(localOwner() === 1, 'the guest is not Silo 02')
+    guest.selectedUnits = [bystander.id]
+    applySnapshot(guest, captureSnapshot(host))
+    assert(guest.outcome === 'lose', 'a host win did not become a guest loss')
+    assert(!guest.selectedUnits.includes(bystander.id), 'the guest kept a Silo 01 unit selected')
+    const online = createMatch(1, 'duel')
+    assert(runCommand(online, 'speed x3') && online.speed === 1, 'speed x3 worked in multiplayer')
+    assert(runCommand(online, 'god mode') && online.godMode === false, 'god mode worked in multiplayer')
+    assert(runCommand(online, 'siloai') && online.aiControl === false, 'siloai worked in multiplayer')
+  } finally {
+    mp.role = 'off'
+  }
+  assert(localOwner() === 0 && !multiplayer(), 'multiplayer leaked into single player')
+  const solo = createMatch(1, 'duel')
+  assert(runCommand(solo, 'speed x3') && solo.speed === 3, 'single player speed x3 broke')
 }

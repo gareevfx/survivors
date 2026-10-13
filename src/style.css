@@ -140,6 +140,11 @@ button, canvas { font: inherit; }
 .sides i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .sides .out { opacity: 0.4; text-decoration: line-through; }
 
+.top-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .top-actions button,
 #hint button,
 #again,
@@ -543,7 +548,43 @@ button, canvas { font: inherit; }
   padding: 20px;
 }
 
+#mp-live {
+  color: #c7d7b0;
+  font-size: 13px;
+  align-self: center;
+}
+
 .menu-card { width: min(520px, 100%); }
+.menu-card input[type='text'] {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  box-sizing: border-box;
+  background: #161b12;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 12px 14px;
+  font-size: 18px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.mp-room {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.mp-room b {
+  font-size: 22px;
+  letter-spacing: 0.18em;
+}
+.menu-card .mp-room button {
+  width: auto;
+  margin-top: 0;
+  padding: 8px 12px;
+  font-size: 16px;
+}
 .menu-card button {
   display: block;
   width: 100%;

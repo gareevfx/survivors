@@ -1,6 +1,7 @@
 import { updateAnimals } from './animals'
+import { multiplayer } from './mpRole'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
-import { updateScanners } from './scanner'
+import { revealCloakedByScanners, updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
@@ -50,12 +51,14 @@ export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
   state.time += dt
   updateSiloAi(state, dt)
+  revealCloakedByScanners(state)
 
   for (const unit of state.units) refreshUnit(state, unit, dt)
   releaseFromTerrain(state)
   for (const unit of state.units) moveUnit(state, unit, dt)
   separate(state)
   releaseFromTerrain(state)
+  revealCloakedByScanners(state)
   advanceGather(state, dt)
   advanceConstruct(state, dt)
   advanceRepair(state, dt)
@@ -65,6 +68,7 @@ export function step(state: MatchState, dt: number): void {
     unit.attackCd = Math.max(0, unit.attackCd - dt)
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
+    if (unit.cloak > 0) unit.cloak = Math.max(0, unit.cloak - dt)
     if (unit.kind === 'porter' && unit.hp > 0) {
       const lived = unit.age
       unit.age += dt
@@ -969,6 +973,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    cloak: 0,
     age: 0,
   }
   state.units.push(unit)
@@ -1106,7 +1111,7 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
  * Covered Stalkers are skipped. Uncovered ones stay valid so the shot can capture them.
  */
 function towerEngages(state: MatchState, building: Building, origin: { x: number; y: number }, target: Target): boolean {
-  if (target.hp <= 0 || target.owner === building.owner || target.targetKind === 'rock') return false
+  if (target.hp <= 0 || target.cloaked || target.owner === building.owner || target.targetKind === 'rock') return false
   if (coveredStalkerTarget(state, target)) return false
   if (!targetInTowerSight(state, building, origin, target)) return false
   return shotClear(state, origin.x, origin.y, target.x, target.y)
@@ -1151,7 +1156,7 @@ function sideSeesTile(state: MatchState, owner: number, tx: number, ty: number):
 }
 
 function isAttackable(unit: Unit, focus: Target): boolean {
-  if (focus.hp <= 0) return false
+  if (focus.hp <= 0 || focus.cloaked) return false
   if (unit.kind === 'drone') return false
   if (focus.targetKind === 'rock') return unit.kind === 'porter'
   if (focus.unitKind === 'drone' && unit.kind === 'howler') return false
@@ -1181,6 +1186,7 @@ function pickFireTarget(state: MatchState, unit: Unit): Target | null {
 }
 
 function siloControlled(state: MatchState, unit: Unit): boolean {
+  if (multiplayer()) return false
   return unit.owner === 0 ? state.aiControl : unit.owner > 0
 }
 
@@ -1214,7 +1220,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
-    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id) continue
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
     if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
     if (other.kind === 'porter' && stalkerCovered(state, other)) continue
@@ -1226,8 +1232,9 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   }
   if (!best && buildingsToo) {
     const castleFirst =
-      (unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
-      (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0))
+      !multiplayer() &&
+      ((unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
+        (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0)))
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
       if (castleFirst && building.kind !== 'keep') continue
@@ -1277,7 +1284,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   }
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
-    if (!unit || unit.hp <= 0) return
+    if (!unit || unit.hp <= 0 || unit.cloak > 0) return
     const source = unitById(state, sourceId)
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'porter') {

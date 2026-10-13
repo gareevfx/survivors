@@ -1,4 +1,5 @@
 import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, tryTrain } from '../game/commands'
+import { localOwner, multiplayer } from '../game/mpRole'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
@@ -16,6 +17,7 @@ import {
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
+  GRID_CLOAK_SECONDS,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -66,24 +68,31 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const endSeed = document.querySelector('#end-seed')
   const sides = document.querySelector('#sides')
 
-  if (ore) ore.textContent = String(state.oreHeld[0])
-  const supplyText = `${state.supplyUsed[0]} / ${state.supplyCap[0]}`
+  const me = localOwner()
+  if (ore) ore.textContent = String(state.oreHeld[me] ?? 0)
+  const supplyText = `${state.supplyUsed[me] ?? 0} / ${state.supplyCap[me] ?? 0}`
   if (supply) {
     supply.textContent = supplyText
-    supply.classList.toggle('tight', state.supplyCap[0] - state.supplyUsed[0] <= 1)
+    supply.classList.toggle('tight', (state.supplyCap[me] ?? 0) - (state.supplyUsed[me] ?? 0) <= 1)
     const cells = supply.closest('.readout')
     if (cells instanceof HTMLElement) cells.title = loreBody('Cells')
   }
   if (clock) clock.textContent = formatTime(state.time)
   const idleCount = state.units.filter(
-    (unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
+    (unit) => unit.owner === me && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
   if (pause) {
+    const online = multiplayer()
+    pause.disabled = online
     pause.textContent = state.paused ? 'Resume' : 'Pause'
-    pause.title = state.paused ? 'Resume the match (Pause)' : 'Pause the match (Pause)'
+    pause.title = online ? 'Pause is off in multiplayer' : state.paused ? 'Resume the match (Pause)' : 'Pause the match (Pause)'
     pause.setAttribute('aria-pressed', state.paused ? 'true' : 'false')
+  }
+  const menuBtn = document.querySelector('#menu-btn')
+  if (menuBtn instanceof HTMLButtonElement) {
+    menuBtn.title = multiplayer() ? 'Leave the match' : 'Pause and return to the menu'
   }
   if (pausedBanner) pausedBanner.classList.toggle('hidden', !state.paused)
   if (aiBadge) aiBadge.classList.toggle('hidden', !state.aiControl)
@@ -115,27 +124,28 @@ export function syncHud(state: MatchState, actions: HudActions): void {
       const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
       const color = PLAYER_COLOR[owner] ?? '#ffffff'
       const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
-      return `<span class="${gone && owner !== 0 ? 'out' : ''}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
+      return `<span class="${gone && owner !== me ? 'out' : ''}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
     }).join('')
   }
 
   if (overlay && endKicker && endTitle && endCopy && endSeed) {
     overlay.classList.toggle('hidden', state.outcome == null)
     const others = PLAYER_NAME.slice(1, state.playerCount).join(', ')
+    const foe = me === 0 ? 1 : 0
     if (state.outcome === 'win') {
-      endKicker.textContent = PLAYER_NAME[0] ?? 'Silo 01'
+      endKicker.textContent = PLAYER_NAME[me] ?? 'Silo 01'
       endTitle.textContent = 'Surface is yours'
       endCopy.textContent =
         state.playerCount > 2
           ? 'Every enemy Silo is rubble. Your banners stay on the field.'
-          : `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
+          : `The ${PLAYER_NAME[foe]} Silo is rubble. Your banners stay on the field.`
     } else if (state.outcome === 'lose') {
-      endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[1] ?? 'Silo 02')
+      endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[foe] ?? 'Silo 02')
       endTitle.textContent = 'The silo has fallen'
       endCopy.textContent =
         state.playerCount > 2
           ? `Your Silo is gone. ${others} fight on without you.`
-          : `Your Silo is gone. ${PLAYER_NAME[1]} takes Surface.`
+          : `Your Silo is gone. ${PLAYER_NAME[foe]} takes Surface.`
     }
     endSeed.textContent = `Field ${state.seed}`
   }
@@ -171,7 +181,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
 
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building?.ruined && state.selectedUnits.length === 0) {
-    const afford = building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST
+    const afford = building.repairPaid || (state.oreHeld[localOwner()] ?? 0) >= SILO_REPAIR_COST
     const porter = nearestPlayerPorter(state, building)
     return [
       {
@@ -193,7 +203,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       },
     ]
   }
-  if (building && building.owner === 0 && state.selectedUnits.length === 0) {
+  if (building && building.owner === localOwner() && state.selectedUnits.length === 0) {
     if (!building.complete) {
       return [
         {
@@ -261,13 +271,13 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         },
       },
     ]
-    const hovers = playerHovers(state, state.selectedUnits)
+    const hovers = playerHovers(state, state.selectedUnits, localOwner())
     if (hovers.length) {
       cmds.push({
         id: 'scan',
         label: 'Scanner',
         hotkey: 'C',
-        title: 'Fly to the nearest black fog, then the tiles seen longest ago',
+        title: 'Fly to the nearest black fog, then the tiles seen longest ago. Reveals an invisible enemy Hover inside sight.',
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
         run: () => toggleScanner(state, hovers.map((unit) => unit.id)),
@@ -276,7 +286,9 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       cmds.push({
         id: 'grid',
         label: 'Grid',
-        title: gridReady ? 'Fly to an even grid covering the map, then stay there' : 'Needs 10 Hovers selected',
+        title: gridReady
+          ? `Fly to an even grid covering the map, stay there, and turn invisible for ${GRID_CLOAK_SECONDS} seconds`
+          : 'Needs 10 Hovers selected',
         disabled: !gridReady,
         run: () => {
           commandHoverGrid(state, state.selectedUnits)
@@ -306,7 +318,7 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
 
 function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions): Cmd {
   const stats = BUILDING_STATS[kind]
-  const afford = state.oreHeld[0] >= stats.cost
+  const afford = (state.oreHeld[localOwner()] ?? 0) >= stats.cost
   return {
     id: `place-${kind}`,
     label: stats.label,
@@ -322,11 +334,11 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
 function repairButton(state: MatchState): Cmd {
   const porters = state.selectedUnits.filter((id) => {
     const unit = unitById(state, id)
-    return !!unit && unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0
+    return !!unit && unit.owner === localOwner() && unit.kind === 'porter' && unit.hp > 0
   })
   const ruin = state.buildings.some((building) => building.ruined)
   const afford = state.buildings.some(
-    (building) => building.ruined && (building.repairPaid || (state.oreHeld[0] ?? 0) >= SILO_REPAIR_COST),
+    (building) => building.ruined && (building.repairPaid || (state.oreHeld[localOwner()] ?? 0) >= SILO_REPAIR_COST),
   )
   let title = 'Repair the nearest ruined Silo'
   if (!porters.length) title = 'You need a stalker to repair'
@@ -348,8 +360,9 @@ function repairButton(state: MatchState): Cmd {
 
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
-  const afford = state.oreHeld[0] >= stats.cost
-  const room = stats.supply === 0 || state.supplyUsed[0] + stats.supply <= state.supplyCap[0]
+  const me = localOwner()
+  const afford = (state.oreHeld[me] ?? 0) >= stats.cost
+  const room = stats.supply === 0 || (state.supplyUsed[me] ?? 0) + stats.supply <= (state.supplyCap[me] ?? 0)
   let title = stats.blurb
   if (!afford) title = `Need ${stats.cost} dumps`
   else if (!room) title = 'Cells cap reached — raise a Storage'
@@ -428,7 +441,7 @@ function nearestPlayerPorter(state: MatchState, building: Building): { id: numbe
   let best: { id: number } | undefined
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== 0 || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== localOwner() || unit.kind !== 'porter' || unit.hp <= 0) continue
     const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
     if (distance < bestD) {
       bestD = distance
@@ -545,6 +558,7 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
+      ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }

@@ -1,4 +1,5 @@
 import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandHarvestOrAttack, commandMove, commandRepair, tryPlace, tryTrain } from './commands'
+import { multiplayer } from './mpRole'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
@@ -271,12 +272,14 @@ function dispatchDrones(state: MatchState, side: Brain): void {
     if (traveling && !threatened) {
       reserved.push({ x: order.x, y: order.y })
       side.scout = drone.id
+      drone.scanning = true
       continue
     }
     const goal = droneGoal(state, side, drone.x, drone.y, reserved)
     reserved.push(goal)
     side.scout = drone.id
     commandMove(state, [drone.id], goal.x, goal.y, false)
+    drone.scanning = true
   }
 }
 
@@ -467,7 +470,7 @@ function knownPillarReaches(state: MatchState, side: Brain, x: number, y: number
 function knownEnemyNear(state: MatchState, side: Brain, x: number, y: number): boolean {
   if (knownPillarReaches(state, side, x, y)) return true
   for (const unit of state.units) {
-    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone' || unit.cloak > 0) continue
     if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
     if (Math.hypot(unit.x - x, unit.y - y) <= EXPANSION_THREAT) return true
   }
@@ -765,6 +768,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, finished Storage, Flasher, and Gorilla sight.
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
+  if (multiplayer()) return
   if (state.outcome) return
   const think = 0.5
   let budget = 8
@@ -1511,7 +1515,7 @@ function guardDuty(state: MatchState, side: Brain, units: Unit[], keepPoint: { x
   if (!posts.length) return
   const busy = new Set<number>()
   for (const enemy of state.units) {
-    if (enemy.owner === side.owner || enemy.hp <= 0 || enemy.kind === 'drone') continue
+    if (enemy.owner === side.owner || enemy.hp <= 0 || enemy.kind === 'drone' || enemy.cloak > 0) continue
     if (!tileBit(state, side.visible, Math.floor(enemy.x / TILE), Math.floor(enemy.y / TILE))) continue
     let near = false
     for (const post of posts) {
@@ -1673,7 +1677,7 @@ function siloAttackers(state: MatchState, side: Brain, keepPoint: { x: number; y
   if (!watched.length) return []
   const threats: Unit[] = []
   for (const unit of state.units) {
-    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone') continue
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone' || unit.cloak > 0) continue
     const range = UNIT_STATS[unit.kind].range
     if (range <= 0) continue
     const seen = tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))

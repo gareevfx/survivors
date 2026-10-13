@@ -3,6 +3,8 @@ import { Sfx } from './game/audio'
 import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
+import { localOwner, mp, multiplayer } from './game/mpRole'
+import { endMp, hostRoom, joinRoom, pumpNet } from './game/mpSession'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
@@ -58,6 +60,10 @@ function focus(x: number, y: number): void {
 }
 
 function openCommand(): void {
+  if (multiplayer()) {
+    if (match) pushToast(match, 'Commands are off in multiplayer.')
+    return
+  }
   commandBar.classList.remove('hidden')
   commandField.focus()
   commandField.select()
@@ -79,8 +85,13 @@ function lookAtHome(): void {
 }
 
 function showMenu(): void {
+  if (multiplayer()) {
+    leaveOnline('You left the match.')
+    return
+  }
   menuOpen = true
   menu?.classList.remove('hidden')
+  showMp(false)
   if (menuResume) menuResume.classList.toggle('hidden', !match || match.outcome != null)
   if (match && !match.outcome) match.paused = true
 }
@@ -89,6 +100,7 @@ function startMatch(mode: MatchMode, seed?: number): void {
   closeCommand()
   menuOpen = false
   menu?.classList.add('hidden')
+  showMp(false)
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
   terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
   camera.zoom = mode === 'ffa' ? 0.85 : 1.35
@@ -101,6 +113,8 @@ function startMatch(mode: MatchMode, seed?: number): void {
   input.clearGroups()
   resetHudCache()
   lookAtHome()
+  last = performance.now()
+  acc = 0
 }
 
 function boot(seed?: number): void {
@@ -144,7 +158,7 @@ const input = attachInput({
 function selectIdlePorters(): void {
   if (!match) return
   const ids = match.units
-    .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
+    .filter((unit) => unit.owner === localOwner() && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
     .map((unit) => unit.id)
   if (!ids.length) {
     pushToast(match, 'Every stalker is already busy.')
@@ -163,7 +177,7 @@ hintClose?.addEventListener('click', () => {
   if (match) match.tutorial = false
 })
 document.querySelector('#pause')?.addEventListener('click', () => {
-  if (!match || menuOpen) return
+  if (!match || menuOpen || multiplayer()) return
   match.paused = !match.paused
 })
 document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
@@ -184,13 +198,19 @@ document.querySelector('#about-close')?.addEventListener('click', () => {
   about?.classList.add('hidden')
 })
 menuResume?.addEventListener('click', () => {
-  if (!match || match.outcome) return
+  if (!match || match.outcome || multiplayer()) return
   menuOpen = false
   menu?.classList.add('hidden')
   match.paused = false
 })
 document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
-again?.addEventListener('click', () => boot())
+again?.addEventListener('click', () => {
+  if (multiplayer()) {
+    leaveOnline('Host a new room to play again.')
+    return
+  }
+  boot()
+})
 idle?.addEventListener('click', () => {
   sfx.unlock()
   selectIdlePorters()
@@ -217,6 +237,94 @@ mini.addEventListener('pointerup', () => {
   miniDrag = false
 })
 
+const mpPanel = document.querySelector<HTMLElement>('#mp-panel')
+const mpStatus = document.querySelector<HTMLElement>('#mp-status')
+const mpRoom = document.querySelector<HTMLElement>('#mp-room')
+const mpRoomCode = document.querySelector<HTMLElement>('#mp-room-code')
+const mpCode = document.querySelector<HTMLInputElement>('#mp-code')
+const mpLive = document.querySelector<HTMLElement>('#mp-live')
+
+function showMp(open: boolean): void {
+  mpPanel?.classList.toggle('hidden', !open)
+  for (const id of ['#menu-duel', '#menu-duel-note', '#menu-ffa', '#menu-ffa-note', '#menu-about', '#menu-donat', '#menu-mp']) {
+    document.querySelector(id)?.classList.toggle('hidden', open)
+  }
+  if (menuResume) menuResume.classList.toggle('hidden', open || !match || match.outcome != null)
+}
+
+function setMpStatus(text: string, live: boolean): void {
+  if (mpStatus) mpStatus.textContent = text
+  if (mpLive) {
+    mpLive.textContent = text
+    mpLive.classList.toggle('hidden', !live)
+  }
+}
+
+function mpHooks() {
+  return {
+    onStatus: (text: string, live: boolean) => setMpStatus(text, live),
+    onCode: (code: string) => {
+      if (mpRoomCode) mpRoomCode.textContent = code
+      mpRoom?.classList.remove('hidden')
+    },
+    onReady: (seed: number) => startMatch('duel', seed),
+    onDrop: (message: string) => leaveOnline(message),
+    getState: () => match,
+  }
+}
+
+function leaveOnline(message: string): void {
+  endMp()
+  closeCommand()
+  match = null
+  terrain = null
+  menuOpen = true
+  menu?.classList.remove('hidden')
+  showMp(true)
+  if (mpRoom) mpRoom.classList.add('hidden')
+  if (mpCode) mpCode.value = ''
+  setMpStatus(message, false)
+  const pause = document.querySelector<HTMLButtonElement>('#pause')
+  if (pause) pause.disabled = false
+}
+
+document.querySelector('#menu-mp')?.addEventListener('click', () => {
+  showMp(true)
+  if (mpRoom) mpRoom.classList.add('hidden')
+  if (mpCode) mpCode.value = ''
+  setMpStatus('Host a room and send the code, or join with one.', false)
+})
+document.querySelector('#mp-back')?.addEventListener('click', () => {
+  if (multiplayer()) leaveOnline('You left the match.')
+  else {
+    endMp()
+    showMp(false)
+    setMpStatus('Host a room and send the code, or join with one.', false)
+  }
+})
+document.querySelector('#mp-host')?.addEventListener('click', () => {
+  if (mpRoom) mpRoom.classList.add('hidden')
+  hostRoom(mpHooks())
+})
+document.querySelector('#mp-join')?.addEventListener('click', () => {
+  joinRoom(mpCode?.value ?? '', mpHooks())
+})
+mpCode?.addEventListener('keydown', (event) => {
+  if (event.code !== 'Enter') return
+  event.preventDefault()
+  joinRoom(mpCode.value, mpHooks())
+})
+document.querySelector('#mp-copy')?.addEventListener('click', () => {
+  const code = mpRoomCode?.textContent?.trim() ?? ''
+  if (!code) return
+  const done = () => setMpStatus(`Copied ${code}. Waiting for opponent.`, false)
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(code).then(done).catch(done)
+    return
+  }
+  done()
+})
+
 showMenu()
 
 let last = performance.now()
@@ -229,7 +337,11 @@ function loop(now: number): void {
   if (match && terrain && !menuOpen) {
     const live = match
     const ground = terrain
-    if (!live.paused) {
+    if (multiplayer()) {
+      live.paused = false
+      live.speed = 1
+    }
+    if (mp.role !== 'guest' && !live.paused) {
       const rate = live.speed === 3 ? 3 : 1
       acc += dt * rate
       let guard = 0
@@ -238,6 +350,7 @@ function loop(now: number): void {
         acc -= STEP
       }
     }
+    pumpNet(live, dt)
     input.pan(dt)
     const drawn = renderWorld(stage, live, ground, camera, {
       drag: input.dragRect(),
@@ -278,3 +391,27 @@ function loop(now: number): void {
 }
 
 requestAnimationFrame(loop)
+
+// A background tab stops painting. Catch the host sim up when frames stall.
+window.setInterval(() => {
+  if (mp.role !== 'host' || !match || menuOpen) return
+  const now = performance.now()
+  const gap = now - last
+  if (gap < 90) return
+  const live = match
+  live.paused = false
+  live.speed = 1
+  last = now
+  let budget = Math.min(1, gap / 1000)
+  while (budget > 0) {
+    const slice = Math.min(0.05, budget)
+    acc += slice
+    let guard = 0
+    while (acc >= STEP && guard++ < 6) {
+      step(live, STEP)
+      acc -= STEP
+    }
+    pumpNet(live, slice)
+    budget -= slice
+  }
+}, 200)

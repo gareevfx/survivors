@@ -1,4 +1,5 @@
 import { spawnAnimals } from './animals'
+import { localOwner } from './mpRole'
 import { generateBattlefield, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
@@ -126,6 +127,7 @@ export function unitTarget(unit: Unit): Target {
     hp: unit.hp,
     targetKind: 'unit',
     unitKind: unit.kind,
+    cloaked: unit.cloak > 0,
   }
 }
 
@@ -297,6 +299,7 @@ export function makeUnit(
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    cloak: 0,
     age: 0,
   }
   state.units.push(unit)
@@ -506,7 +509,8 @@ function aimRally(building: Building): void {
 }
 
 export function playerKeep(state: MatchState): Building | undefined {
-  return state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  const owner = localOwner()
+  return state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
 }
 
 export function nearestOre(state: MatchState, x: number, y: number): { id: number; tx: number; ty: number } | null {
