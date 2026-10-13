@@ -1,6 +1,7 @@
 import { drawAnimal } from './animalArt'
 import type { Camera } from './camera'
-import { buildingCenter, buildingRect, getTarget, placementAllowed, playerKeep } from './state'
+import { controlledSide } from './control'
+import { buildingCenter, buildingRect, getTarget, placementAllowed, sideKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
@@ -168,7 +169,7 @@ export function renderWorld(
   }
   drawGroundUntil(Number.POSITIVE_INFINITY)
 
-  const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : 0
+  const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : controlledSide(state)
   for (const shot of state.projectiles) {
     if (shot.x < view.l || shot.y < view.t || shot.x > view.r || shot.y > view.b) continue
     if (shot.owner !== viewer && !viewTileVisible(state, Math.floor(shot.x / TILE), Math.floor(shot.y / TILE))) continue
@@ -213,7 +214,7 @@ export function renderWorld(
   }
 
   const rally = state.selectedBuilding != null ? state.buildings.find((b) => b.id === state.selectedBuilding) : undefined
-  if (rally && rally.owner === 0 && viewBuildingSeen(state, rally)) {
+  if (rally && rally.owner === controlledSide(state) && viewBuildingSeen(state, rally)) {
     ctx.strokeStyle = 'rgba(159, 216, 255, 0.8)'
     ctx.fillStyle = '#9fd8ff'
     ctx.beginPath()
@@ -322,7 +323,7 @@ function drawFog(
 }
 
 function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
-  const keep = playerKeep(state)
+  const keep = sideKeep(state, controlledSide(state))
   if (!keep) return
   const origin = buildingCenter(keep)
   let best: { x: number; y: number; d: number } | null = null
@@ -343,7 +344,7 @@ function drawOreHint(ctx: CanvasRenderingContext2D, state: MatchState): void {
 }
 
 function drawKeepSight(ctx: CanvasRenderingContext2D, state: MatchState): void {
-  const keep = playerKeep(state)
+  const keep = sideKeep(state, controlledSide(state))
   if (!keep) return
   const center = buildingCenter(keep)
   ctx.save()
@@ -571,7 +572,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
         ? Math.sin(unit.anim) * 1.1
         : 0
 
-  if (selected || (state.tutorial && unit.owner === 0 && unit.kind === 'porter')) {
+  if (selected || (state.tutorial && unit.owner === controlledSide(state) && unit.kind === 'porter')) {
     const pulse = state.tutorial && !selected ? 0.45 + Math.sin(state.time * 4) * 0.2 : 0.9
     ctx.save()
     ctx.strokeStyle = selected ? `rgba(244, 241, 196, ${pulse})` : `rgba(230, 193, 90, ${pulse})`
@@ -677,7 +678,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.restore()
   }
 
-  if (unit.owner === 0 && unit.kind === 'porter' && !unit.order) {
+  if (unit.owner === controlledSide(state) && unit.kind === 'porter' && !unit.order) {
     ctx.fillStyle = '#f0c857'
     ctx.beginPath()
     ctx.moveTo(unit.x, unit.y - 16)

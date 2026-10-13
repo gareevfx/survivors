@@ -1,3 +1,4 @@
+import { controlledSide } from './control'
 import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
 import { depositKnown } from './vision'
 import {
@@ -41,7 +42,8 @@ function living(state: MatchState, ids: number[]): Unit[] {
 }
 
 function noteOrder(state: MatchState, units: Unit[]): void {
-  if (units.some((unit) => unit.owner === 0)) state.events.push({ type: 'order' })
+  const side = controlledSide(state)
+  if (units.some((unit) => unit.owner === side)) state.events.push({ type: 'order' })
 }
 
 function depositOf(unit: Unit): number | null {
@@ -387,7 +389,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
     unit.leashY = null
     setUnitDestination(state, unit, gx, gy)
   })
-  if (units.some((unit) => unit.owner === 0)) {
+  if (units.some((unit) => unit.owner === controlledSide(state))) {
     state.pings.push({
       x,
       y,
@@ -399,9 +401,10 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
   noteOrder(state, units)
 }
 
-/** Living player Hovers. Dead and enemy Hovers are left out. */
+/** Living Hovers of the side the player is commanding. Dead and other Hovers are left out. */
 export function playerHovers(state: MatchState, ids: number[]): Unit[] {
-  return living(state, ids).filter((unit) => unit.owner === 0 && unit.kind === 'drone')
+  const side = controlledSide(state)
+  return living(state, ids).filter((unit) => unit.owner === side && unit.kind === 'drone')
 }
 
 /** Cell centers covering the map. The last short row is spread across the full width. */
@@ -566,7 +569,7 @@ export function commandAttack(
     unit.leashY = null
     stopMoving(unit)
   }
-  if (units.some((unit) => unit.owner === 0)) {
+  if (units.some((unit) => unit.owner === controlledSide(state))) {
     state.pings.push({ x, y, life: 0.45, max: 0.45, color: '#ff7a68' })
   }
   noteOrder(state, units)
@@ -718,7 +721,7 @@ export function commandRepair(state: MatchState, ids: number[], buildingId: numb
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
   if (state.outcome || state.paused) return
   const building = buildingById(state, buildingId)
-  if (!building || building.owner !== 0 || building.hp <= 0) return
+  if (!building || building.owner !== controlledSide(state) || building.hp <= 0) return
   building.rallyX = x
   building.rallyY = y
   state.pings.push({ x, y, life: 0.5, max: 0.5, color: '#9fd8ff' })
@@ -743,7 +746,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   debitDumps(state, building.owner, stats.cost)
   building.queue.push({ kind, remaining: stats.trainTime, total: stats.trainTime })
   recomputeSupply(state)
-  if (building.owner === 0) state.events.push({ type: 'build' })
+  if (building.owner === controlledSide(state)) state.events.push({ type: 'build' })
   return null
 }
 
@@ -755,7 +758,7 @@ export function cancelTrain(state: MatchState, buildingId: number): void {
   if (!job) return
   state.oreHeld[building.owner] += UNIT_STATS[job.kind].cost
   recomputeSupply(state)
-  if (building.owner === 0) pushToast(state, `Cancelled ${UNIT_STATS[job.kind].label}.`)
+  if (building.owner === controlledSide(state)) pushToast(state, `Cancelled ${UNIT_STATS[job.kind].label}.`)
 }
 
 function ejectFrom(state: MatchState, building: ReturnType<typeof makeBuilding>): void {
@@ -828,7 +831,7 @@ export function tryPlace(
     stopMoving(porter)
   }
 
-  if (owner === 0) {
+  if (owner === controlledSide(state)) {
     state.placement = null
     state.attackMoveArmed = false
     state.moveArmed = false
@@ -859,7 +862,7 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   if (state.selectedBuilding === building.id) state.selectedBuilding = null
   rebuildBlocked(state)
   recomputeSupply(state)
-  if (building.owner === 0) pushToast(state, `Cancelled. Returned ${refund} dumps.`)
+  if (building.owner === controlledSide(state)) pushToast(state, `Cancelled. Returned ${refund} dumps.`)
 }
 
 /**

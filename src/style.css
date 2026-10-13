@@ -139,6 +139,40 @@ button, canvas { font: inherit; }
 .sides span { display: inline-flex; align-items: center; gap: 4px; }
 .sides i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .sides .out { opacity: 0.4; text-decoration: line-through; }
+.sides .you { color: var(--paper); }
+
+.side-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  pointer-events: auto;
+}
+.side-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(18, 22, 14, 0.72);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.side-switch button[aria-pressed='true'] {
+  color: var(--paper);
+  border-color: var(--gold);
+}
+.side-switch button.out {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.side-switch i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}
 
 .top-actions button,
 #hint button,

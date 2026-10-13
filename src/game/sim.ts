@@ -1,4 +1,5 @@
 import { updateAnimals } from './animals'
+import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateScanners } from './scanner'
 import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
@@ -1185,6 +1186,7 @@ function pickFireTarget(state: MatchState, unit: Unit): Target | null {
 }
 
 function siloControlled(state: MatchState, unit: Unit): boolean {
+  if (state.doubleGame && unit.owner === controlledSide(state)) return false
   return unit.owner === 0 ? state.aiControl : unit.owner > 0
 }
 
@@ -1229,9 +1231,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
     }
   }
   if (!best && buildingsToo) {
-    const castleFirst =
-      (unit.owner !== 0 && sideKnowsEnemyKeep(state, unit.owner)) ||
-      (unit.owner === 0 && state.aiControl && sideKnowsEnemyKeep(state, 0))
+    const castleFirst = siloControlled(state, unit) && sideKnowsEnemyKeep(state, unit.owner)
     for (const building of state.buildings) {
       if (building.owner === unit.owner || building.hp <= 0) continue
       if (castleFirst && building.kind !== 'keep') continue
@@ -1454,7 +1454,7 @@ function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
   stopMoving(unit)
   state.selectedUnits = state.selectedUnits.filter((id) => {
     const selected = unitById(state, id)
-    return !!selected && selected.owner === 0 && selected.hp > 0
+    return !!selected && selected.owner === controlledSide(state) && selected.hp > 0
   })
   for (const other of state.units) {
     if (other.owner !== newOwner) continue
@@ -1514,13 +1514,14 @@ function captureSide(state: MatchState, victim: number, captor: number): void {
   }
   state.oreHeld[captor] = (state.oreHeld[captor] ?? 0) + (state.oreHeld[victim] ?? 0)
   state.oreHeld[victim] = 0
+  const seat = controlledSide(state)
   state.selectedUnits = state.selectedUnits.filter((id) => {
     const unit = unitById(state, id)
-    return !!unit && unit.owner === 0 && unit.hp > 0
+    return !!unit && unit.owner === seat && unit.hp > 0
   })
   if (state.selectedBuilding != null) {
     const selected = buildingById(state, state.selectedBuilding)
-    if (!selected || selected.owner !== 0 || selected.hp <= 0) state.selectedBuilding = null
+    if (!selected || selected.owner !== seat || selected.hp <= 0) state.selectedBuilding = null
   }
   for (const unit of state.units) {
     const order = unit.order

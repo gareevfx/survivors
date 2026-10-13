@@ -1,5 +1,6 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
+import { cycleSide, takeSide } from './game/control'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, playerHovers, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
@@ -2107,6 +2108,103 @@ function castlesSpawnFarApart(): void {
   assert(camps.size >= 2, 'castle placement did not change between matches')
 }
 
+function ordered(state: MatchState, owner: number): boolean {
+  return state.units.some((unit) => unit.owner === owner && unit.hp > 0 && unit.order != null)
+}
+
+function clearOrders(state: MatchState): void {
+  for (const unit of state.units) unit.order = null
+}
+
+function doubleGameCommand(): void {
+  const state = createMatch(11)
+  assert(!state.doubleGame && Number(state.control) === 0, 'a match starts in double game')
+  assert(!runCommand(state, 'double'), 'a partial line turned double game on')
+  assert(!state.doubleGame, 'a partial line changed double game')
+  assert(!runCommand(state, 'double game on'), 'an unknown double game line was accepted')
+  assert(!state.doubleGame, 'an unknown line turned double game on')
+  assert(runCommand(state, 'double game'), 'double game was rejected')
+  assert(state.doubleGame && Number(state.control) === 0, 'double game did not start on Silo 01')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Double game is on. Tab changes side.', 'double game did not announce itself')
+  assert(runCommand(state, 'double game'), 'repeating double game was rejected')
+  assert(state.doubleGame, 'repeating double game turned it off')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Double game is already on.', 'the repeat used the wrong notice')
+
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const foe = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home && foe, 'missing silos')
+  assert(viewTileVisible(state, home.tx + 1, home.ty + 1), 'Silo 01 went dark under double game')
+  assert(!viewTileVisible(state, foe.tx + 1, foe.ty + 1), 'Silo 02 was visible before switching')
+  state.selectedUnits = state.units.filter((unit) => unit.owner === 0).map((unit) => unit.id)
+  state.placement = 'yard'
+  cycleSide(state)
+  assert(Number(state.control) === 1, 'the side did not move to Silo 02')
+  assert(state.selectedUnits.length === 0 && state.placement == null, 'switching sides kept the previous hands')
+  assert(viewTileVisible(state, foe.tx + 1, foe.ty + 1), 'Silo 02 stayed dark while controlled')
+  assert(!viewTileVisible(state, home.tx + 1, home.ty + 1), 'Silo 01 stayed lit after leaving it')
+  assert(describeSelection(state).includes(PLAYER_NAME[1] ?? 'Silo 02'), 'the panel did not name the controlled side')
+  assert(!ordered(state, 1), 'Silo 02 started with orders')
+  updateSiloAi(state, 0.5)
+  assert(!ordered(state, 1), 'SiloAI ordered the controlled side')
+
+  assert(runCommand(state, 'all cams'), 'all cams was rejected during double game')
+  assert(state.bothCam && state.doubleGame && Number(state.control) === 1, 'all cams cleared double game')
+  assert(
+    viewTileVisible(state, home.tx + 1, home.ty + 1) && viewTileVisible(state, foe.tx + 1, foe.ty + 1),
+    'all cams did not merge sight during double game',
+  )
+  assert(runCommand(state, 'all cams off'), 'all cams off was rejected')
+  assert(!state.bothCam && state.doubleGame, 'all cams off cleared double game')
+
+  assert(runCommand(state, 'show enemy cam'), 'enemy cam was rejected during double game')
+  assert(state.enemyCam && Number(state.control) === 1 && state.doubleGame, 'enemy cam changed double game')
+  assert(!viewTileVisible(state, home.tx + 1, home.ty + 1), 'enemy cam showed Silo 01')
+  assert(viewTileVisible(state, foe.tx + 1, foe.ty + 1), 'enemy cam hid a side other than Silo 01')
+  assert(runCommand(state, 'off enemy cam'), 'off enemy cam was rejected')
+
+  assert(runCommand(state, 'siloai'), 'siloai was rejected during double game')
+  assert(state.aiControl && state.doubleGame, 'siloai cleared double game')
+  clearOrders(state)
+  updateSiloAi(state, 0.5)
+  assert(ordered(state, 0), 'SiloAI did not play Silo 01 while another side was controlled')
+  assert(!ordered(state, 1), 'SiloAI ordered the side under the player')
+
+  takeSide(state, 0)
+  assert(Number(state.control) === 0, 'the switcher did not return to Silo 01')
+  clearOrders(state)
+  updateSiloAi(state, 0.5)
+  assert(!ordered(state, 0), 'SiloAI ordered Silo 01 while it was controlled')
+  assert(ordered(state, 1), 'SiloAI stayed suspended after leaving Silo 02')
+
+  assert(runCommand(state, 'double game off'), 'double game off was rejected')
+  assert(!state.doubleGame && Number(state.control) === 0, 'double game off did not return to Silo 01')
+  assert(state.aiControl, 'double game off cleared siloai')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Double game is off.', 'double game off used the wrong notice')
+  clearOrders(state)
+  updateSiloAi(state, 0.5)
+  assert(ordered(state, 1), 'Silo 02 stayed suspended after double game off')
+  assert(ordered(state, 0), 'siloai did not resume Silo 01 after double game off')
+  assert(runCommand(state, 'double game off'), 'double game off was rejected while already off')
+  assert(!state.doubleGame, 'the off command turned double game on')
+  assert(state.toasts[state.toasts.length - 1]?.text === 'Double game is already off.', 'the off repeat used the wrong notice')
+
+  const ffa = createMatch(12, 'ffa')
+  assert(runCommand(ffa, 'double game'), 'double game was rejected in a free-for-all')
+  cycleSide(ffa)
+  cycleSide(ffa)
+  cycleSide(ffa)
+  assert(Number(ffa.control) === 3, 'cycle did not walk every seated side')
+  cycleSide(ffa)
+  assert(Number(ffa.control) === 0, 'cycle did not wrap to Silo 01')
+  assert(runCommand(ffa, 'off fow'), 'off fow was rejected during double game')
+  cycleSide(ffa)
+  cycleSide(ffa)
+  assert(Number(ffa.control) === 2 && ffa.doubleGame && ffa.fogCleared, 'off fow cleared double game')
+  assert(viewTileVisible(ffa, 0, 0), 'off fow followed the controlled side into fog')
+  const seat = ffa.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  assert(seat && viewTileVisible(ffa, seat.tx + 1, seat.ty + 1), 'the controlled Silo stayed dark with fog off')
+}
+
 function buriedMineralsPreferTheFasterRock(): void {
   const state = createMatch(8)
   for (const unit of state.units) unit.hp = 0
@@ -2163,6 +2261,7 @@ fogHidesUnexploredGround()
 clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()
+doubleGameCommand()
 freedomKillsEveryUnit()
 speedTriplesTheMatch()
 wildlifeStaysAmbient()
