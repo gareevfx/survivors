@@ -439,8 +439,6 @@ export interface MatchState {
   visible: Uint8Array
   /** Match time when Silo 01 last saw each tile. Zero until that tile is seen. */
   seenAt: Float32Array
-  /** Match time when Silo 02 last saw each tile. Guest scanners use it in multiplayer. */
-  aiSeenAt?: Float32Array
   /** Tiles Silo 02 has scouted. Same array as sideExplored[1]. */
   aiExplored: Uint8Array
   /** Tiles currently inside Silo 02 sight. Same array as sideVisible[1]. */

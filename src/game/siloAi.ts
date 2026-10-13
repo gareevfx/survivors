@@ -1,5 +1,4 @@
 import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandHarvestOrAttack, commandMove, commandRepair, tryPlace, tryTrain } from './commands'
-import { multiplayer } from './mpRole'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
@@ -768,7 +767,6 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  * Covered Stalkers are not auto-targets. A hit captures one only outside its own Silo, finished Storage, Flasher, and Gorilla sight.
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
-  if (multiplayer()) return
   if (state.outcome) return
   const think = 0.5
   let budget = 8

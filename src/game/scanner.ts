@@ -1,8 +1,7 @@
-import { guestSend } from './mpLink'
-import { multiplayer } from './mpRole'
 import { setUnitDestination, stopMoving } from './nav'
 import { unitById } from './state'
-import { TILE, UNIT_STATS, type MatchState, type PlayerId, type Unit } from './types'
+import { TILE, UNIT_STATS, type MatchState, type Unit } from './types'
+import { tileExplored } from './vision'
 
 /** Keep a flight until the Hover is this close, matching the AI Drone scout. */
 const HOLD = 80
@@ -12,12 +11,10 @@ const SPREAD = 8 * TILE
 /**
  * Turn Scanner on for the selected player Hovers, or off when they are already scanning.
  * A fresh scan drops the current order so the next flight is the nearest black fog.
- * `actor` defaults to Silo 01 so single-player and the host stay on the old path.
  */
-export function toggleScanner(state: MatchState, ids: number[], actor: PlayerId = 0): void {
-  if (guestSend({ op: 'scan', ids })) return
+export function toggleScanner(state: MatchState, ids: number[]): void {
   if (state.outcome || state.paused) return
-  const hovers = playerHovers(state, ids, actor)
+  const hovers = playerHovers(state, ids)
   if (!hovers.length) return
   const allOn = hovers.every((hover) => hover.scanning)
   for (const hover of hovers) {
@@ -51,43 +48,24 @@ export function revealCloakedByScanners(state: MatchState): void {
 
 /** Keep each scanning Hover on a flight. Black fog first, then the oldest sighting. */
 export function updateScanners(state: MatchState): void {
-  if (state.outcome || state.paused) return
-  if (!state.aiControl) flyScanners(state, 0, state.explored, state.visible, state.seenAt)
-  if (!multiplayer()) return
-  if (!state.aiSeenAt || state.aiSeenAt.length !== state.aiExplored.length) {
-    state.aiSeenAt = new Float32Array(state.aiExplored.length)
-  }
-  flyScanners(state, 1, state.aiExplored, state.aiVisible, state.aiSeenAt)
-}
-
-function flyScanners(
-  state: MatchState,
-  owner: PlayerId,
-  explored: Uint8Array,
-  visible: Uint8Array,
-  seenAt: Float32Array,
-): void {
+  if (state.outcome || state.paused || state.aiControl) return
   const hovers = state.units.filter(
-    (unit) => unit.owner === owner && unit.kind === 'drone' && unit.hp > 0 && unit.scanning,
+    (unit) => unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0 && unit.scanning,
   )
   if (!hovers.length) return
-  const black = blackRemains(explored)
+  const black = blackRemains(state)
   const reserved: Array<{ x: number; y: number }> = []
   for (const hover of hovers) {
     const order = hover.order
     if (order?.type === 'move') {
       const dist = Math.hypot(hover.x - order.x, hover.y - order.y)
-      const tx = Math.floor(order.x / TILE)
-      const ty = Math.floor(order.y / TILE)
-      const index = ty * state.mapW + tx
-      const onMap = tx >= 0 && ty >= 0 && tx < state.mapW && ty < state.mapH
-      const revealed = black && onMap && explored[index] === 1
+      const revealed = black && tileExplored(state, Math.floor(order.x / TILE), Math.floor(order.y / TILE))
       if (dist > HOLD && !revealed) {
         reserved.push({ x: order.x, y: order.y })
         continue
       }
     }
-    const goal = scanGoal(state, hover.x, hover.y, reserved, black, explored, visible, seenAt)
+    const goal = scanGoal(state, hover.x, hover.y, reserved, black)
     reserved.push(goal)
     hover.order = { type: 'move', x: goal.x, y: goal.y }
     hover.idleAcquire = false
@@ -97,18 +75,18 @@ function flyScanners(
   }
 }
 
-function playerHovers(state: MatchState, ids: number[], actor: PlayerId): Unit[] {
+function playerHovers(state: MatchState, ids: number[]): Unit[] {
   const hovers: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.owner === actor && unit.kind === 'drone' && unit.hp > 0) hovers.push(unit)
+    if (unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0) hovers.push(unit)
   }
   return hovers
 }
 
-function blackRemains(explored: Uint8Array): boolean {
-  for (let i = 0; i < explored.length; i++) {
-    if (explored[i] === 0) return true
+function blackRemains(state: MatchState): boolean {
+  for (let i = 0; i < state.explored.length; i++) {
+    if (state.explored[i] === 0) return true
   }
   return false
 }
@@ -127,9 +105,6 @@ function scanGoal(
   fromY: number,
   reserved: Array<{ x: number; y: number }>,
   black: boolean,
-  explored: Uint8Array,
-  visible: Uint8Array,
-  seenAt: Float32Array,
 ): { x: number; y: number } {
   let nearest: { x: number; y: number; d: number } | null = null
   let oldest: { x: number; y: number; score: number } | null = null
@@ -142,12 +117,12 @@ function scanGoal(
       if (from < TILE * 2) continue
       if (crowded(reserved, x, y)) continue
       if (black) {
-        if (explored[index] !== 0) continue
+        if (state.explored[index] !== 0) continue
         if (!nearest || from < nearest.d) nearest = { x, y, d: from }
         continue
       }
-      if (visible[index] === 1) continue
-      const score = seenAt[index] * 100000 + from
+      if (state.visible[index] === 1) continue
+      const score = state.seenAt[index] * 100000 + from
       if (!oldest || score < oldest.score) oldest = { x, y, score }
     }
   }

@@ -1,5 +1,4 @@
 import { clampCamera, screenToWorld, worldToScreen, type Camera } from './camera'
-import { localOwner, multiplayer } from './mpRole'
 import {
   commandAttack,
   commandConstruct,
@@ -93,8 +92,8 @@ export function attachInput(opts: {
     if (state.outcome || state.paused || state.aiControl) return
     const keep = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
-    const keepOk = keep?.owner === localOwner() && keep.kind === 'keep'
-    if (!porters && !keepOk && !state.units.some((unit) => unit.owner === localOwner() && unit.kind === 'porter' && unit.hp > 0)) {
+    const keepOk = keep?.owner === 0 && keep.kind === 'keep'
+    if (!porters && !keepOk && !state.units.some((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)) {
       pushToast(state, 'Select a stalker or the Silo first.')
       return
     }
@@ -106,7 +105,7 @@ export function attachInput(opts: {
   function trainSelected(kind: UnitKind): void {
     const state = opts.getState()
     const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
-    if (!building || building.owner !== localOwner()) return
+    if (!building || building.owner !== 0) return
     const error = tryTrain(state, building.id, kind)
     if (error) pushToast(state, error)
   }
@@ -120,7 +119,7 @@ function clearSelection(state: MatchState): void {
 
   function selectUnit(state: MatchState, id: number, shift: boolean): void {
     const unit = unitById(state, id)
-    if (!unit || unit.owner !== localOwner() || unit.hp <= 0) {
+    if (!unit || unit.owner !== 0 || unit.hp <= 0) {
       if (!shift) clearSelection(state)
       return
     }
@@ -150,7 +149,7 @@ function clearSelection(state: MatchState): void {
         const tx = Math.floor(world.x / TILE)
         const ty = Math.floor(world.y / TILE)
         const porters = state.selectedUnits.filter((id) => unitById(state, id)?.kind === 'porter')
-        const error = tryPlace(state, localOwner(), state.placement, tx, ty, porters)
+        const error = tryPlace(state, 0, state.placement, tx, ty, porters)
         if (error) pushToast(state, error)
         return
       }
@@ -169,7 +168,7 @@ function clearSelection(state: MatchState): void {
       const touchHit = touch ? pick(state, world.x, world.y) : null
       if (touch && state.selectedUnits.length && touchHit?.type === 'unit') {
         const unit = unitById(state, touchHit.id)
-        if (unit && unit.owner !== localOwner()) {
+        if (unit && unit.owner !== 0) {
           commandAttack(state, state.selectedUnits, touchHit.id, 'unit')
           return
         }
@@ -181,7 +180,7 @@ function clearSelection(state: MatchState): void {
           if (error) pushToast(state, error)
           return
         }
-        if (building && building.owner !== localOwner()) {
+        if (building && building.owner !== 0) {
           if (!commandHarvestOrAttack(state, state.selectedUnits, touchHit.id)) {
             commandAttack(state, state.selectedUnits, touchHit.id, 'building')
           }
@@ -209,12 +208,12 @@ function clearSelection(state: MatchState): void {
       const now = performance.now()
       if (!shift && hit.id === lastClick.id && now - lastClick.t < 280) {
         const unit = unitById(state, hit.id)
-        if (unit && unit.owner === localOwner()) {
+        if (unit && unit.owner === 0) {
           const box = view()
           const cam = opts.getCamera()
           state.selectedUnits = state.units
             .filter((other) => {
-              if (other.owner !== localOwner() || other.kind !== unit.kind || other.hp <= 0) return false
+              if (other.owner !== 0 || other.kind !== unit.kind || other.hp <= 0) return false
               const screen = worldToScreen(cam, other.x, other.y)
               return screen.x >= 0 && screen.y >= 0 && screen.x <= box.w && screen.y <= box.h
             })
@@ -232,7 +231,7 @@ function clearSelection(state: MatchState): void {
     }
     if (hit.type === 'building') {
       const building = buildingById(state, hit.id)
-      if (building?.ruined || building?.owner === localOwner()) {
+      if (building?.ruined || building?.owner === 0) {
         state.selectedBuilding = building.id
         state.selectedUnits = []
         state.selectedOre = null
@@ -284,7 +283,7 @@ function clearSelection(state: MatchState): void {
     const hit = pick(state, world.x, world.y)
     if (hit?.type === 'unit') {
       const unit = unitById(state, hit.id)
-      if (unit && unit.owner !== localOwner()) {
+      if (unit && unit.owner !== 0) {
         commandAttack(state, state.selectedUnits, hit.id, 'unit')
         return
       }
@@ -296,14 +295,14 @@ function clearSelection(state: MatchState): void {
         if (error) pushToast(state, error)
         return
       }
-      if (building && building.owner === localOwner() && !building.complete) {
+      if (building && building.owner === 0 && !building.complete) {
         const workers = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter' && unitById(state, id)?.hp)
         if (workers) {
           commandConstruct(state, state.selectedUnits, hit.id)
           return
         }
       }
-      if (building && building.owner !== localOwner()) {
+      if (building && building.owner !== 0) {
         if (!commandHarvestOrAttack(state, state.selectedUnits, hit.id)) {
           commandAttack(state, state.selectedUnits, hit.id, 'building')
         }
@@ -334,7 +333,7 @@ function clearSelection(state: MatchState): void {
     const ids = state.units
       .filter(
         (unit) =>
-          unit.owner === localOwner() &&
+          unit.owner === 0 &&
           unit.hp > 0 &&
           unit.x >= minX &&
           unit.x <= maxX &&
@@ -501,7 +500,6 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'Pause') {
       event.preventDefault()
-      if (multiplayer()) return
       state.paused = !state.paused
       return
     }
@@ -588,7 +586,7 @@ function clearSelection(state: MatchState): void {
       const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
       if (!building?.ruined) return
       const worker = state.units
-        .filter((unit) => unit.owner === localOwner() && unit.kind === 'porter' && unit.hp > 0)
+        .filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
         .sort((a, b) => {
           const center = buildingCenter(building)
           return Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y)
@@ -605,7 +603,7 @@ function clearSelection(state: MatchState): void {
       if (state.paused) return
       const ids = state.selectedUnits.filter((id) => {
         const unit = unitById(state, id)
-        return !!unit && unit.owner === localOwner() && unit.kind === 'drone' && unit.hp > 0
+        return !!unit && unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0
       })
       if (ids.length) toggleScanner(state, ids)
       return
@@ -656,7 +654,7 @@ function clearSelection(state: MatchState): void {
       }
       const ids = (groups.get(n) ?? []).filter((id) => {
         const unit = unitById(state, id)
-        return !!unit && unit.hp > 0 && unit.owner === localOwner()
+        return !!unit && unit.hp > 0 && unit.owner === 0
       })
       groups.set(n, ids)
       if (!ids.length) return
