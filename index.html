@@ -103,17 +103,38 @@
           <p class="meta" id="menu-ffa-note"></p>
           <button id="menu-mp" type="button">LAN Game</button>
           <div id="mp-panel" class="hidden">
-            <p class="meta" id="mp-status">Same Wi-Fi. Host a room and share the code, or join with one. The host plays Silo 01. The guest plays Silo 02.</p>
-            <button id="mp-host" type="button">Host</button>
-            <label class="meta" id="mp-code-label" for="mp-code">Room code</label>
-            <input id="mp-code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD" aria-label="Room code" />
-            <button id="mp-join" type="button">Join</button>
-            <p class="mp-room hidden" id="mp-room">
-              <span>Room</span>
-              <b id="mp-room-code">----</b>
-              <button id="mp-copy" type="button">Copy</button>
-            </p>
-            <button id="mp-back" type="button">Back</button>
+            <p class="meta" id="mp-status">Same Wi-Fi. No server. The host plays Silo 01. The guest plays Silo 02.</p>
+            <div id="mp-setup">
+              <ol class="mp-steps">
+                <li>On this PC, press Host and copy the invite.</li>
+                <li>On the other PC, open LAN Game, paste the invite, and press Make reply.</li>
+                <li>Back here, paste the reply and press Connect.</li>
+              </ol>
+              <button id="mp-host" type="button">Host</button>
+              <label class="meta" for="mp-paste">Invite from the host</label>
+              <textarea id="mp-paste" rows="4" spellcheck="false" placeholder="Paste the invite here" aria-label="Invite from the host"></textarea>
+              <button id="mp-join" type="button">Make reply</button>
+              <button id="mp-back" type="button">Back</button>
+            </div>
+            <div id="mp-offer" class="hidden">
+              <p class="meta">Step 1. Copy this invite onto the other PC. There, open LAN Game, paste it, and press Make reply. A camera can scan the code instead.</p>
+              <textarea id="mp-offer-text" rows="4" readonly spellcheck="false" aria-label="Invite"></textarea>
+              <button id="mp-offer-copy" type="button">Copy invite</button>
+              <canvas id="mp-offer-qr" class="mp-qr hidden" aria-label="Invite QR code"></canvas>
+              <p class="meta" id="mp-offer-qr-note"></p>
+              <p class="meta">Step 2. Paste the reply from the other PC, then press Connect.</p>
+              <textarea id="mp-reply-paste" rows="4" spellcheck="false" placeholder="Paste the reply here" aria-label="Reply from the other PC"></textarea>
+              <button id="mp-connect" type="button">Connect</button>
+              <button id="mp-offer-back" type="button">Back</button>
+            </div>
+            <div id="mp-answer" class="hidden">
+              <p class="meta">Step 2. Copy this reply onto the host PC. The host pastes it and presses Connect. Stay on this page. A camera can scan the code instead.</p>
+              <textarea id="mp-answer-text" rows="4" readonly spellcheck="false" aria-label="Reply"></textarea>
+              <button id="mp-answer-copy" type="button">Copy reply</button>
+              <canvas id="mp-answer-qr" class="mp-qr hidden" aria-label="Reply QR code"></canvas>
+              <p class="meta" id="mp-answer-qr-note"></p>
+              <button id="mp-answer-back" type="button">Back</button>
+            </div>
           </div>
           <button id="menu-resume" type="button" class="hidden">Resume</button>
           <button id="menu-about" type="button">About the Game</button>

@@ -1,29 +1,21 @@
 /**
  * LAN only. An empty server list gathers host candidates, including the
- * mDNS .local names browsers use on a home network. No STUN and no TURN,
- * so a guest on another network cannot open the data channel.
- * PeerJS is used only to exchange those candidates.
+ * mDNS .local names browsers use on a home network. No STUN, no TURN,
+ * and no signaling broker. The invite text carries those candidates.
  */
 export const CONNECT_MS = 20000
-export const GUEST_TRIES = 3
 
-export const LAN_FAIL = 'Could not reach that PC on this network. Use the same Wi-Fi and check the code.'
+export const LAN_FAIL = 'Could not reach that PC on this network. Use the same Wi-Fi and try the invite again.'
+
+export const INVITE_BAD = 'That invite could not be read. Copy it again from the host.'
+export const REPLY_BAD = 'That reply could not be read. Copy it again from the other PC.'
+export const NO_LAN = 'Could not find a LAN address on this PC.'
+export const EXPIRED = 'The reply expired before the host connected. Start again and paste it on the host right away.'
 
 export type LinkPath = 'Connecting…' | 'On the LAN'
-export type GuestFail = 'timeout' | 'drop' | 'missing' | 'other'
 
-export function peerOptions(): { debug: 0; config: RTCConfiguration } {
-  return {
-    debug: 0,
-    config: { iceServers: [] },
-  }
-}
-
-/** Timeout and a dropped channel retry until the budget is spent. A missing room retries once. */
-export function guestShouldRetry(attempt: number, reason: GuestFail): boolean {
-  if (reason === 'timeout' || reason === 'drop') return attempt + 1 < GUEST_TRIES
-  if (reason === 'missing') return attempt < 1
-  return false
+export function peerOptions(): { config: RTCConfiguration } {
+  return { config: { iceServers: [] } }
 }
 
 export interface IceStat {

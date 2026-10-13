@@ -1,16 +1,5 @@
-import Peer, { type DataConnection, type PeerError } from 'peerjs'
 import { setGuestSender } from './mpLink'
-import {
-  CONNECT_MS,
-  GUEST_TRIES,
-  LAN_FAIL,
-  guestShouldRetry,
-  pathFromStats,
-  peerOptions,
-  type GuestFail,
-  type IceStat,
-  type LinkPath,
-} from './mpIce'
+import { CONNECT_MS, EXPIRED, INVITE_BAD, LAN_FAIL, NO_LAN, REPLY_BAD, pathFromStats, peerOptions, type IceStat, type LinkPath } from './mpIce'
 import { mp } from './mpRole'
 import {
   acceptSnapshot,
@@ -22,38 +11,34 @@ import {
   resetInterp,
   type Snapshot,
 } from './mpProtocol'
+import { decodeSignal, encodeSignal, packLan } from './mpSignal'
 import { pushToast } from './state'
 import { PLAYER_NAME, type GameEvent, type MatchState } from './types'
 
 /** Wall-clock snapshots. 12 Hz sits between 10 and 15. */
 const SNAP = 1 / 12
-const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const SOUND = new Set<GameEvent['type']>(['attack', 'death', 'ready', 'build'])
 
 export interface MpHooks {
   onStatus: (text: string, live: boolean) => void
-  onCode: (code: string) => void
+  onInvite: (text: string) => void
+  onReply: (text: string) => void
   onReady: (seed: number) => void
   onDrop: (message: string) => void
   getState: () => MatchState | null
 }
 
 let ticket = 0
-let peer: Peer | null = null
-let link: DataConnection | null = null
+let pc: RTCPeerConnection | null = null
+let channel: RTCDataChannel | null = null
 let hooks: MpHooks | null = null
 let snapAcc = 0
 let soundQueue: GameEvent[] = []
-let room = ''
 let matched = false
 let matchSeed = 0
 let linkPath: LinkPath = 'Connecting…'
-let brokerWatch = 0
-let guestLive: (() => void) | null = null
-
-export function roomCode(): string {
-  return room
-}
+let replyApplied = false
+let iceTimer = 0
 
 export function endMp(): void {
   ticket += 1
@@ -61,27 +46,26 @@ export function endMp(): void {
   mp.role = 'off'
   snapAcc = 0
   soundQueue = []
-  room = ''
   matched = false
   matchSeed = 0
-  guestLive = null
+  replyApplied = false
   linkPath = 'Connecting…'
-  if (brokerWatch) window.clearInterval(brokerWatch)
-  brokerWatch = 0
+  if (iceTimer) window.clearTimeout(iceTimer)
+  iceTimer = 0
   resetInterp()
-  const currentLink = link
-  const current = peer
-  link = null
-  peer = null
+  const currentChannel = channel
+  const current = pc
+  channel = null
+  pc = null
   try {
-    currentLink?.close()
+    currentChannel?.close()
   } catch {
     /* already closed */
   }
   try {
-    current?.destroy()
+    current?.close()
   } catch {
-    /* already destroyed */
+    /* already closed */
   }
 }
 
@@ -89,29 +73,26 @@ export function hostRoom(next: MpHooks): void {
   endMp()
   hooks = next
   const mine = ticket
-  hooks.onStatus('Connecting…', false)
-  openHost(mine, 0)
-  brokerWatch = window.setInterval(() => {
-    if (mine !== ticket) {
-      window.clearInterval(brokerWatch)
-      brokerWatch = 0
-      return
-    }
-    reconnectBroker('interval')
-  }, 5000)
+  hooks.onStatus('Gathering a LAN invite…', false)
+  void openHost(mine)
 }
 
-export function joinRoom(raw: string, next: MpHooks): void {
-  const code = normalizeCode(raw)
+export function acceptReply(raw: string): void {
+  const mine = ticket
+  const conn = pc
+  if (!conn || replyApplied || mine !== ticket) {
+    hooks?.onStatus(REPLY_BAD, false)
+    return
+  }
+  void applyReply(raw, conn, mine)
+}
+
+export function joinInvite(raw: string, next: MpHooks): void {
   endMp()
   hooks = next
   const mine = ticket
-  if (!code) {
-    hooks.onStatus('Enter the four-character room code.', false)
-    return
-  }
-  hooks.onStatus('Connecting…', false)
-  joinAttempt(code, mine, 0)
+  hooks.onStatus('Reading the invite…', false)
+  void openGuest(raw, mine)
 }
 
 /** Host sends snapshots. Guest eases the last one into the picture. */
@@ -126,236 +107,166 @@ export function pumpNet(state: MatchState, dt: number): void {
   }
   if (soundQueue.length > 32) soundQueue.splice(0, soundQueue.length - 32)
   snapAcc += dt
-  if (!link?.open || snapAcc < SNAP) return
+  if (channel?.readyState !== 'open' || snapAcc < SNAP) return
   snapAcc -= SNAP
   if (snapAcc > SNAP) snapAcc = SNAP
   const events = soundQueue.splice(0, soundQueue.length)
-  link.send({ t: 'snap', snap: captureSnapshot(state, events) })
+  send({ t: 'snap', snap: captureSnapshot(state, events) })
 }
 
-function openHost(mine: number, attempt: number): void {
-  if (mine !== ticket) return
-  const code = makeCode()
-  let retired = false
-  const host = new Peer(`s${code}`, peerOptions())
-  peer = host
-  host.on('open', () => {
-    if (retired || mine !== ticket) return
-    room = code
-    hooks?.onCode(code)
-    hooks?.onStatus(`Waiting for the other PC. Code ${code}.`, false)
-  })
-  host.on('connection', (incoming) => {
-    if (retired || mine !== ticket) return
-    if (matched) {
-      incoming.close()
-      return
-    }
-    if (link && link !== incoming) {
-      try {
-        link.close()
-      } catch {
-        /* the previous attempt already died */
-      }
-      link = null
-    }
-    bind(incoming, mine, 'host')
-  })
-  host.on('disconnected', () => {
-    if (retired || mine !== ticket || !room) return
-    console.log('[survivors] broker disconnected, reconnecting')
-    window.setTimeout(() => reconnectBroker('event'), 400)
-  })
-  host.on('error', (err) => {
-    if (retired || mine !== ticket) return
-    if (err.type === 'unavailable-id' && attempt < 6 && !room) {
-      retired = true
-      try {
-        host.destroy()
-      } catch {
-        /* already gone */
-      }
-      openHost(mine, attempt + 1)
-      return
-    }
-    if (brokerError(err)) {
-      console.log('[survivors] broker disconnected, reconnecting')
-      if (room) return
-      if (attempt < 4) {
-        retired = true
-        try {
-          host.destroy()
-        } catch {
-          /* already gone */
-        }
-        window.setTimeout(() => openHost(mine, attempt + 1), 700)
-        return
-      }
-      fail(mine, 'Could not reach the PeerJS broker.')
-      return
-    }
-    if (!room) fail(mine, errorText(err))
-  })
-}
-
-function joinAttempt(code: string, mine: number, attempt: number): void {
-  if (mine !== ticket) return
-  let attemptDone = false
-  const guest = new Peer(peerOptions())
-  peer = guest
-  const markLive = () => {
-    if (attemptDone) return
-    attemptDone = true
-    window.clearTimeout(timer)
+async function openHost(mine: number): Promise<void> {
+  const conn = new RTCPeerConnection(peerOptions().config)
+  if (mine !== ticket) {
+    conn.close()
+    return
   }
-  guestLive = markLive
-  const finish = (reason: GuestFail, message: string) => {
-    if (attemptDone || mine !== ticket) return
-    attemptDone = true
-    if (guestLive === markLive) guestLive = null
-    window.clearTimeout(timer)
-    try {
-      link?.close()
-    } catch {
-      /* already closed */
-    }
-    link = null
-    try {
-      guest.destroy()
-    } catch {
-      /* already destroyed */
-    }
-    if (peer === guest) peer = null
-    if (guestShouldRetry(attempt, reason)) {
-      const next = attempt + 2
-      hooks?.onStatus(`Connecting… (${next}/${GUEST_TRIES})`, false)
-      window.setTimeout(() => joinAttempt(code, mine, attempt + 1), 400)
-      return
-    }
-    fail(mine, message)
-  }
-  const timer = window.setTimeout(() => {
-    finish('timeout', LAN_FAIL)
-  }, CONNECT_MS)
-  guest.on('open', () => {
-    if (attemptDone || mine !== ticket) return
-    const conn = guest.connect(`s${code}`, { reliable: true })
-    bind(conn, mine, 'guest', finish)
-  })
-  guest.on('error', (err) => {
+  pc = conn
+  watchPc(conn, mine, 'host')
+  const ch = conn.createDataChannel('game', { ordered: true })
+  bind(ch, mine, 'host')
+  try {
+    const offer = await conn.createOffer()
     if (mine !== ticket) return
-    if (attemptDone || mp.role === 'guest') {
-      if (brokerError(err)) {
-        console.log('[survivors] broker disconnected, reconnecting')
-        reconnectBroker('event')
-      }
+    await conn.setLocalDescription(offer)
+    const ready = await waitGather(conn)
+    if (mine !== ticket) return
+    const sdp = conn.localDescription?.sdp ?? ''
+    if (!ready || !packLan('offer', sdp)) {
+      fail(mine, NO_LAN)
       return
     }
-    if (err.type === 'peer-unavailable') {
-      finish('missing', 'That room is not open.')
-      return
-    }
-    if (brokerError(err)) {
-      finish('drop', 'Could not reach the PeerJS broker.')
-      return
-    }
-    if (err.type === 'browser-incompatible' || err.type === 'invalid-id' || err.type === 'ssl-unavailable') {
-      finish('other', errorText(err))
-      return
-    }
-    finish('drop', LAN_FAIL)
-  })
-  guest.on('disconnected', () => {
-    if (mine !== ticket || !attemptDone) return
-    console.log('[survivors] broker disconnected, reconnecting')
-    window.setTimeout(() => reconnectBroker('event'), 400)
-  })
+    const text = await encodeSignal('offer', sdp)
+    if (mine !== ticket) return
+    hooks?.onInvite(text)
+    hooks?.onStatus('Copy the invite to the other PC. Then paste the reply below.', false)
+  } catch {
+    fail(mine, 'This browser could not open a LAN connection.')
+  }
 }
 
-function bind(
-  conn: DataConnection,
-  mine: number,
-  side: 'host' | 'guest',
-  onGuestFail?: (reason: GuestFail, message: string) => void,
-): void {
-  link = conn
-  watchIce(conn, mine)
+async function applyReply(raw: string, conn: RTCPeerConnection, mine: number): Promise<void> {
+  const desc = await decodeSignal(raw)
+  if (mine !== ticket) return
+  if (!desc || desc.type !== 'answer') {
+    hooks?.onStatus(REPLY_BAD, false)
+    return
+  }
+  try {
+    await conn.setRemoteDescription({ type: 'answer', sdp: desc.sdp })
+  } catch {
+    if (mine !== ticket) return
+    hooks?.onStatus(REPLY_BAD, false)
+    return
+  }
+  if (mine !== ticket) return
+  replyApplied = true
+  hooks?.onStatus('Connecting…', false)
+  armIce(mine, LAN_FAIL)
+}
+
+async function openGuest(raw: string, mine: number): Promise<void> {
+  const desc = await decodeSignal(raw)
+  if (mine !== ticket) return
+  if (!desc || desc.type !== 'offer') {
+    hooks?.onStatus(INVITE_BAD, false)
+    return
+  }
+  const conn = new RTCPeerConnection(peerOptions().config)
+  if (mine !== ticket) {
+    conn.close()
+    return
+  }
+  pc = conn
+  watchPc(conn, mine, 'guest')
+  conn.addEventListener('datachannel', (ev) => {
+    if (mine !== ticket) return
+    bind(ev.channel, mine, 'guest')
+  })
+  try {
+    await conn.setRemoteDescription({ type: 'offer', sdp: desc.sdp })
+    if (mine !== ticket) return
+    const answer = await conn.createAnswer()
+    if (mine !== ticket) return
+    await conn.setLocalDescription(answer)
+    const ready = await waitGather(conn)
+    if (mine !== ticket) return
+    const sdp = conn.localDescription?.sdp ?? ''
+    if (!ready || !packLan('answer', sdp)) {
+      fail(mine, NO_LAN)
+      return
+    }
+    const text = await encodeSignal('answer', sdp)
+    if (mine !== ticket) return
+    hooks?.onReply(text)
+    hooks?.onStatus('Copy the reply to the host PC. Stay on this page.', false)
+  } catch {
+    fail(mine, INVITE_BAD)
+  }
+}
+
+function bind(ch: RTCDataChannel, mine: number, side: 'host' | 'guest'): void {
+  channel = ch
   if (side === 'guest') {
     setGuestSender((cmd) => {
-      if (link?.open) link.send({ t: 'cmd', cmd })
+      if (channel?.readyState === 'open') send({ t: 'cmd', cmd })
     })
   }
-  const hello = (seed: number) => {
-    if (link?.open) link.send({ t: 'hello', seed })
+  const hello = () => {
+    if (channel?.readyState === 'open') send({ t: 'hello', seed: matchSeed })
   }
-  conn.on('open', () => {
+  ch.addEventListener('open', () => {
     if (mine !== ticket || side !== 'guest') return
     const poke = window.setInterval(() => {
       if (mine !== ticket || mp.role === 'guest') {
         window.clearInterval(poke)
         return
       }
-      if (link?.open) link.send({ t: 'ready' })
+      if (channel?.readyState === 'open') send({ t: 'ready' })
     }, 400)
-    if (link?.open) link.send({ t: 'ready' })
+    if (channel?.readyState === 'open') send({ t: 'ready' })
   })
-  conn.on('data', (data) => {
-    if (mine !== ticket) return
+  ch.addEventListener('message', (ev) => {
+    if (mine !== ticket || channel !== ch) return
+    let data: unknown
+    try {
+      data = JSON.parse(String(ev.data))
+    } catch {
+      return
+    }
     const msg = asRecord(data)
     if (msg?.t === 'ready' && side === 'host') {
       if (!matched) {
         matched = true
         matchSeed = (Math.random() * 1_000_000_000) | 0
         mp.role = 'host'
+        if (iceTimer) window.clearTimeout(iceTimer)
+        iceTimer = 0
         hooks?.onStatus(onlineLine(PLAYER_NAME[0]), true)
         hooks?.onReady(matchSeed)
       }
-      hello(matchSeed)
+      hello()
       return
     }
-    onData(data, mine, conn)
+    onData(data, mine, ch)
   })
-  conn.on('close', () => {
-    if (mine !== ticket || link !== conn) return
-    if (side === 'host' && !matched) {
-      link = null
-      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
-      return
-    }
-    if (side === 'guest' && mp.role !== 'guest') {
-      onGuestFail?.('drop', LAN_FAIL)
+  ch.addEventListener('close', () => {
+    if (mine !== ticket || channel !== ch) return
+    if (!matched && mp.role === 'off') {
+      fail(mine, side === 'guest' ? EXPIRED : LAN_FAIL)
       return
     }
     fail(mine, 'Opponent left.')
   })
-  conn.on('error', () => {
-    if (mine !== ticket || link !== conn) return
-    if (side === 'host' && !matched) {
-      link = null
-      try {
-        conn.close()
-      } catch {
-        /* already closed */
-      }
-      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
-      return
-    }
-    if (side === 'guest' && mp.role !== 'guest') {
-      onGuestFail?.('drop', LAN_FAIL)
-      return
-    }
-    fail(mine, 'The connection dropped.')
-  })
 }
 
-function onData(data: unknown, mine: number, conn: DataConnection): void {
+function onData(data: unknown, mine: number, ch: RTCDataChannel): void {
   const msg = asRecord(data)
-  if (!msg || mine !== ticket || link !== conn) return
+  if (!msg || mine !== ticket || channel !== ch) return
   if (msg.t === 'hello' && mp.role !== 'host' && mp.role !== 'guest') {
     const seed = msg.seed
     if (typeof seed !== 'number' || !Number.isFinite(seed)) return
-    guestLive?.()
-    guestLive = null
+    if (iceTimer) window.clearTimeout(iceTimer)
+    iceTimer = 0
     mp.role = 'guest'
     hooks?.onStatus(onlineLine(PLAYER_NAME[1]), true)
     hooks?.onReady(seed | 0)
@@ -366,7 +277,7 @@ function onData(data: unknown, mine: number, conn: DataConnection): void {
     const cmd = parseCmd(msg.cmd)
     if (!state || !cmd) return
     const err = applyNetCmd(state, cmd)
-    if (err && link?.open) link.send({ t: 'toast', text: err })
+    if (err) send({ t: 'toast', text: err })
     return
   }
   if (msg.t === 'snap' && mp.role === 'guest') {
@@ -381,52 +292,31 @@ function onData(data: unknown, mine: number, conn: DataConnection): void {
   }
 }
 
-function watchIce(conn: DataConnection, mine: number): void {
-  conn.on('iceStateChanged', (state) => {
-    console.log(`[survivors] ICE ${state}`)
-    if (state === 'connected' || state === 'completed') void reportPath(conn, mine)
+function watchPc(conn: RTCPeerConnection, mine: number, side: 'host' | 'guest'): void {
+  conn.addEventListener('icecandidate', (ev) => {
+    const candidate = ev.candidate
+    if (!candidate) return
+    console.log(`[survivors] ICE candidate ${candidate.type ?? ''} ${candidate.protocol ?? ''} ${candidate.address ?? ''}`)
   })
-  const hookPc = () => {
-    const pc = conn.peerConnection
-    if (!pc) return
-    const marked = pc as RTCPeerConnection & { __svIce?: boolean }
-    if (marked.__svIce) return
-    marked.__svIce = true
-    pc.addEventListener('icecandidate', (ev) => {
-      const candidate = ev.candidate
-      if (!candidate) return
-      console.log(`[survivors] ICE candidate ${candidate.type ?? ''} ${candidate.protocol ?? ''} ${candidate.address ?? ''}`)
-    })
-  }
-  hookPc()
-  conn.on('open', hookPc)
+  conn.addEventListener('iceconnectionstatechange', () => {
+    console.log(`[survivors] ICE ${conn.iceConnectionState}`)
+    if (mine !== ticket) return
+    if (conn.iceConnectionState === 'connected' || conn.iceConnectionState === 'completed') void reportPath(conn, mine)
+    if (conn.iceConnectionState === 'failed') {
+      if (mp.role !== 'off') fail(mine, 'The connection dropped.')
+      else if (side === 'host' && !replyApplied) return
+      else if (!matched) fail(mine, side === 'guest' ? EXPIRED : LAN_FAIL)
+    }
+  })
 }
 
-async function reportPath(conn: DataConnection, mine: number): Promise<void> {
-  const pc = conn.peerConnection
-  if (!pc) return
-  const stats = await pc.getStats()
+async function reportPath(conn: RTCPeerConnection, mine: number): Promise<void> {
+  const stats = await conn.getStats()
   const reports: IceStat[] = []
   stats.forEach((report) => {
-    const row = report as {
-      type?: string
-      id?: string
-      state?: string
-      nominated?: boolean
-      selected?: boolean
-      localCandidateId?: string
-      candidateType?: string
-    }
+    const row = report as IceStat
     if (!row.type) return
-    reports.push({
-      type: row.type,
-      id: row.id,
-      state: row.state,
-      nominated: row.nominated,
-      selected: row.selected,
-      localCandidateId: row.localCandidateId,
-      candidateType: row.candidateType,
-    })
+    reports.push(row)
   })
   const path = pathFromStats(reports)
   console.log(`[survivors] path ${path}`)
@@ -441,15 +331,33 @@ function onlineLine(name: string): string {
   return `Online · ${name} · ${linkPath}`
 }
 
-function reconnectBroker(why: string): void {
-  const current = peer
-  if (!current || current.destroyed || !current.disconnected) return
-  console.log(`[survivors] broker disconnected, reconnecting (${why})`)
-  try {
-    current.reconnect()
-  } catch {
-    /* the next tick tries again */
-  }
+function waitGather(conn: RTCPeerConnection): Promise<boolean> {
+  const hasHost = () => (conn.localDescription?.sdp ?? '').includes(' typ host')
+  if (conn.iceGatheringState === 'complete') return Promise.resolve(hasHost())
+  return new Promise((resolve) => {
+    const finish = () => {
+      conn.removeEventListener('icegatheringstatechange', onState)
+      window.clearTimeout(timer)
+      resolve(hasHost())
+    }
+    const onState = () => {
+      if (conn.iceGatheringState === 'complete') finish()
+    }
+    conn.addEventListener('icegatheringstatechange', onState)
+    const timer = window.setTimeout(finish, 8000)
+  })
+}
+
+function armIce(mine: number, message: string): void {
+  if (iceTimer) window.clearTimeout(iceTimer)
+  iceTimer = window.setTimeout(() => {
+    if (mine !== ticket || matched || mp.role !== 'off' || channel?.readyState === 'open') return
+    fail(mine, message)
+  }, CONNECT_MS)
+}
+
+function send(msg: unknown): void {
+  if (channel?.readyState === 'open') channel.send(JSON.stringify(msg))
 }
 
 function fail(mine: number, message: string): void {
@@ -459,45 +367,7 @@ function fail(mine: number, message: string): void {
   notify?.onDrop(message)
 }
 
-function makeCode(): string {
-  const bytes = new Uint8Array(4)
-  crypto.getRandomValues(bytes)
-  let code = ''
-  for (const byte of bytes) code += ALPHABET[byte % ALPHABET.length] ?? 'A'
-  return code
-}
-
-export function normalizeCode(raw: string): string | null {
-  const code = raw.trim().toUpperCase().replace(/[^A-Z2-9]/g, '')
-  if (code.length !== 4) return null
-  if ([...code].some((ch) => !ALPHABET.includes(ch))) return null
-  return code
-}
-
-function brokerError(err: PeerError<string>): boolean {
-  return (
-    err.type === 'network' ||
-    err.type === 'server-error' ||
-    err.type === 'socket-error' ||
-    err.type === 'socket-closed' ||
-    err.type === 'disconnected'
-  )
-}
-
-function errorText(err: PeerError<string>): string {
-  if (err.type === 'peer-unavailable') return 'That room is not open.'
-  if (brokerError(err)) return 'Could not reach the PeerJS broker.'
-  if (err.type === 'unavailable-id') return 'That room code is already in use.'
-  if (err.type === 'browser-incompatible') return 'This browser cannot open a WebRTC room.'
-  return 'The connection dropped.'
-}
-
 function asRecord(data: unknown): { t?: unknown; seed?: unknown; cmd?: unknown; snap?: Snapshot; text?: unknown } | null {
   if (!data || typeof data !== 'object') return null
   return data as { t?: unknown; seed?: unknown; cmd?: unknown; snap?: Snapshot; text?: unknown }
 }
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return
-  reconnectBroker('visible')
-})

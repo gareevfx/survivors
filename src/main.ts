@@ -4,7 +4,8 @@ import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { attachInput } from './game/input'
 import { localOwner, mp, multiplayer } from './game/mpRole'
-import { endMp, hostRoom, joinRoom, pumpNet } from './game/mpSession'
+import { acceptReply, endMp, hostRoom, joinInvite, pumpNet } from './game/mpSession'
+import { drawQr } from './game/qr'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, unitById } from './game/state'
@@ -239,10 +240,12 @@ mini.addEventListener('pointerup', () => {
 
 const mpPanel = document.querySelector<HTMLElement>('#mp-panel')
 const mpStatus = document.querySelector<HTMLElement>('#mp-status')
-const mpRoom = document.querySelector<HTMLElement>('#mp-room')
-const mpRoomCode = document.querySelector<HTMLElement>('#mp-room-code')
-const mpCode = document.querySelector<HTMLInputElement>('#mp-code')
 const mpLive = document.querySelector<HTMLElement>('#mp-live')
+const mpPaste = document.querySelector<HTMLTextAreaElement>('#mp-paste')
+const mpOfferText = document.querySelector<HTMLTextAreaElement>('#mp-offer-text')
+const mpReplyPaste = document.querySelector<HTMLTextAreaElement>('#mp-reply-paste')
+const mpAnswerText = document.querySelector<HTMLTextAreaElement>('#mp-answer-text')
+const LAN_INTRO = 'Same Wi-Fi. No server. The host plays Silo 01. The guest plays Silo 02.'
 
 function showMp(open: boolean): void {
   mpPanel?.classList.toggle('hidden', !open)
@@ -250,6 +253,22 @@ function showMp(open: boolean): void {
     document.querySelector(id)?.classList.toggle('hidden', open)
   }
   if (menuResume) menuResume.classList.toggle('hidden', open || !match || match.outcome != null)
+  if (!open) showLanStep('setup')
+}
+
+function showLanStep(step: 'setup' | 'offer' | 'answer'): void {
+  document.querySelector('#mp-setup')?.classList.toggle('hidden', step !== 'setup')
+  document.querySelector('#mp-offer')?.classList.toggle('hidden', step !== 'offer')
+  document.querySelector('#mp-answer')?.classList.toggle('hidden', step !== 'answer')
+}
+
+function paintQr(id: string, noteId: string, text: string, noun: string): void {
+  const canvas = document.querySelector<HTMLCanvasElement>(id)
+  const note = document.querySelector<HTMLElement>(noteId)
+  if (!canvas) return
+  const drew = drawQr(canvas, text)
+  canvas.classList.toggle('hidden', !drew)
+  if (note) note.textContent = drew ? '' : `This ${noun} is too long to scan. Copy the text.`
 }
 
 function setMpStatus(text: string, live: boolean): void {
@@ -263,9 +282,16 @@ function setMpStatus(text: string, live: boolean): void {
 function mpHooks() {
   return {
     onStatus: (text: string, live: boolean) => setMpStatus(text, live),
-    onCode: (code: string) => {
-      if (mpRoomCode) mpRoomCode.textContent = code
-      mpRoom?.classList.remove('hidden')
+    onInvite: (text: string) => {
+      if (mpOfferText) mpOfferText.value = text
+      if (mpReplyPaste) mpReplyPaste.value = ''
+      paintQr('#mp-offer-qr', '#mp-offer-qr-note', text, 'invite')
+      showLanStep('offer')
+    },
+    onReply: (text: string) => {
+      if (mpAnswerText) mpAnswerText.value = text
+      paintQr('#mp-answer-qr', '#mp-answer-qr-note', text, 'reply')
+      showLanStep('answer')
     },
     onReady: (seed: number) => startMatch('duel', seed),
     onDrop: (message: string) => leaveOnline(message),
@@ -280,9 +306,10 @@ function leaveOnline(message: string): void {
   terrain = null
   menuOpen = true
   menu?.classList.remove('hidden')
+  showLanStep('setup')
   showMp(true)
-  if (mpRoom) mpRoom.classList.add('hidden')
-  if (mpCode) mpCode.value = ''
+  if (mpPaste) mpPaste.value = ''
+  if (mpReplyPaste) mpReplyPaste.value = ''
   setMpStatus(message, false)
   const pause = document.querySelector<HTMLButtonElement>('#pause')
   if (pause) pause.disabled = false
@@ -290,40 +317,49 @@ function leaveOnline(message: string): void {
 
 document.querySelector('#menu-mp')?.addEventListener('click', () => {
   showMp(true)
-  if (mpRoom) mpRoom.classList.add('hidden')
-  if (mpCode) mpCode.value = ''
-  setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
+  showLanStep('setup')
+  if (mpPaste) mpPaste.value = ''
+  setMpStatus(LAN_INTRO, false)
 })
-document.querySelector('#mp-back')?.addEventListener('click', () => {
+document.querySelector('#mp-back')?.addEventListener('click', () => leaveLan())
+document.querySelector('#mp-offer-back')?.addEventListener('click', () => leaveLan())
+document.querySelector('#mp-answer-back')?.addEventListener('click', () => leaveLan())
+document.querySelector('#mp-host')?.addEventListener('click', () => {
+  hostRoom(mpHooks())
+})
+document.querySelector('#mp-join')?.addEventListener('click', () => {
+  joinInvite(mpPaste?.value ?? '', mpHooks())
+})
+document.querySelector('#mp-connect')?.addEventListener('click', () => {
+  acceptReply(mpReplyPaste?.value ?? '')
+})
+document.querySelector('#mp-offer-copy')?.addEventListener('click', () => {
+  copyText(mpOfferText?.value ?? '', 'Invite copied. Paste it on the other PC.')
+})
+document.querySelector('#mp-answer-copy')?.addEventListener('click', () => {
+  copyText(mpAnswerText?.value ?? '', 'Reply copied. Paste it on the host PC.')
+})
+
+function leaveLan(): void {
   if (multiplayer()) leaveOnline('You left the match.')
   else {
     endMp()
     showMp(false)
-    setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
+    setMpStatus(LAN_INTRO, false)
   }
-})
-document.querySelector('#mp-host')?.addEventListener('click', () => {
-  if (mpRoom) mpRoom.classList.add('hidden')
-  hostRoom(mpHooks())
-})
-document.querySelector('#mp-join')?.addEventListener('click', () => {
-  joinRoom(mpCode?.value ?? '', mpHooks())
-})
-mpCode?.addEventListener('keydown', (event) => {
-  if (event.code !== 'Enter') return
-  event.preventDefault()
-  joinRoom(mpCode.value, mpHooks())
-})
-document.querySelector('#mp-copy')?.addEventListener('click', () => {
-  const code = mpRoomCode?.textContent?.trim() ?? ''
-  if (!code) return
-  const done = () => setMpStatus(`Copied ${code}. Waiting for the other PC.`, false)
+}
+
+function copyText(text: string, doneText: string): void {
+  if (!text) return
+  const done = () => setMpStatus(doneText, false)
   if (navigator.clipboard?.writeText) {
-    void navigator.clipboard.writeText(code).then(done).catch(done)
+    void navigator.clipboard.writeText(text).then(done).catch(() => {
+      done()
+    })
     return
   }
   done()
-})
+}
 
 showMenu()
 

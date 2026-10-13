@@ -1,4 +1,6 @@
-import { CONNECT_MS, GUEST_TRIES, guestShouldRetry, pathFromStats, peerOptions } from './game/mpIce'
+import { CONNECT_MS, pathFromStats, peerOptions } from './game/mpIce'
+import { packLan, unpackLan, encodeSignal, decodeSignal } from './game/mpSignal'
+import { qrModules } from './game/qr'
 import { localOwner, mp, multiplayer } from './game/mpRole'
 import { acceptSnapshot, applyNetCmd, applySnapshot, captureSnapshot, parseCmd, setGuestBlend } from './game/mpProtocol'
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
@@ -2230,7 +2232,7 @@ siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
 multiplayerSnapshotAndCommands()
-lanGameUsesHostCandidatesOnly()
+await lanGameUsesHostCandidatesOnly()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -5194,15 +5196,12 @@ function fullStorageRefusesAHaul(): void {
   assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
 }
 
-function lanGameUsesHostCandidatesOnly(): void {
+async function lanGameUsesHostCandidatesOnly(): Promise<void> {
   const options = peerOptions()
   const servers = options.config.iceServers ?? []
   assert(servers.length === 0, 'LAN mode still lists a STUN or TURN server')
   assert(!/stun:|turns?:/i.test(JSON.stringify(options)), 'a relay url leaked into the LAN config')
-  assert(CONNECT_MS === 20000 && GUEST_TRIES === 3, 'the guest retry budget changed')
-  assert(guestShouldRetry(0, 'timeout') && guestShouldRetry(1, 'drop') && !guestShouldRetry(2, 'timeout'), 'a dropped channel should retry twice')
-  assert(guestShouldRetry(0, 'missing') && !guestShouldRetry(1, 'missing'), 'a missing room should retry once')
-  assert(!guestShouldRetry(0, 'other'), 'a hard failure should stop')
+  assert(CONNECT_MS === 20000, 'the LAN connect budget changed')
   const local = pathFromStats([
     { type: 'local-candidate', id: 'host', candidateType: 'host' },
     { type: 'candidate-pair', nominated: true, state: 'succeeded', localCandidateId: 'host' },
@@ -5212,6 +5211,32 @@ function lanGameUsesHostCandidatesOnly(): void {
     { type: 'candidate-pair', selected: true, localCandidateId: 'relay' },
   ])
   assert(local === 'On the LAN' && relayed === 'Connecting…' && pathFromStats([]) === 'Connecting…', 'the LAN path was misread')
+  const sample = [
+    'v=0',
+    'o=- 0 0 IN IP4 127.0.0.1',
+    's=-',
+    't=0 0',
+    'a=candidate:1 1 udp 1 1.2.3.4 9 typ srflx',
+    'a=candidate:2 1 udp 2113937151 pc.local 40000 typ host generation 0',
+    'a=ice-ufrag:abcd',
+    'a=ice-pwd:passwordpasswordpassword',
+    'a=fingerprint:sha-256 AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99',
+    'a=setup:actpass',
+    'a=sctp-port:5000',
+    'a=max-message-size:262144',
+  ].join('\r\n')
+  const packed = packLan('offer', sample)
+  assert(packed.startsWith('O\n') && !packed.includes('srflx') && packed.includes('typ host'), 'the invite kept a public candidate')
+  const back = unpackLan(packed)
+  assert(back?.type === 'offer' && back.sdp.includes('typ host') && !back.sdp.includes('srflx'), 'the invite did not rebuild')
+  const token = await encodeSignal('offer', sample)
+  assert(packed.length < sample.length && token.startsWith('sv1.'), 'the invite was not packed')
+  const decoded = await decodeSignal(`  ${token.slice(0, 12)}\n${token.slice(12)}  `)
+  assert(decoded?.type === 'offer' && decoded.sdp.includes('a=ice-ufrag:abcd'), 'the invite did not survive a copy')
+  assert((await decodeSignal('not-an-invite')) == null, 'junk should not decode')
+  const mark = qrModules('LAN')
+  assert(mark != null && mark.length === mark[0]?.length && mark[0]?.[0] === true && mark[1]?.[1] === false, 'the QR finder is wrong')
+  assert(qrModules('x'.repeat(2000)) == null, 'an oversized QR should be skipped')
 }
 
 function multiplayerSnapshotAndCommands(): void {
