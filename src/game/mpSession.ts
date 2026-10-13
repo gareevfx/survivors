@@ -1,5 +1,16 @@
 import Peer, { type DataConnection, type PeerError } from 'peerjs'
 import { setGuestSender } from './mpLink'
+import {
+  CONNECT_MS,
+  GUEST_TRIES,
+  LAN_FAIL,
+  guestShouldRetry,
+  pathFromStats,
+  peerOptions,
+  type GuestFail,
+  type IceStat,
+  type LinkPath,
+} from './mpIce'
 import { mp } from './mpRole'
 import {
   acceptSnapshot,
@@ -34,6 +45,11 @@ let hooks: MpHooks | null = null
 let snapAcc = 0
 let soundQueue: GameEvent[] = []
 let room = ''
+let matched = false
+let matchSeed = 0
+let linkPath: LinkPath = 'Connecting…'
+let brokerWatch = 0
+let guestLive: (() => void) | null = null
 
 export function roomCode(): string {
   return room
@@ -46,6 +62,12 @@ export function endMp(): void {
   snapAcc = 0
   soundQueue = []
   room = ''
+  matched = false
+  matchSeed = 0
+  guestLive = null
+  linkPath = 'Connecting…'
+  if (brokerWatch) window.clearInterval(brokerWatch)
+  brokerWatch = 0
   resetInterp()
   const currentLink = link
   const current = peer
@@ -69,6 +91,14 @@ export function hostRoom(next: MpHooks): void {
   const mine = ticket
   hooks.onStatus('Connecting…', false)
   openHost(mine, 0)
+  brokerWatch = window.setInterval(() => {
+    if (mine !== ticket) {
+      window.clearInterval(brokerWatch)
+      brokerWatch = 0
+      return
+    }
+    reconnectBroker('interval')
+  }, 5000)
 }
 
 export function joinRoom(raw: string, next: MpHooks): void {
@@ -81,21 +111,7 @@ export function joinRoom(raw: string, next: MpHooks): void {
     return
   }
   hooks.onStatus('Connecting…', false)
-  const guest = new Peer()
-  peer = guest
-  guest.on('open', () => {
-    if (mine !== ticket) return
-    const conn = guest.connect(`s${code}`, { reliable: true })
-    bind(conn, mine, 'guest')
-  })
-  guest.on('error', (err) => {
-    if (mine !== ticket) return
-    fail(mine, errorText(err))
-  })
-  window.setTimeout(() => {
-    if (mine !== ticket || mp.role === 'guest') return
-    fail(mine, 'The room did not answer. Check the code and try again.')
-  }, 20000)
+  joinAttempt(code, mine, 0)
 }
 
 /** Host sends snapshots. Guest eases the last one into the picture. */
@@ -118,50 +134,158 @@ export function pumpNet(state: MatchState, dt: number): void {
 }
 
 function openHost(mine: number, attempt: number): void {
+  if (mine !== ticket) return
   const code = makeCode()
   let retired = false
-  const host = new Peer(`s${code}`)
+  const host = new Peer(`s${code}`, peerOptions())
   peer = host
   host.on('open', () => {
     if (retired || mine !== ticket) return
     room = code
     hooks?.onCode(code)
-    hooks?.onStatus(`Waiting for opponent. Code ${code}.`, false)
+    hooks?.onStatus(`Waiting for the other PC. Code ${code}.`, false)
   })
   host.on('connection', (incoming) => {
     if (retired || mine !== ticket) return
-    if (link) {
+    if (matched) {
       incoming.close()
       return
     }
+    if (link && link !== incoming) {
+      try {
+        link.close()
+      } catch {
+        /* the previous attempt already died */
+      }
+      link = null
+    }
     bind(incoming, mine, 'host')
+  })
+  host.on('disconnected', () => {
+    if (retired || mine !== ticket || !room) return
+    console.log('[survivors] broker disconnected, reconnecting')
+    window.setTimeout(() => reconnectBroker('event'), 400)
   })
   host.on('error', (err) => {
     if (retired || mine !== ticket) return
-    if (err.type === 'unavailable-id' && attempt < 6) {
+    if (err.type === 'unavailable-id' && attempt < 6 && !room) {
       retired = true
-      host.destroy()
+      try {
+        host.destroy()
+      } catch {
+        /* already gone */
+      }
       openHost(mine, attempt + 1)
       return
     }
-    fail(mine, errorText(err))
-  })
-  host.on('disconnected', () => {
-    if (retired || mine !== ticket || link?.open) return
-    fail(mine, 'The connection dropped.')
+    if (brokerError(err)) {
+      console.log('[survivors] broker disconnected, reconnecting')
+      if (room) return
+      if (attempt < 4) {
+        retired = true
+        try {
+          host.destroy()
+        } catch {
+          /* already gone */
+        }
+        window.setTimeout(() => openHost(mine, attempt + 1), 700)
+        return
+      }
+      fail(mine, 'Could not reach the PeerJS broker.')
+      return
+    }
+    if (!room) fail(mine, errorText(err))
   })
 }
 
-function bind(conn: DataConnection, mine: number, side: 'host' | 'guest'): void {
+function joinAttempt(code: string, mine: number, attempt: number): void {
+  if (mine !== ticket) return
+  let attemptDone = false
+  const guest = new Peer(peerOptions())
+  peer = guest
+  const markLive = () => {
+    if (attemptDone) return
+    attemptDone = true
+    window.clearTimeout(timer)
+  }
+  guestLive = markLive
+  const finish = (reason: GuestFail, message: string) => {
+    if (attemptDone || mine !== ticket) return
+    attemptDone = true
+    if (guestLive === markLive) guestLive = null
+    window.clearTimeout(timer)
+    try {
+      link?.close()
+    } catch {
+      /* already closed */
+    }
+    link = null
+    try {
+      guest.destroy()
+    } catch {
+      /* already destroyed */
+    }
+    if (peer === guest) peer = null
+    if (guestShouldRetry(attempt, reason)) {
+      const next = attempt + 2
+      hooks?.onStatus(`Connecting… (${next}/${GUEST_TRIES})`, false)
+      window.setTimeout(() => joinAttempt(code, mine, attempt + 1), 400)
+      return
+    }
+    fail(mine, message)
+  }
+  const timer = window.setTimeout(() => {
+    finish('timeout', LAN_FAIL)
+  }, CONNECT_MS)
+  guest.on('open', () => {
+    if (attemptDone || mine !== ticket) return
+    const conn = guest.connect(`s${code}`, { reliable: true })
+    bind(conn, mine, 'guest', finish)
+  })
+  guest.on('error', (err) => {
+    if (mine !== ticket) return
+    if (attemptDone || mp.role === 'guest') {
+      if (brokerError(err)) {
+        console.log('[survivors] broker disconnected, reconnecting')
+        reconnectBroker('event')
+      }
+      return
+    }
+    if (err.type === 'peer-unavailable') {
+      finish('missing', 'That room is not open.')
+      return
+    }
+    if (brokerError(err)) {
+      finish('drop', 'Could not reach the PeerJS broker.')
+      return
+    }
+    if (err.type === 'browser-incompatible' || err.type === 'invalid-id' || err.type === 'ssl-unavailable') {
+      finish('other', errorText(err))
+      return
+    }
+    finish('drop', LAN_FAIL)
+  })
+  guest.on('disconnected', () => {
+    if (mine !== ticket || !attemptDone) return
+    console.log('[survivors] broker disconnected, reconnecting')
+    window.setTimeout(() => reconnectBroker('event'), 400)
+  })
+}
+
+function bind(
+  conn: DataConnection,
+  mine: number,
+  side: 'host' | 'guest',
+  onGuestFail?: (reason: GuestFail, message: string) => void,
+): void {
   link = conn
-  let started = false
-  let seed = 0
+  watchIce(conn, mine)
   if (side === 'guest') {
     setGuestSender((cmd) => {
       if (link?.open) link.send({ t: 'cmd', cmd })
     })
   }
-  const hello = () => {
+  const hello = (seed: number) => {
     if (link?.open) link.send({ t: 'hello', seed })
   }
   conn.on('open', () => {
@@ -179,40 +303,61 @@ function bind(conn: DataConnection, mine: number, side: 'host' | 'guest'): void 
     if (mine !== ticket) return
     const msg = asRecord(data)
     if (msg?.t === 'ready' && side === 'host') {
-      if (!started) {
-        started = true
-        seed = (Math.random() * 1_000_000_000) | 0
+      if (!matched) {
+        matched = true
+        matchSeed = (Math.random() * 1_000_000_000) | 0
         mp.role = 'host'
-        hooks?.onStatus(`Online · ${PLAYER_NAME[0]}`, true)
-        hooks?.onReady(seed)
+        hooks?.onStatus(onlineLine(PLAYER_NAME[0]), true)
+        hooks?.onReady(matchSeed)
       }
-      hello()
+      hello(matchSeed)
       return
     }
-    onData(data, mine, () => {
-      started = true
-    }, started)
-    if (mp.role === 'guest') started = true
+    onData(data, mine, conn)
   })
   conn.on('close', () => {
-    if (mine !== ticket) return
-    fail(mine, started ? 'Opponent left.' : 'The room closed before the match started.')
+    if (mine !== ticket || link !== conn) return
+    if (side === 'host' && !matched) {
+      link = null
+      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
+      return
+    }
+    if (side === 'guest' && mp.role !== 'guest') {
+      onGuestFail?.('drop', LAN_FAIL)
+      return
+    }
+    fail(mine, 'Opponent left.')
   })
   conn.on('error', () => {
-    if (mine !== ticket) return
+    if (mine !== ticket || link !== conn) return
+    if (side === 'host' && !matched) {
+      link = null
+      try {
+        conn.close()
+      } catch {
+        /* already closed */
+      }
+      hooks?.onStatus(`Waiting for the other PC. Code ${room}.`, false)
+      return
+    }
+    if (side === 'guest' && mp.role !== 'guest') {
+      onGuestFail?.('drop', LAN_FAIL)
+      return
+    }
     fail(mine, 'The connection dropped.')
   })
 }
 
-function onData(data: unknown, mine: number, markStarted: () => void, started: boolean): void {
+function onData(data: unknown, mine: number, conn: DataConnection): void {
   const msg = asRecord(data)
-  if (!msg || mine !== ticket) return
-  if (msg.t === 'hello' && !started && mp.role !== 'host') {
+  if (!msg || mine !== ticket || link !== conn) return
+  if (msg.t === 'hello' && mp.role !== 'host' && mp.role !== 'guest') {
     const seed = msg.seed
     if (typeof seed !== 'number' || !Number.isFinite(seed)) return
-    markStarted()
+    guestLive?.()
+    guestLive = null
     mp.role = 'guest'
-    hooks?.onStatus(`Online · ${PLAYER_NAME[1]}`, true)
+    hooks?.onStatus(onlineLine(PLAYER_NAME[1]), true)
     hooks?.onReady(seed | 0)
     return
   }
@@ -233,6 +378,77 @@ function onData(data: unknown, mine: number, markStarted: () => void, started: b
   if (msg.t === 'toast' && mp.role === 'guest' && typeof msg.text === 'string') {
     const state = hooks?.getState()
     if (state) pushToast(state, msg.text)
+  }
+}
+
+function watchIce(conn: DataConnection, mine: number): void {
+  conn.on('iceStateChanged', (state) => {
+    console.log(`[survivors] ICE ${state}`)
+    if (state === 'connected' || state === 'completed') void reportPath(conn, mine)
+  })
+  const hookPc = () => {
+    const pc = conn.peerConnection
+    if (!pc) return
+    const marked = pc as RTCPeerConnection & { __svIce?: boolean }
+    if (marked.__svIce) return
+    marked.__svIce = true
+    pc.addEventListener('icecandidate', (ev) => {
+      const candidate = ev.candidate
+      if (!candidate) return
+      console.log(`[survivors] ICE candidate ${candidate.type ?? ''} ${candidate.protocol ?? ''} ${candidate.address ?? ''}`)
+    })
+  }
+  hookPc()
+  conn.on('open', hookPc)
+}
+
+async function reportPath(conn: DataConnection, mine: number): Promise<void> {
+  const pc = conn.peerConnection
+  if (!pc) return
+  const stats = await pc.getStats()
+  const reports: IceStat[] = []
+  stats.forEach((report) => {
+    const row = report as {
+      type?: string
+      id?: string
+      state?: string
+      nominated?: boolean
+      selected?: boolean
+      localCandidateId?: string
+      candidateType?: string
+    }
+    if (!row.type) return
+    reports.push({
+      type: row.type,
+      id: row.id,
+      state: row.state,
+      nominated: row.nominated,
+      selected: row.selected,
+      localCandidateId: row.localCandidateId,
+      candidateType: row.candidateType,
+    })
+  })
+  const path = pathFromStats(reports)
+  console.log(`[survivors] path ${path}`)
+  if (mine !== ticket || path === 'Connecting…') return
+  linkPath = path
+  if (mp.role === 'host') hooks?.onStatus(onlineLine(PLAYER_NAME[0]), true)
+  else if (mp.role === 'guest') hooks?.onStatus(onlineLine(PLAYER_NAME[1]), true)
+  else hooks?.onStatus(path, false)
+}
+
+function onlineLine(name: string): string {
+  return `Online · ${name} · ${linkPath}`
+}
+
+function reconnectBroker(why: string): void {
+  const current = peer
+  if (!current || current.destroyed || !current.disconnected) return
+  console.log(`[survivors] broker disconnected, reconnecting (${why})`)
+  try {
+    current.reconnect()
+  } catch {
+    /* the next tick tries again */
   }
 }
 
@@ -258,11 +474,19 @@ export function normalizeCode(raw: string): string | null {
   return code
 }
 
+function brokerError(err: PeerError<string>): boolean {
+  return (
+    err.type === 'network' ||
+    err.type === 'server-error' ||
+    err.type === 'socket-error' ||
+    err.type === 'socket-closed' ||
+    err.type === 'disconnected'
+  )
+}
+
 function errorText(err: PeerError<string>): string {
   if (err.type === 'peer-unavailable') return 'That room is not open.'
-  if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
-    return 'Could not reach the PeerJS broker.'
-  }
+  if (brokerError(err)) return 'Could not reach the PeerJS broker.'
   if (err.type === 'unavailable-id') return 'That room code is already in use.'
   if (err.type === 'browser-incompatible') return 'This browser cannot open a WebRTC room.'
   return 'The connection dropped.'
@@ -272,3 +496,8 @@ function asRecord(data: unknown): { t?: unknown; seed?: unknown; cmd?: unknown; 
   if (!data || typeof data !== 'object') return null
   return data as { t?: unknown; seed?: unknown; cmd?: unknown; snap?: Snapshot; text?: unknown }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  reconnectBroker('visible')
+})

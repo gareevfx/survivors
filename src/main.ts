@@ -292,14 +292,14 @@ document.querySelector('#menu-mp')?.addEventListener('click', () => {
   showMp(true)
   if (mpRoom) mpRoom.classList.add('hidden')
   if (mpCode) mpCode.value = ''
-  setMpStatus('Host a room and send the code, or join with one.', false)
+  setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
 })
 document.querySelector('#mp-back')?.addEventListener('click', () => {
   if (multiplayer()) leaveOnline('You left the match.')
   else {
     endMp()
     showMp(false)
-    setMpStatus('Host a room and send the code, or join with one.', false)
+    setMpStatus('Same Wi-Fi. Host a room and share the code, or join with one.', false)
   }
 })
 document.querySelector('#mp-host')?.addEventListener('click', () => {
@@ -317,7 +317,7 @@ mpCode?.addEventListener('keydown', (event) => {
 document.querySelector('#mp-copy')?.addEventListener('click', () => {
   const code = mpRoomCode?.textContent?.trim() ?? ''
   if (!code) return
-  const done = () => setMpStatus(`Copied ${code}. Waiting for opponent.`, false)
+  const done = () => setMpStatus(`Copied ${code}. Waiting for the other PC.`, false)
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(code).then(done).catch(done)
     return

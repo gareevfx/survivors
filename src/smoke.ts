@@ -1,3 +1,4 @@
+import { CONNECT_MS, GUEST_TRIES, guestShouldRetry, pathFromStats, peerOptions } from './game/mpIce'
 import { localOwner, mp, multiplayer } from './game/mpRole'
 import { acceptSnapshot, applyNetCmd, applySnapshot, captureSnapshot, parseCmd, setGuestBlend } from './game/mpProtocol'
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
@@ -2229,6 +2230,7 @@ siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
 multiplayerSnapshotAndCommands()
+lanGameUsesHostCandidatesOnly()
 console.log('smoke ok')
 
 function captureHarvestAndPassages(): void {
@@ -5190,6 +5192,26 @@ function fullStorageRefusesAHaul(): void {
     `the replacement Storage is ${gap} tiles from the heap`,
   )
   assert(raised.id !== filled.id, 'SiloAI did not start a second Storage')
+}
+
+function lanGameUsesHostCandidatesOnly(): void {
+  const options = peerOptions()
+  const servers = options.config.iceServers ?? []
+  assert(servers.length === 0, 'LAN mode still lists a STUN or TURN server')
+  assert(!/stun:|turns?:/i.test(JSON.stringify(options)), 'a relay url leaked into the LAN config')
+  assert(CONNECT_MS === 20000 && GUEST_TRIES === 3, 'the guest retry budget changed')
+  assert(guestShouldRetry(0, 'timeout') && guestShouldRetry(1, 'drop') && !guestShouldRetry(2, 'timeout'), 'a dropped channel should retry twice')
+  assert(guestShouldRetry(0, 'missing') && !guestShouldRetry(1, 'missing'), 'a missing room should retry once')
+  assert(!guestShouldRetry(0, 'other'), 'a hard failure should stop')
+  const local = pathFromStats([
+    { type: 'local-candidate', id: 'host', candidateType: 'host' },
+    { type: 'candidate-pair', nominated: true, state: 'succeeded', localCandidateId: 'host' },
+  ])
+  const relayed = pathFromStats([
+    { type: 'local-candidate', id: 'relay', candidateType: 'relay' },
+    { type: 'candidate-pair', selected: true, localCandidateId: 'relay' },
+  ])
+  assert(local === 'On the LAN' && relayed === 'Connecting…' && pathFromStats([]) === 'Connecting…', 'the LAN path was misread')
 }
 
 function multiplayerSnapshotAndCommands(): void {
