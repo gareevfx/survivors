@@ -7,7 +7,7 @@ import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
-import { FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
+import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { resetHudCache, syncHud } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
@@ -36,6 +36,10 @@ if (duelNote) {
 const ffaNote = document.querySelector<HTMLElement>('#menu-ffa-note')
 if (ffaNote) {
   ffaNote.textContent = `${PLAYER_NAME.slice(0, 4).join(', ')}, each against the others, on a ${FFA_MAP_W}×${FFA_MAP_H} field.`
+}
+const ffa8Note = document.querySelector<HTMLElement>('#menu-ffa8-note')
+if (ffa8Note) {
+  ffa8Note.textContent = `${PLAYER_NAME.slice(0, 8).join(', ')}, each against the others, on a ${FFA8_MAP_W}×${FFA8_MAP_H} field.`
 }
 const sfx = new Sfx()
 let commandArmedAt = 0
@@ -92,7 +96,7 @@ function startMatch(mode: MatchMode, seed?: number): void {
   menu?.classList.add('hidden')
   match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
   terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
-  camera.zoom = mode === 'ffa' ? 0.85 : 1.35
+  camera.zoom = mode === 'ffa8' ? 0.75 : mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
     hintCopy.textContent =
       mode === 'duel'
@@ -179,6 +183,7 @@ document.querySelector('#pause')?.addEventListener('click', () => {
 document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
 document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
 document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
+document.querySelector('#menu-ffa8')?.addEventListener('click', () => startMatch('ffa8'))
 const donat = document.querySelector<HTMLElement>('#donat')
 document.querySelector('#menu-donat')?.addEventListener('click', () => {
   donat?.classList.remove('hidden')

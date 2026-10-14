@@ -7,7 +7,10 @@ export const MAP_PX_H = TILE * MAP_H
 /** Free-for-all uses a 90×50 field. */
 export const FFA_MAP_W = 90
 export const FFA_MAP_H = 50
-export type MatchMode = 'duel' | 'ffa'
+/** Eight-player free-for-all uses a 100×100 field. */
+export const FFA8_MAP_W = 100
+export const FFA8_MAP_H = 100
+export type MatchMode = 'duel' | 'ffa' | 'ffa8'
 
 export const PLAYER_KEEP_TX = 6
 export const PLAYER_KEEP_TY = 34

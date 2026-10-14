@@ -6,12 +6,13 @@ import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
+import { minimapFrame } from './game/render'
 import { keepEntrance } from './game/siloArt'
-import { BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
+import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2297,6 +2298,7 @@ stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
 storageStartsEmptyAndFillsWithCells()
 bothModesUseTheirOwnMapSize()
+eightPlayerFieldPlacesEightSilos()
 aisAttackEachOther()
 eliminatingASideRemovesIt()
 groundUnitsNeverOverlapSolidGround()
@@ -2605,6 +2607,124 @@ function captureHarvestAndPassages(): void {
   }
   assert(duel.outcome === 'win', `capturing the enemy silo did not win (${duel.outcome})`)
   for (const id of enemyIds) assert(unitById(duel, id)?.owner === 0, '1v1 capture left units with the loser')
+}
+
+function eightPlayerFieldPlacesEightSilos(): void {
+  assert(PLAYER_NAME[0] === 'Silo 01' && PLAYER_NAME[7] === 'Silo 08', 'side names do not reach Silo 08')
+  assert(PLAYER_COLOR.length >= 8 && new Set(PLAYER_COLOR.slice(0, 8)).size === 8, 'the eight team colors are not distinct')
+  const duel = createMatch(2, 'duel')
+  assert(duel.mode === 'duel' && duel.mapW === 80 && duel.mapH === 40 && duel.playerCount === 2, '1 vs 1 changed size')
+  const four = createMatch(2, 'ffa')
+  assert(four.mode === 'ffa' && four.mapW === 90 && four.mapH === 50 && four.playerCount === 4, '4-player free-for-all changed size')
+  const quota = animalCounts(FFA8_MAP_W, FFA8_MAP_H)
+  assert(quota.bear > BEAR_COUNT && quota.moose > MOOSE_COUNT && quota.crow > CROW_COUNT && quota.eagle > EAGLE_COUNT, 'wildlife did not grow with the 100×100 field')
+
+  for (const seed of [2, 7]) {
+    const state = createMatch(seed, 'ffa8')
+    assert(state.mode === 'ffa8' && state.mapW === FFA8_MAP_W && state.mapH === FFA8_MAP_H, `8-player map is ${state.mapW}×${state.mapH}`)
+    assert(state.playerCount === 8 && state.tiles.length === FFA8_MAP_W * FFA8_MAP_H, 'the 8-player map did not seat eight sides on 100×100')
+    assert(state.sideExplored.length === 8 && state.sideVisible.length === 8 && state.oreHeld.length === 8, 'a side is missing fog or a bank')
+    const keeps = state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
+    assert(keeps.length === 8, `expected 8 Silos, saw ${keeps.length}`)
+    assert(new Set(keeps.map((keep) => keep.owner)).size === 8, 'two Silos share a side')
+    const gaps = narrowPassageCount(state.tiles, state.ore, state.mapW, state.mapH)
+    assert(gaps === 0, `8-player seed ${seed} left ${gaps} one-tile passages`)
+    const frame = minimapFrame(180, 140, state.mapW, state.mapH)
+    assert(Math.abs(frame.w - frame.h) < 0.01, 'the square field does not fit a square minimap')
+    let corners = 0
+    let edges = 0
+    let minD = Infinity
+    const onEdge = (value: number) => value < 20 || value > 80
+    for (let i = 0; i < keeps.length; i++) {
+      const keep = keeps[i]
+      if (!keep) continue
+      const ex = onEdge(keep.tx)
+      const ey = onEdge(keep.ty)
+      if (ex && ey) corners += 1
+      else if (ex || ey) edges += 1
+      else assert(false, `Silo ${keep.owner} is not on the ring (${keep.tx}, ${keep.ty})`)
+      for (let j = i + 1; j < keeps.length; j++) {
+        const other = keeps[j]
+        if (!other) continue
+        minD = Math.min(minD, Math.hypot(keep.tx + 1.5 - (other.tx + 1.5), keep.ty + 1.5 - (other.ty + 1.5)))
+        const yards = { x0: keep.tx - 9, y0: keep.ty - 9, x1: keep.tx + 2 + 9, y1: keep.ty + 2 + 9 }
+        const box = { x0: other.tx - 9, y0: other.ty - 9, x1: other.tx + 2 + 9, y1: other.ty + 2 + 9 }
+        const overlap = yards.x0 <= box.x1 && box.x0 <= yards.x1 && yards.y0 <= box.y1 && box.y0 <= yards.y1
+        assert(!overlap, `seed ${seed} Silo yards overlap`)
+      }
+      const sight = BUILDING_STATS.keep.sight / TILE
+      const near = state.ore.filter(
+        (node) => Math.hypot(node.tx + 0.5 - (keep.tx + 1.5), node.ty + 0.5 - (keep.ty + 1.5)) <= sight + 1,
+      )
+      assert(near.length >= 4, `Silo ${keep.owner} has only ${near.length} dumps nearby`)
+      const workers = state.units.filter((unit) => unit.owner === keep.owner && unit.kind === 'porter' && unit.hp > 0)
+      assert(workers.length === 4, `side ${keep.owner} did not start with four stalkers`)
+      assert(state.oreHeld[keep.owner] === STARTING_ORE, `side ${keep.owner} did not start with the usual dumps`)
+      assert(sideTileVisible(state, keep.owner, keep.tx + 1, keep.ty + 1), `side ${keep.owner} cannot see its own Silo`)
+      assert(PLAYER_NAME[keep.owner]?.startsWith('Silo '), `side ${keep.owner} has no Silo tag`)
+    }
+    assert(corners === 4 && edges === 4, `Silos are ${corners} corners and ${edges} edges`)
+    assert(minD > 40, `Silos are only ${minD.toFixed(1)} tiles apart`)
+    assert(state.rocks.length > duel.rocks.length * 2, 'rocks and trees did not scale with the 100×100 field')
+    assert(state.ore.length > four.ore.length, 'the 100×100 field has fewer dumps than the 4-player map')
+    const counts = {
+      bear: state.animals.filter((animal) => animal.kind === 'bear').length,
+      moose: state.animals.filter((animal) => animal.kind === 'moose').length,
+      crow: state.animals.filter((animal) => animal.kind === 'crow').length,
+      eagle: state.animals.filter((animal) => animal.kind === 'eagle').length,
+    }
+    assert(
+      counts.bear === quota.bear && counts.moose === quota.moose && counts.crow === quota.crow && counts.eagle === quota.eagle,
+      `wildlife is ${counts.bear}/${counts.moose}/${counts.crow}/${counts.eagle}`,
+    )
+  }
+
+  const state = createMatch(4, 'ffa8')
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  const far = state.buildings.find((building) => building.owner === 7 && building.kind === 'keep' && building.hp > 0)
+  assert(home && far, 'missing Silo 01 or Silo 08')
+  assert(viewTileVisible(state, home.tx + 1, home.ty + 1), 'Silo 01 starts outside its own sight')
+  assert(!viewTileVisible(state, far.tx + 1, far.ty + 1), 'Silo 08 is visible to Silo 01 at the start')
+  assert(runCommand(state, 'all cams'), 'all cams was rejected on the 8-player map')
+  for (const keep of state.buildings) {
+    if (keep.kind !== 'keep' || keep.hp <= 0) continue
+    assert(viewTileVisible(state, keep.tx + 1, keep.ty + 1), `all cams hid ${PLAYER_NAME[keep.owner]}`)
+  }
+  assert(runCommand(state, 'all cams off'), 'all cams off was rejected')
+  assert(runCommand(state, 'double game'), 'double game was rejected on the 8-player map')
+  state.selectedUnits = [1]
+  for (let step = 0; step < 7; step++) cycleSide(state)
+  assert(Number(state.control) === 7 && state.selectedUnits.length === 0, 'double game did not reach Silo 08')
+  assert(viewTileVisible(state, far.tx + 1, far.ty + 1), 'Silo 08 stayed dark while controlled')
+  assert(!viewTileVisible(state, home.tx + 1, home.ty + 1), 'Silo 01 stayed lit after leaving it')
+  state.selectedBuilding = far.id
+  assert(describeSelection(state).includes('Silo 08'), 'the Silo tag did not follow the controlled side')
+  cycleSide(state)
+  assert(Number(state.control) === 0, 'double game did not wrap after Silo 08')
+  assert(runCommand(state, 'double game off') && !state.doubleGame, 'double game off failed')
+
+  const victim = state.buildings.find((building) => building.owner === 7 && building.kind === 'keep' && building.hp > 0)
+  assert(victim, 'missing Silo 08 for capture')
+  const ids = state.units.filter((unit) => unit.owner === 7 && unit.hp > 0).map((unit) => unit.id)
+  const victimOre = state.oreHeld[7] ?? 0
+  const captorOre = state.oreHeld[3] ?? 0
+  victim.hp = 6
+  const fallenCenter = buildingCenter(victim)
+  const killer = makeUnit(state, 3, 'pike', fallenCenter.x, fallenCenter.y + 70)
+  commandAttack(state, [killer.id], victim.id, 'building')
+  for (let i = 0; i < 90; i++) {
+    step(state, 1 / 60)
+    if (state.eliminated[7]) break
+  }
+  assert(state.eliminated[7], 'destroying a Silo did not eliminate that side in the 8-player match')
+  assert(state.outcome == null, 'one capture ended the 8-player match')
+  for (const id of ids) assert(unitById(state, id)?.owner === 3, 'a captured unit did not join Silo 04')
+  assert(state.oreHeld[3] === captorOre + victimOre, `dumps moved to ${state.oreHeld[3]}, expected ${captorOre + victimOre}`)
+  assert(state.oreHeld[7] === 0, 'Silo 08 kept dumps')
+  assert(
+    state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0).length === 7,
+    'every other Silo fell with the first capture',
+  )
 }
 
 function bothModesUseTheirOwnMapSize(): void {

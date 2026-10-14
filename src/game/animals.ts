@@ -1,11 +1,19 @@
 import { hash2, mulberry32 } from './rng'
-import { TILE, type Animal, type AnimalKind, type MatchState } from './types'
+import { FFA_MAP_H, FFA_MAP_W, TILE, type Animal, type AnimalKind, type MatchState } from './types'
 
-/** Fixed handful. The same counts on the duel field and the free-for-all. */
+/** Fixed handful on the duel field and the 4-player free-for-all. Larger maps scale by area. */
 export const BEAR_COUNT = 4
 export const MOOSE_COUNT = 3
 export const CROW_COUNT = 6
 export const EAGLE_COUNT = 3
+
+/** Wildlife for a map. Counts stay put through 90×50, then grow with the field. */
+export function animalCounts(mapW: number, mapH: number): { bear: number; moose: number; crow: number; eagle: number } {
+  const base = FFA_MAP_W * FFA_MAP_H
+  const scale = mapW * mapH <= base ? 1 : (mapW * mapH) / base
+  const n = (count: number) => Math.max(count, Math.round(count * scale))
+  return { bear: n(BEAR_COUNT), moose: n(MOOSE_COUNT), crow: n(CROW_COUNT), eagle: n(EAGLE_COUNT) }
+}
 
 const BEAR_SPEED = 24
 const MOOSE_SPEED = 36
@@ -17,11 +25,12 @@ export function spawnAnimals(state: MatchState): void {
   const rand = mulberry32(state.seed ^ 0x51f15e)
   const open = openTiles(state)
   const placed: Array<[number, number]> = []
+  const quota = animalCounts(state.mapW, state.mapH)
   const animals: Animal[] = []
-  for (let i = 0; i < BEAR_COUNT; i++) animals.push(placeGround(state, 'bear', open, placed, rand, animals.length))
-  for (let i = 0; i < MOOSE_COUNT; i++) animals.push(placeGround(state, 'moose', open, placed, rand, animals.length))
-  for (let i = 0; i < CROW_COUNT; i++) animals.push(placeCrow(state, rand, animals.length))
-  for (let i = 0; i < EAGLE_COUNT; i++) animals.push(placeEagle(state, rand, animals.length))
+  for (let i = 0; i < quota.bear; i++) animals.push(placeGround(state, 'bear', open, placed, rand, animals.length))
+  for (let i = 0; i < quota.moose; i++) animals.push(placeGround(state, 'moose', open, placed, rand, animals.length))
+  for (let i = 0; i < quota.crow; i++) animals.push(placeCrow(state, rand, animals.length))
+  for (let i = 0; i < quota.eagle; i++) animals.push(placeEagle(state, rand, animals.length))
   state.animals = animals
 }
 

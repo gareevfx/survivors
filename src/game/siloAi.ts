@@ -769,8 +769,11 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
-  const think = 0.5
-  let budget = 8
+  // Eight sides think one army per tick, the same stagger as the old 150×150 field.
+  // Four-side and duel keep the half-second beat.
+  const crowded = state.playerCount > 4
+  const think = crowded ? 0.75 : 0.5
+  let budget = crowded ? 1 : 8
 
   state.aiAcc += dt
   if (state.aiAcc >= think) {
@@ -804,6 +807,10 @@ export function updateSiloAi(state: MatchState, dt: number): void {
   if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0) || aiSuspended(state, 0)) return
   state.playerAiAcc += dt
   if (state.playerAiAcc < think) return
+  if (budget <= 0 && crowded) {
+    state.playerAiAcc = think
+    return
+  }
   state.playerAiAcc = 0
   runSide(state, 0)
 }
