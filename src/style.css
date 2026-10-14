@@ -577,7 +577,11 @@ button, canvas { font: inherit; }
   padding: 20px;
 }
 
-.menu-card { width: min(520px, 100%); }
+.menu-card {
+  width: min(520px, 100%);
+  max-height: calc(100% - 8px);
+  overflow: auto;
+}
 .menu-card button {
   display: block;
   width: 100%;
