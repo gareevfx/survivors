@@ -558,6 +558,13 @@ button, canvas { font: inherit; }
 
 .about-card p + p { margin-top: 12px; }
 
+.about-card a {
+  color: var(--gold);
+  text-underline-offset: 2px;
+}
+
+.about-card a:hover { color: var(--paper); }
+
 .selectable {
   user-select: text;
   -webkit-user-select: text;
