@@ -2447,6 +2447,8 @@ combatResolves()
 keepDecidesTheField()
 endOfMatchStats()
 cryoPreservesStalkers()
+siloAiUsesHoverGrid()
+siloAiBuysCryoFor250()
 enemyPlays()
 wideMapHidesObjectsAndMakesDunmarchScout()
 aiBuildingsLeaveAGapAndAvoidMinerals()
@@ -5708,20 +5710,38 @@ function cryoPreservesStalkers(): void {
   const brain = createMatch(24)
   const elder = brain.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
   assert(elder, 'Dunmarch has no Stalker')
-  elder.age = 250
   elder.cargo = 0
   elder.order = null
   brain.oreHeld[1] = 100
   const aiKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(aiKeep, 'Dunmarch has no Silo')
-  makeBuilding(brain, 1, 'cryo', aiKeep.tx + 6, aiKeep.ty, true)
+  const bank = makeBuilding(brain, 1, 'cryo', aiKeep.tx + 6, aiKeep.ty, true)
   rebuildBlocked(brain)
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
   assert(
-    brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
-    'SiloAI left an old Stalker out of the Cryo',
+    !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
+    'SiloAI froze a Stalker it still needed',
   )
+  const yard = buildingCenter(aiKeep)
+  makeUnit(brain, 1, 'porter', yard.x, yard.y + 20)
+  makeUnit(brain, 1, 'porter', yard.x + 16, yard.y + 20)
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(
+    brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
+    'SiloAI left a spare Stalker out of the Cryo',
+  )
+  for (const unit of brain.units) {
+    if (unit.owner === 1 && unit.kind === 'porter' && unit.id !== elder.id) unit.hp = 0
+  }
+  elder.frozen = bank.id
+  elder.order = null
+  const partner = makeUnit(brain, 1, 'porter', yard.x, yard.y + 28)
+  partner.frozen = bank.id
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(elder.frozen == null && partner.frozen == null, 'SiloAI left Stalkers frozen with nobody working')
 
   const planner = createMatch(25)
   planner.time = 300
@@ -5743,4 +5763,78 @@ function cryoPreservesStalkers(): void {
     .map((building) => building.kind)
     .join(',')
   assert(raised, `SiloAI built ${built} and no Cryo`)
+}
+
+function siloAiUsesHoverGrid(): void {
+  const state = createMatch(31)
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep, 'Dunmarch has no Silo for the flight')
+  const home = buildingCenter(keep)
+  const flight = []
+  for (let i = 0; i < 10; i++) flight.push(makeUnit(state, 1, 'drone', home.x + (i - 5) * 8, home.y + 36))
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const spots = hoverGridSpots(state.mapW, state.mapH, 10)
+  const goals = flight.map((unit) => (unit.order?.type === 'move' ? `${unit.order.x},${unit.order.y}` : ''))
+  assert(flight.every((unit) => unit.cloak === GRID_CLOAK_SECONDS && !unit.scanning), 'Grid did not hide the flight')
+  assert(new Set(goals).size === 10, 'Grid did not give each Hover its own spot')
+  for (const goal of goals) assert(spots.some((spot) => `${spot.x},${spot.y}` === goal), 'a Hover left the Grid')
+
+  for (const unit of flight) {
+    unit.cloak = 0
+    unit.order = null
+  }
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(flight.every((unit) => unit.cloak === 0), 'Grid ran again before its cooldown')
+
+  state.time = 90
+  state.aiExplored.fill(1)
+  state.aiVisible.fill(1)
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(flight.every((unit) => unit.cloak === 0), 'Grid scouted a map this side already sees')
+
+  const lead = flight[0]
+  assert(lead, 'missing a Hover')
+  const foe = makeUnit(state, 0, 'pike', lead.x + 12, lead.y)
+  state.aiVisible[Math.floor(foe.y / TILE) * state.mapW + Math.floor(foe.x / TILE)] = 1
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(flight.every((unit) => unit.cloak === GRID_CLOAK_SECONDS), 'Grid stayed visible while a Bike was on the flight')
+
+  const few = createMatch(33)
+  const fewKeep = few.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(fewKeep, 'missing a Silo')
+  const pad = buildingCenter(fewKeep)
+  const nine = []
+  for (let i = 0; i < 9; i++) nine.push(makeUnit(few, 1, 'drone', pad.x + i * 8, pad.y + 30))
+  few.aiAcc = 0
+  updateSiloAi(few, 0.5)
+  assert(nine.every((unit) => unit.cloak === 0), 'Grid accepted fewer than 10 Hovers')
+}
+
+function siloAiBuysCryoFor250(): void {
+  const state = createMatch(32)
+  state.time = 0
+  state.oreHeld[1] = 250
+  state.aiAcc = 0
+  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep, 'Dunmarch has no Silo')
+  chartBase(state, 1, keep.tx + 1, keep.ty + 1, 16)
+  const home = buildingCenter(keep)
+  makeUnit(state, 1, 'porter', home.x, home.y + 24)
+  makeUnit(state, 1, 'porter', home.x + 14, home.y + 24)
+  makeBuilding(state, 1, 'yard', 36, 16, true)
+  makeBuilding(state, 1, 'yard', 40, 16, true)
+  makeBuilding(state, 1, 'tower', 36, 20, true)
+  makeBuilding(state, 1, 'tower', 40, 20, true)
+  makeBuilding(state, 1, 'tower', 44, 20, true)
+  rebuildBlocked(state)
+  updateSiloAi(state, 0.5)
+  const cryo = state.buildings.find((building) => building.owner === 1 && building.kind === 'cryo')
+  assert(cryo, 'SiloAI did not build a Cryo for 250 dumps')
+  const center = buildingCenter(cryo)
+  const silo = buildingCenter(keep)
+  assert(Math.hypot(center.x - silo.x, center.y - silo.y) <= BUILDING_STATS.keep.sight, 'the Cryo was not beside the Silo')
 }

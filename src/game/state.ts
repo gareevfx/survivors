@@ -486,6 +486,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     playerAiAttacking: false,
     playerAiNext: 'pike',
     underAttackCd: 0,
+    gridAt: Array.from({ length: playerCount }, () => -1),
     events: [],
     tutorial: true,
   }

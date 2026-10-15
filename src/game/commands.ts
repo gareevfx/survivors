@@ -496,10 +496,13 @@ function minCostAssign(cost: number[][]): number[] {
   return assign
 }
 
-/** Send at least ten player Hovers to a map-wide grid, then leave them there. */
-export function commandHoverGrid(state: MatchState, ids: number[]): void {
+/**
+ * Send at least ten Hovers to a map-wide grid and hide them for the Grid duration.
+ * The caller chooses which Hovers. The player command only passes the side it controls.
+ */
+export function sendHoverGrid(state: MatchState, units: Unit[]): void {
   if (state.outcome || state.paused) return
-  const hovers = playerHovers(state, ids)
+  const hovers = units.filter((unit) => unit.hp > 0 && unit.kind === 'drone')
   if (hovers.length < 10) return
   const spots = hoverGridSpots(state.mapW, state.mapH, hovers.length)
   const cost = hovers.map((unit) =>
@@ -523,6 +526,11 @@ export function commandHoverGrid(state: MatchState, ids: number[]): void {
     setUnitDestination(state, unit, spot.x, spot.y)
   })
   noteOrder(state, hovers)
+}
+
+/** Send at least ten player Hovers to a map-wide grid, then leave them there. */
+export function commandHoverGrid(state: MatchState, ids: number[]): void {
+  sendHoverGrid(state, playerHovers(state, ids))
 }
 
 export function commandAttack(

@@ -1,4 +1,4 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, thawCryo, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, distToRect, isWalkable, rockAt, rockById } from './state'
@@ -258,13 +258,20 @@ function droneGoal(
   return best
 }
 
-/** Every living Drone stays on a scout flight. A second Drone takes a different patch. */
+/** Seconds after a Grid order before this side may hide the flight again. The 45s cloak sits inside it. */
+const GRID_REUSE = 90
+/** Working Stalkers kept on the map. Anyone past this can be frozen as insurance. */
+const CRYO_KEEP_ACTIVE = 4
+
+/** Every living Drone stays on a scout flight. A second Drone takes a different patch. Ten or more may take the Grid instead. */
 function dispatchDrones(state: MatchState, side: Brain): void {
   const drones = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
   if (!drones.length) return
+  if (issueHoverGrid(state, side, drones)) return
   const bikes = seenEnemyBikes(state, side)
   const reserved: Array<{ x: number; y: number }> = []
   for (const drone of drones) {
+    if (drone.cloak > 0) continue
     const order = drone.order
     const traveling = order?.type === 'move' && Math.hypot(drone.x - order.x, drone.y - order.y) > 80
     const threatened =
@@ -836,38 +843,96 @@ function dronesToTrain(state: MatchState, side: Brain): number {
   return combat >= 2 ? 1 : 0
 }
 
-/** Freeze one old idle Stalker, or thaw when the yard is short of hands. */
+/**
+ * Ten Hovers cover the map and turn invisible. Used to scout while much of the
+ * map is still dark, or when the flight or the Silo is under attack. Not again
+ * until the cooldown has run, so they are not hidden forever.
+ */
+function issueHoverGrid(state: MatchState, side: Brain, drones: Unit[]): boolean {
+  if (drones.length < 10) return false
+  const last = state.gridAt[side.owner] ?? -1
+  if (last >= 0 && state.time - last < GRID_REUSE) return false
+  if (!flightUnderAttack(state, side, drones) && !wantsGridScout(side)) return false
+  sendHoverGrid(state, drones)
+  const sent = drones.every((unit) => unit.cloak > 0)
+  if (!sent) return false
+  state.gridAt[side.owner] = state.time
+  return true
+}
+
+function flightUnderAttack(state: MatchState, side: Brain, drones: Unit[]): boolean {
+  const bikes = seenEnemyBikes(state, side)
+  if (drones.some((drone) => nearBike(bikes, drone.x, drone.y))) return true
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return false
+  const home = buildingCenter(keep)
+  const reach = BUILDING_STATS.keep.sight
+  for (const unit of state.units) {
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone' || unit.cloak > 0) continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (Math.hypot(unit.x - home.x, unit.y - home.y) <= reach) return true
+  }
+  return false
+}
+
+/** Enough of this side's map is still black that a Grid is worth a scout pass. */
+function wantsGridScout(side: Brain): boolean {
+  let dark = 0
+  let samples = 0
+  const grid = side.explored
+  for (let index = 0; index < grid.length; index += 8) {
+    samples += 1
+    if (grid[index] === 0) dark += 1
+  }
+  return samples > 0 && dark / samples >= 0.2
+}
+
+/**
+ * Freeze one spare Stalker, or thaw when the crew is gone or too small to work.
+ * Four stay active. Further Stalkers are insurance, one per think, while the bank can pay 50.
+ */
 function tendCryo(state: MatchState, side: Brain): void {
   const cryo = state.buildings.find(
     (building) => building.owner === side.owner && building.kind === 'cryo' && building.complete && building.hp > 0,
   )
   if (!cryo) return
-  const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
-  const active = porters.filter((unit) => unit.frozen == null)
+  const active = state.units.filter(
+    (unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null,
+  )
   const held = cryoOccupants(state, cryo.id)
-  if (active.length < 2 && held > 0) {
+  if (held > 0 && active.length < 2) {
     thawCryo(state, cryo.id)
     return
   }
-  if (active.length <= 2 || held >= CRYO_SLOTS) return
+  if (held >= CRYO_SLOTS || active.length <= CRYO_KEEP_ACTIVE) return
   if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST) return
-  const candidate = active.find(
-    (unit) =>
-      unit.age >= 200 &&
-      unit.cargo <= 0 &&
-      unit.order?.type !== 'construct' &&
-      unit.order?.type !== 'repair' &&
-      unit.order?.type !== 'freeze',
+  const spare = active.find(
+    (unit) => unit.cargo <= 0 && unit.order?.type !== 'construct' && unit.order?.type !== 'repair' && unit.order?.type !== 'freeze',
   )
-  if (!candidate) return
-  commandFreeze(state, [candidate.id], cryo.id)
+  if (!spare) return
+  commandFreeze(state, [spare.id], cryo.id)
 }
 
-/** One Cryo, after the Silo has yards and pillars, and only once the bank can still raise a Storage. */
-function cryoWanted(state: MatchState, side: Brain, porters: number): boolean {
-  if (state.time < 240 || porters < 4) return false
-  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.cryo.cost + BUILDING_STATS.silo.cost) return false
+/** One Cryo beside the Silo, once this side can pay 250 and is not already raising something more urgent. */
+function cryoWanted(state: MatchState, side: Brain): boolean {
+  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.cryo.cost) return false
   return !state.buildings.some((building) => building.owner === side.owner && building.kind === 'cryo' && building.hp > 0)
+}
+
+/** Charted ground inside Silo sight, and not under a known enemy Pillar. */
+function placeSafeCryo(state: MatchState, side: Brain): boolean {
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return false
+  const spot = findBuildSpot(state, 'cryo', keep.tx, keep.ty, side.owner)
+  if (!spot) {
+    rememberBlindSpot(state, side, 'cryo', findBuildSpot(state, 'cryo', keep.tx, keep.ty, side.owner, false))
+    return false
+  }
+  const centerX = (spot.tx + BUILDING_STATS.cryo.w / 2) * TILE
+  const centerY = (spot.ty + BUILDING_STATS.cryo.h / 2) * TILE
+  if (remoteFromKeep(state, side.owner, centerX, centerY)) return false
+  if (knownPillarReaches(state, side, centerX, centerY)) return false
+  return tryPlace(state, side.owner, 'cryo', spot.tx, spot.ty, []) === null
 }
 
 function runSide(state: MatchState, owner: PlayerId): void {
@@ -918,8 +983,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
       if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
         placeChartedNearKeep(state, side, 'yard')
       }
-    } else if (cryoWanted(state, side, porters.length)) {
-      placeChartedNearKeep(state, side, 'cryo')
+    } else if (cryoWanted(state, side)) {
+      placeSafeCryo(state, side)
     } else if (ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')
     }
@@ -1142,7 +1207,9 @@ function repairPorter(state: MatchState, side: Brain, x: number, y: number): Uni
 function scoutUnchartedSite(state: MatchState, side: Brain): void {
   const chart = side.chart
   if (!chart) return
-  const drone = state.units.find((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
+  const drone = state.units.find(
+    (unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0 && unit.cloak <= 0,
+  )
   if (!drone) return
   const order = drone.order
   if (order?.type === 'move' && Math.hypot(order.x - chart.x, order.y - chart.y) < 48) return

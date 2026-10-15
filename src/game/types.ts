@@ -552,6 +552,8 @@ export interface MatchState {
   playerAiAttacking: boolean
   playerAiNext: 'pike' | 'howler'
   underAttackCd: number
+  /** Match time when this side last ordered Hover Grid. -1 until the first use. */
+  gridAt: number[]
   events: GameEvent[]
   tutorial: boolean
 }
