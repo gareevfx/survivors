@@ -11,23 +11,23 @@ const cryoUrl = new URL('../assets/silo-cryo.png', import.meta.url).href
 
 const FOOT = 96
 /** Plain cutout height. Cryo uses this same scale, not its own width. */
-const SPRITE_H = 677
+const SPRITE_H = 684
 const DRAW_H = 118
 const SCALE = DRAW_H / SPRITE_H
 
 /** Door center in each cutout, so the two bunkers sit on the same tiles. */
-const PLAIN_DOOR = { x: 0.4884, y: 0.8202 }
-const CRYO_DOOR = { x: 0.4967, y: 0.8217 }
+const PLAIN_DOOR = { x: 0.477, y: 0.8278 }
+const CRYO_DOOR = { x: 0.5108, y: 0.8253 }
 /** Door anchor inside the footprint. The dish overflows above the tile. */
 const DOOR_OX = 48
 const DOOR_OY = 78
 
 /** Front pair fills first, then the back pair. Boxes are fractions of the cryo cutout. */
 const VESSELS: Array<{ x: number; y: number; w: number; h: number }> = [
-  { x: 0.0427, y: 0.5888, w: 0.1528, h: 0.284 },
-  { x: 0.8027, y: 0.5902, w: 0.1565, h: 0.287 },
-  { x: 0.0626, y: 0.2189, w: 0.1328, h: 0.2751 },
-  { x: 0.8036, y: 0.2101, w: 0.1366, h: 0.284 },
+  { x: 0.0504, y: 0.5827, w: 0.0998, h: 0.3704 },
+  { x: 0.8094, y: 0.5944, w: 0.1304, h: 0.2694 },
+  { x: 0.0647, y: 0.2152, w: 0.1034, h: 0.328 },
+  { x: 0.8067, y: 0.2225, w: 0.1394, h: 0.3177 },
 ]
 
 const WINDOW_COUNT = 8
