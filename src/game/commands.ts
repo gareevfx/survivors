@@ -218,7 +218,13 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
 /** Miners who were told to gather and are waiting for a free slot. */
 export function fillOpenGatherSlots(state: MatchState): void {
   const waiting = state.units.filter(
-    (unit) => unit.kind === 'porter' && unit.hp > 0 && unit.cargo <= 0 && unit.order == null && unit.nodeMemory === 0,
+    (unit) =>
+      unit.kind === 'porter' &&
+      unit.hp > 0 &&
+      unit.frozen == null &&
+      unit.cargo <= 0 &&
+      unit.order == null &&
+      unit.nodeMemory === 0,
   )
   for (const owner of [0, 1] as const) {
     const group = waiting.filter((unit) => unit.owner === owner)
@@ -575,6 +581,70 @@ export function commandAttack(
   noteOrder(state, units)
 }
 
+/**
+ * Walk selected Stalkers into a finished Cryo.
+ * The freeze fee is charged when they enter, not when the order is given.
+ * Returns true when at least one Stalker was sent.
+ */
+export function commandFreeze(state: MatchState, ids: number[], buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'cryo') return false
+  const crew = living(state, ids).filter(
+    (unit) => unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
+  )
+  if (!crew.length) return false
+  for (const unit of crew) {
+    noteProgress(unit)
+    unit.order = { type: 'freeze', buildingId: building.id }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    unit.scanning = false
+    stopMoving(unit)
+  }
+  if (crew.some((unit) => unit.owner === controlledSide(state))) {
+    const center = buildingCenter(building)
+    state.pings.push({ x: center.x, y: center.y, life: 0.45, max: 0.45, color: '#9fd7e8' })
+  }
+  noteOrder(state, crew)
+  return true
+}
+
+/** Put every Stalker frozen in this Cryo back on the ground beside it. */
+export function releaseCryo(state: MatchState, building: Building): void {
+  const held = state.units.filter((unit) => unit.frozen === building.id && unit.hp > 0)
+  if (!held.length) return
+  const stats = BUILDING_STATS.cryo
+  const center = buildingCenter(building)
+  held.forEach((unit, index) => {
+    unit.frozen = null
+    unit.order = null
+    unit.idleAcquire = false
+    unit.nodeMemory = 0
+    stopMoving(unit)
+    const angle = (index / held.length) * Math.PI * 2
+    const spot = nearestParking(
+      state,
+      building.tx,
+      building.ty,
+      stats.w,
+      stats.h,
+      center.x + Math.cos(angle) * 64,
+      center.y + Math.sin(angle) * 64,
+    )
+    if (spot) {
+      unit.x = spot.x
+      unit.y = spot.y
+    }
+  })
+}
+
+export function thawCryo(state: MatchState, buildingId: number): void {
+  const building = buildingById(state, buildingId)
+  if (!building || building.kind !== 'cryo' || building.hp <= 0) return
+  releaseCryo(state, building)
+}
+
 /** Spend dumps, and draw the same amount out of Storage, richest pile first. */
 export function debitDumps(state: MatchState, owner: number, amount: number): void {
   state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) - amount
@@ -884,7 +954,7 @@ export function nearestFreeBuilder(
   let bestTier = Infinity
   let bestScore = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.frozen != null) continue
     const tier = freeBuilderTier(unit)
     if (tier == null) continue
     const along = builderTravel(state, unit, tx, ty, w, h)
@@ -928,7 +998,7 @@ export function coverOpenSites(state: MatchState): void {
   }
 }
 
-export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower', owner: PlayerId = 1): boolean {
+export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower' | 'cryo', owner: PlayerId = 1): boolean {
   const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
   const spot = findBuildSpot(state, kind, keep.tx, keep.ty, owner)

@@ -162,7 +162,7 @@ export function rockTarget(rock: Rock): Target {
 export function getTarget(state: MatchState, id: number, kind: TargetKind): Target | null {
   if (kind === 'unit') {
     const unit = unitById(state, id)
-    if (!unit || unit.hp <= 0) return null
+    if (!unit || unit.hp <= 0 || unit.frozen != null) return null
     return unitTarget(unit)
   }
   if (kind === 'rock') {
@@ -303,10 +303,19 @@ export function makeUnit(
     scanning: false,
     cloak: 0,
     age: 0,
+    frozen: null,
   }
   state.units.push(unit)
   noteUnitCreated(state, owner, kind)
   return unit
+}
+
+export function cryoOccupants(state: MatchState, buildingId: number): number {
+  let count = 0
+  for (const unit of state.units) {
+    if (unit.frozen === buildingId && unit.hp > 0) count += 1
+  }
+  return count
 }
 
 export function blankSideStats(): SideStats {

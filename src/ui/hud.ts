@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -7,11 +7,14 @@ import { hoverPortraitUrl } from '../game/hoverArt'
 import { factoryPortraitUrl } from '../game/factoryArt'
 import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
+import { cryoPortraitUrl } from '../game/cryoArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, buildingCenter, unitById } from '../game/state'
+import { buildingById, buildingCenter, cryoOccupants, unitById } from '../game/state'
 import {
   BUILDING_STATS,
+  CRYO_FREEZE_COST,
+  CRYO_SLOTS,
   PLAYER_COLOR,
   PLAYER_NAME,
   SILO_REPAIR_COST,
@@ -86,7 +89,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   }
   if (clock) clock.textContent = formatTime(state.time)
   const idleCount = state.units.filter(
-    (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
+    (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
@@ -283,6 +286,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
+        placeButton(state, 'cryo', actions),
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
@@ -295,6 +299,19 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
+    }
+    if (building.kind === 'cryo') {
+      const held = cryoOccupants(state, building.id)
+      return [
+        {
+          id: 'thaw',
+          label: 'Thaw',
+          detail: held ? `${held} inside` : 'empty',
+          title: `Release the frozen Stalkers beside this Cryo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned.`,
+          disabled: held === 0,
+          run: () => thawCryo(state, building.id),
+        },
+      ]
     }
     return []
   }
@@ -359,7 +376,13 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       })
     }
     if (porters) {
-      cmds.push(repairButton(state), placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
+      cmds.push(
+        repairButton(state),
+        placeButton(state, 'yard', actions),
+        placeButton(state, 'silo', actions),
+        placeButton(state, 'tower', actions),
+        placeButton(state, 'cryo', actions),
+      )
     }
     return cmds
   }
@@ -383,7 +406,7 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
   return {
     id: `place-${kind}`,
     label: stats.label,
-    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : 'T',
+    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : kind === 'tower' ? 'T' : 'O',
     detail: `${stats.cost} dumps`,
     title: afford ? stats.blurb : `Need ${stats.cost} dumps`,
     disabled: !afford,
@@ -503,7 +526,7 @@ function nearestPlayerPorter(state: MatchState, building: Building): { id: numbe
   let best: { id: number } | undefined
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== controlledSide(state) || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== controlledSide(state) || unit.kind !== 'porter' || unit.hp <= 0 || unit.frozen != null) continue
     const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
     if (distance < bestD) {
       bestD = distance
@@ -551,7 +574,9 @@ export function describeSelection(state: MatchState): string {
             ? storagePortraitUrl(building.owner)
             : building.kind === 'tower'
               ? pillarPortraitUrl(building.owner)
-              : ''
+              : building.kind === 'cryo'
+                ? cryoPortraitUrl(building.owner)
+                : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
@@ -560,6 +585,7 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
+      ${building.kind === 'cryo' && building.complete ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps to freeze</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}

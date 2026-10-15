@@ -2,7 +2,7 @@ import { updateAnimals } from './animals'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateScanners } from './scanner'
-import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
+import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter, releaseCryo } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
@@ -33,6 +33,8 @@ import {
   CHASE_BREAK,
   GATHER_AMOUNT,
   GATHER_TIME,
+  CRYO_FREEZE_COST,
+  CRYO_SLOTS,
   INTERACT,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
@@ -57,9 +59,13 @@ export function step(state: MatchState, dt: number): void {
   updateSiloAi(state, dt)
   revealCloakedByScanners(state)
 
-  for (const unit of state.units) refreshUnit(state, unit, dt)
+  for (const unit of state.units) {
+    if (unit.frozen == null) refreshUnit(state, unit, dt)
+  }
   releaseFromTerrain(state)
-  for (const unit of state.units) moveUnit(state, unit, dt)
+  for (const unit of state.units) {
+    if (unit.frozen == null) moveUnit(state, unit, dt)
+  }
   separate(state)
   releaseFromTerrain(state)
   revealCloakedByScanners(state)
@@ -73,6 +79,7 @@ export function step(state: MatchState, dt: number): void {
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.cloak > 0) unit.cloak = Math.max(0, unit.cloak - dt)
+    if (unit.frozen != null) continue
     if (unit.kind === 'porter' && unit.hp > 0) {
       const lived = unit.age
       unit.age += dt
@@ -194,7 +201,57 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
     return
   }
 
+  if (order.type === 'freeze') {
+    refreshFreeze(state, unit, order)
+    return
+  }
+
   refreshConstruct(state, unit, order)
+}
+
+function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { type: 'freeze' }>): void {
+  const building = buildingById(state, order.buildingId)
+  if (!building || building.hp <= 0 || building.kind !== 'cryo' || building.owner !== unit.owner || !building.complete) {
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  if (distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT) {
+    stopMoving(unit)
+    admitCryo(state, unit, building)
+    return
+  }
+  const stats = BUILDING_STATS.cryo
+  const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+  if (!spot) return
+  const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - spot.x, (unit.goalY ?? 0) - spot.y) > 8
+  if (far) setUnitDestination(state, unit, spot.x, spot.y)
+}
+
+function admitCryo(state: MatchState, unit: Unit, building: Building): void {
+  const held = state.units.filter((other) => other.frozen === building.id && other.hp > 0).length
+  if (held >= CRYO_SLOTS) {
+    unit.order = null
+    stopMoving(unit)
+    if (unit.owner === controlledSide(state)) pushToast(state, 'Cryo is full.')
+    return
+  }
+  if ((state.oreHeld[unit.owner] ?? 0) < CRYO_FREEZE_COST) {
+    unit.order = null
+    stopMoving(unit)
+    if (unit.owner === controlledSide(state)) pushToast(state, `Need ${CRYO_FREEZE_COST} dumps to freeze.`)
+    return
+  }
+  debitDumps(state, unit.owner, CRYO_FREEZE_COST)
+  const center = buildingCenter(building)
+  unit.frozen = building.id
+  unit.order = null
+  unit.idleAcquire = false
+  unit.scanning = false
+  unit.x = center.x
+  unit.y = center.y
+  stopMoving(unit)
+  state.selectedUnits = state.selectedUnits.filter((id) => id !== unit.id)
 }
 
 function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
@@ -573,7 +630,7 @@ function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
 /** A ground unit inside a blocked tile, or clipping one, is moved to the nearest free cell. */
 function releaseFromTerrain(state: MatchState): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0 || unit.kind === 'drone') continue
+    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null) continue
     const radius = UNIT_STATS[unit.kind].radius
     if (!circleHitsSolid(state, unit.x, unit.y, radius)) continue
     const originTx = Math.floor(unit.x / TILE)
@@ -619,7 +676,7 @@ function steerAround(
   let ax = 0
   let ay = 0
   for (const other of state.units) {
-    if (other.id === unit.id || other.hp <= 0) continue
+    if (other.id === unit.id || other.hp <= 0 || other.frozen != null) continue
     if ((other.kind === 'drone') !== flying) continue
     if (closingOn(unit, other.id)) continue
     const ox = other.x - unit.x
@@ -657,10 +714,10 @@ function separate(state: MatchState): void {
   const units = state.units
   for (let i = 0; i < units.length; i++) {
       const a = units[i]
-    if (!a || a.hp <= 0 || a.kind === 'drone') continue
+    if (!a || a.hp <= 0 || a.kind === 'drone' || a.frozen != null) continue
     for (let j = i + 1; j < units.length; j++) {
       const b = units[j]
-      if (!b || b.hp <= 0 || b.kind === 'drone') continue
+      if (!b || b.hp <= 0 || b.kind === 'drone' || b.frozen != null) continue
       const dx = b.x - a.x
       const dy = b.y - a.y
       const distance = Math.hypot(dx, dy) || 0.001
@@ -980,6 +1037,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     scanning: false,
     cloak: 0,
     age: 0,
+    frozen: null,
   }
   state.units.push(unit)
   noteUnitCreated(state, building.owner, kind)
@@ -1090,7 +1148,7 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
   let best: Target | null = null
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner === building.owner || unit.hp <= 0) continue
+    if (unit.owner === building.owner || unit.hp <= 0 || unit.frozen != null) continue
     const target = unitTarget(unit)
     if (!towerEngages(state, building, origin, target)) continue
     const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
@@ -1226,7 +1284,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
-    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0) continue
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0 || other.frozen != null) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
     if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
     if (other.kind === 'porter' && stalkerCovered(state, other)) continue
@@ -1287,7 +1345,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   }
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
-    if (!unit || unit.hp <= 0 || unit.cloak > 0) return
+    if (!unit || unit.hp <= 0 || unit.cloak > 0 || unit.frozen != null) return
     const source = unitById(state, sourceId)
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'porter') {
@@ -1370,6 +1428,7 @@ function cleanup(state: MatchState): void {
     }
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
     state.events.push({ type: 'death' })
+    if (building.kind === 'cryo') releaseCryo(state, building)
     if (building.kind === 'keep') fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
   }
   for (const building of deadBuildings) {
@@ -1669,7 +1728,7 @@ const STUCK_SHIFT = 8
 
 function watchStuckUnits(state: MatchState, dt: number): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0) continue
+    if (unit.hp <= 0 || unit.frozen != null) continue
     if (unit.avoidNode >= 0 && state.time >= unit.avoidUntil) unit.avoidNode = -1
     if (!unit.order || workingInPlace(state, unit)) {
       noteProgress(unit)

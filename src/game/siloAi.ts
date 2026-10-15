@@ -1,8 +1,8 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandHarvestOrAttack, commandMove, commandRepair, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
-import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { buildingCenter, buildingRect, cryoOccupants, distToRect, isWalkable, rockAt, rockById } from './state'
+import { BUILDING_STATS, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
@@ -110,7 +110,7 @@ function tileBit(state: MatchState, grid: Uint8Array, tx: number, ty: number): b
 }
 
 function idlePorter(unit: Unit, owner: PlayerId): boolean {
-  return unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && !unit.order
+  return unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order
 }
 
 /** Unexplored ground this close to the scout is searched first, so new minerals are found before a long hunt. */
@@ -836,9 +836,44 @@ function dronesToTrain(state: MatchState, side: Brain): number {
   return combat >= 2 ? 1 : 0
 }
 
+/** Freeze one old idle Stalker, or thaw when the yard is short of hands. */
+function tendCryo(state: MatchState, side: Brain): void {
+  const cryo = state.buildings.find(
+    (building) => building.owner === side.owner && building.kind === 'cryo' && building.complete && building.hp > 0,
+  )
+  if (!cryo) return
+  const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
+  const active = porters.filter((unit) => unit.frozen == null)
+  const held = cryoOccupants(state, cryo.id)
+  if (active.length < 2 && held > 0) {
+    thawCryo(state, cryo.id)
+    return
+  }
+  if (active.length <= 2 || held >= CRYO_SLOTS) return
+  if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST) return
+  const candidate = active.find(
+    (unit) =>
+      unit.age >= 200 &&
+      unit.cargo <= 0 &&
+      unit.order?.type !== 'construct' &&
+      unit.order?.type !== 'repair' &&
+      unit.order?.type !== 'freeze',
+  )
+  if (!candidate) return
+  commandFreeze(state, [candidate.id], cryo.id)
+}
+
+/** One Cryo, after the Silo has yards and pillars, and only once the bank can still raise a Storage. */
+function cryoWanted(state: MatchState, side: Brain, porters: number): boolean {
+  if (state.time < 240 || porters < 4) return false
+  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.cryo.cost + BUILDING_STATS.silo.cost) return false
+  return !state.buildings.some((building) => building.owner === side.owner && building.kind === 'cryo' && building.hp > 0)
+}
+
 function runSide(state: MatchState, owner: PlayerId): void {
   const side = brain(state, owner)
   dispatchDrones(state, side)
+  tendCryo(state, side)
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const idle = porters.filter((unit) => idlePorter(unit, side.owner))
   const scout = claimScout(state, side, idle)
@@ -883,6 +918,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
       if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
         placeChartedNearKeep(state, side, 'yard')
       }
+    } else if (cryoWanted(state, side, porters.length)) {
+      placeChartedNearKeep(state, side, 'cryo')
     } else if (ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')
     }
@@ -1112,7 +1149,7 @@ function scoutUnchartedSite(state: MatchState, side: Brain): void {
   commandMove(state, [drone.id], chart.x, chart.y, false)
 }
 
-function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'silo' | 'tower'): boolean {
+function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'silo' | 'tower' | 'cryo'): boolean {
   if (aiPlaceNearKeep(state, kind, side.owner)) return true
   const keep = ownKeep(state, side.owner)
   if (!keep) return false
@@ -1124,7 +1161,7 @@ function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'si
 function rememberBlindSpot(
   state: MatchState,
   side: Brain,
-  kind: 'yard' | 'silo' | 'tower',
+  kind: 'yard' | 'silo' | 'tower' | 'cryo',
   spot: { tx: number; ty: number } | null,
 ): void {
   if (side.chart || !spot) return

@@ -48,7 +48,12 @@ export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'dro
 export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
 }
-export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
+export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower' | 'cryo'
+
+/** Frozen Stalkers one Cryo can hold. */
+export const CRYO_SLOTS = 4
+/** Dumps charged when a Stalker steps into a Cryo. */
+export const CRYO_FREEZE_COST = 50
 export type TargetKind = 'unit' | 'building' | 'rock'
 
 export interface UnitStats {
@@ -201,6 +206,17 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
     sight: UNIT_STATS.drone.sight,
     damage: 8 / 3,
   },
+  cryo: {
+    label: 'Cryo',
+    blurb: '2×2 vault. Costs 250 dumps. Holds 4 Stalkers. Freezing one costs 50 dumps when it enters. A frozen Stalker leaves the map, cannot be attacked, and its 5-minute life is paused. Thaw, or destroying the Cryo, releases them beside it.',
+    w: 2,
+    h: 2,
+    hp: 400,
+    cost: 250,
+    buildTime: 14,
+    supply: 0,
+    sight: 120,
+  },
 }
 
 export const PLAYER_NAME: readonly string[] = [
@@ -242,6 +258,7 @@ export type Order =
   | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return'; binId?: number }
   | { type: 'construct'; buildingId: number }
   | { type: 'repair'; buildingId: number }
+  | { type: 'freeze'; buildingId: number }
 
 export interface Unit {
   id: number
@@ -280,6 +297,8 @@ export interface Unit {
   cloak: number
   /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
   age: number
+  /** Cryo this Stalker is frozen inside. Null while the Stalker is on the map. */
+  frozen: number | null
 }
 
 export interface TrainJob {

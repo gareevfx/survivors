@@ -1,7 +1,7 @@
 import { drawAnimal } from './animalArt'
 import type { Camera } from './camera'
 import { controlledSide } from './control'
-import { buildingCenter, buildingRect, getTarget, placementAllowed, sideKeep } from './state'
+import { buildingCenter, buildingRect, cryoOccupants, getTarget, placementAllowed, sideKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
@@ -9,6 +9,7 @@ import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
+import { cryoDamageStage, drawCryoSprite } from './cryoArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
 import { drawGraveSprite, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -392,7 +393,13 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = building.ruined ? '#6a645c' : (PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0])
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo' && building.kind !== 'tower') {
+  if (
+    building.kind !== 'keep' &&
+    building.kind !== 'yard' &&
+    building.kind !== 'silo' &&
+    building.kind !== 'tower' &&
+    building.kind !== 'cryo'
+  ) {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
     ctx.beginPath()
     ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
@@ -407,6 +414,7 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   if (building.kind === 'keep') drawKeep(ctx, state, building, x, y, color)
   else if (building.kind === 'yard') drawYard(ctx, state, building, x, y, color)
   else if (building.kind === 'tower') drawTower(ctx, state, building, x, y, color)
+  else if (building.kind === 'cryo') drawCryo(ctx, state, building, x, y, color)
   else drawStorage(ctx, state, building, x, y, color)
 
   if (!building.ruined && building.hp < stats.hp) {
@@ -540,6 +548,24 @@ function drawTower(
     aim,
     flash,
   })
+  ctx.restore()
+  ctx.imageSmoothingEnabled = false
+}
+
+function drawCryo(
+  ctx: CanvasRenderingContext2D,
+  state: MatchState,
+  building: Building,
+  x: number,
+  y: number,
+  color: string,
+): void {
+  const stats = BUILDING_STATS.cryo
+  const held = building.complete ? cryoOccupants(state, building.id) : 0
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  drawCryoSprite(ctx, x, y, color, held, cryoDamageStage(building.hp, stats.hp))
   ctx.restore()
   ctx.imageSmoothingEnabled = false
 }
@@ -833,6 +859,17 @@ export function renderMinimap(
       ctx.beginPath()
       ctx.arc(cx, cy, Math.max(0.8, radius * 0.38), 0, Math.PI * 2)
       ctx.fill()
+    } else if (building.kind === 'cryo') {
+      ctx.fillStyle = '#9fd7e8'
+      ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)
+      ctx.fillStyle = teamColor(building.owner)
+      const inset = Math.max(0.6, Math.min(sx, sy) * 0.28)
+      ctx.fillRect(
+        ox + building.tx * sx + inset,
+        oy + building.ty * sy + inset,
+        Math.max(1, stats.w * sx - inset * 2),
+        Math.max(1, stats.h * sy - inset * 2),
+      )
     } else {
       ctx.fillStyle = teamColor(building.owner)
       ctx.fillRect(ox + building.tx * sx, oy + building.ty * sy, stats.w * sx, stats.h * sy)

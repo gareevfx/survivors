@@ -3,6 +3,7 @@ import { controlledSide, cycleSide, handsOff } from './control'
 import {
   commandAttack,
   commandConstruct,
+  commandFreeze,
   commandGather,
   commandHarvestOrAttack,
   commandMove,
@@ -306,6 +307,9 @@ function clearSelection(state: MatchState): void {
           return
         }
       }
+      if (building && building.owner === side && building.complete && building.kind === 'cryo') {
+        if (commandFreeze(state, state.selectedUnits, hit.id)) return
+      }
       if (building && building.owner !== side) {
         if (!commandHarvestOrAttack(state, state.selectedUnits, hit.id)) {
           commandAttack(state, state.selectedUnits, hit.id, 'building')
@@ -339,6 +343,7 @@ function clearSelection(state: MatchState): void {
         (unit) =>
           unit.owner === controlledSide(state) &&
           unit.hp > 0 &&
+          unit.frozen == null &&
           unit.x >= minX &&
           unit.x <= maxX &&
           unit.y >= minY &&
@@ -544,6 +549,7 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyJ' ||
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
+        event.code === 'KeyO' ||
         event.code === 'KeyC' ||
         event.code === 'KeyR')
     ) {
@@ -574,6 +580,10 @@ function clearSelection(state: MatchState): void {
       armPlace('tower')
       return
     }
+    if (event.code === 'KeyO') {
+      armPlace('cryo')
+      return
+    }
     if (event.code === 'KeyP') {
       trainSelected('porter')
       return
@@ -600,7 +610,7 @@ function clearSelection(state: MatchState): void {
       const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
       if (!building?.ruined) return
       const worker = state.units
-        .filter((unit) => unit.owner === controlledSide(state) && unit.kind === 'porter' && unit.hp > 0)
+        .filter((unit) => unit.owner === controlledSide(state) && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null)
         .sort((a, b) => {
           const center = buildingCenter(building)
           return Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y)
