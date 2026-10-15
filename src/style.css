@@ -532,6 +532,114 @@ button, canvas { font: inherit; }
 #again, #to-menu { margin-top: 14px; }
 #to-menu { margin-left: 8px; }
 
+.end-card {
+  width: min(880px, 100%);
+  max-height: calc(100% - 8px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.end-card > .eyebrow,
+.end-card > h2,
+.end-card > #end-copy,
+.end-actions,
+.end-card > .seed {
+  flex-shrink: 0;
+}
+
+#end-stats {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: #141a12;
+}
+
+.end-duration {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.end-duration b {
+  color: var(--paper);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.end-table-wrap { overflow: auto; }
+
+#end-stats table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+#end-stats th,
+#end-stats td {
+  padding: 6px 8px;
+  text-align: right;
+  border-bottom: 1px solid #2c3826;
+  white-space: nowrap;
+}
+
+#end-stats thead th {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  vertical-align: bottom;
+}
+
+#end-stats thead th.group,
+#end-stats td.group {
+  border-left: 1px solid var(--line);
+}
+
+#end-stats tbody th {
+  text-align: left;
+  color: var(--text);
+  font-weight: 500;
+}
+
+#end-stats td { color: var(--paper); }
+
+#end-stats tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+
+#end-stats tr.you { background: rgba(230, 193, 90, 0.08); }
+
+.end-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.end-side i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 #donat,
 #about {
   position: absolute;

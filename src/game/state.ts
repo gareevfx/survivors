@@ -24,6 +24,7 @@ import {
   type MatchState,
   type PlayerId,
   type Rock,
+  type SideStats,
   type Target,
   type TargetKind,
   type Unit,
@@ -304,7 +305,42 @@ export function makeUnit(
     age: 0,
   }
   state.units.push(unit)
+  noteUnitCreated(state, owner, kind)
   return unit
+}
+
+export function blankSideStats(): SideStats {
+  return {
+    created: { porter: 0, pike: 0, howler: 0, drone: 0 },
+    lost: { porter: 0, pike: 0, howler: 0, drone: 0 },
+    dumps: 0,
+    silos: 0,
+  }
+}
+
+export function noteUnitCreated(state: MatchState, owner: number, kind: UnitKind): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.created[kind] += 1
+}
+
+export function noteUnitLost(state: MatchState, owner: number, kind: UnitKind): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.lost[kind] += 1
+}
+
+export function noteDumpsCollected(state: MatchState, owner: number, amount: number): void {
+  if (amount <= 0) return
+  const row = state.stats[owner]
+  if (!row) return
+  row.dumps += amount
+}
+
+export function noteSiloCaptured(state: MatchState, owner: number): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.silos += 1
 }
 
 export function makeBuilding(
@@ -417,6 +453,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     supplyUsed: Array.from({ length: playerCount }, () => 0),
     supplyCap: Array.from({ length: playerCount }, () => 0),
     time: 0,
+    stats: Array.from({ length: playerCount }, () => blankSideStats()),
     paused: false,
     speed: 1,
     outcome: null,

@@ -12,7 +12,7 @@ import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from '
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './game/types'
+import { BUILDING_STATS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -30,7 +30,7 @@ import {
   viewUnitSeen,
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
-import { describeSelection } from './ui/hud'
+import { describeSelection, endStatsHtml } from './ui/hud'
 import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -1091,6 +1091,165 @@ function combatResolves(): void {
   const leftB = unitById(state, b.id)
   const damaged = (leftA?.hp ?? 0) < 40 || (leftB?.hp ?? 0) < 40 || !leftA || !leftB
   assert(damaged, `pikes did not fight (${leftA?.hp}, ${leftB?.hp})`)
+}
+
+function countsMatch(state: MatchState, owner: number, kind: UnitKind, created: number, lost: number): void {
+  const row = state.stats[owner]
+  assert(row, `missing stats for side ${owner}`)
+  assert(row.created[kind] === created, `side ${owner} created ${row.created[kind]} ${kind}, expected ${created}`)
+  assert(row.lost[kind] === lost, `side ${owner} lost ${row.lost[kind]} ${kind}, expected ${lost}`)
+}
+
+function endOfMatchStats(): void {
+  const fresh = createMatch(4)
+  for (let owner = 0; owner < fresh.playerCount; owner++) {
+    const alive: Record<UnitKind, number> = { porter: 0, pike: 0, howler: 0, drone: 0 }
+    for (const unit of fresh.units) {
+      if (unit.owner === owner && unit.hp > 0) alive[unit.kind] += 1
+    }
+    for (const kind of UNIT_KINDS) countsMatch(fresh, owner, kind, alive[kind], 0)
+    assert(fresh.stats[owner]?.dumps === 0, 'a new side already collected dumps')
+    assert(fresh.stats[owner]?.silos === 0, 'a new side already captured a silo')
+  }
+  assert((fresh.stats[0]?.created.porter ?? 0) > 0, 'Silo 01 started without Stalkers')
+
+  const keep = fresh.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'missing the home Silo')
+  keep.queue.push({ kind: 'pike', remaining: 0.01, total: 1 })
+  step(fresh, 1 / 60)
+  assert(fresh.units.some((unit) => unit.owner === 0 && unit.kind === 'pike' && unit.hp > 0), 'the Flasher never stepped out')
+  countsMatch(fresh, 0, 'pike', 1, 0)
+  const trained = fresh.units.find((unit) => unit.owner === 0 && unit.kind === 'pike')
+  assert(trained, 'the trained Flasher disappeared')
+  trained.hp = 0
+  step(fresh, 1 / 60)
+  countsMatch(fresh, 0, 'pike', 1, 1)
+  assert(!fresh.units.some((unit) => unit.id === trained.id), 'the dead Flasher stayed on the field')
+
+  const hauler = fresh.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(hauler, 'missing a Stalker to deliver dumps')
+  clearPad(fresh, 16, 16, 28, 28)
+  const bin = makeBuilding(fresh, 0, 'silo', 20, 20, true)
+  rebuildBlocked(fresh)
+  hauler.x = (bin.tx + 1) * TILE
+  hauler.y = (bin.ty + 2) * TILE + 8
+  hauler.cargo = 8
+  hauler.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  const bank = fresh.oreHeld[0]
+  const collected = () => fresh.stats[0]?.dumps ?? -1
+  step(fresh, 1 / 30)
+  assert(collected() === 8, `delivered dumps were ${collected()}`)
+  assert(fresh.oreHeld[0] === bank + 8, 'the bank did not take the delivered dumps')
+  bin.stock = STORAGE_CAP
+  hauler.cargo = 8
+  hauler.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  step(fresh, 1 / 30)
+  assert(collected() === 8, 'a full Storage counted a refused haul')
+  assert(hauler.cargo === 8, 'a full Storage took the cargo anyway')
+  bin.stock = STORAGE_CAP - 3
+  hauler.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  step(fresh, 1 / 30)
+  assert(collected() === 11, `a partial haul counted ${collected()}`)
+  assert(tryTrain(fresh, keep.id, 'porter') === null, 'the Silo rejected a Stalker paid from the bank')
+  assert(collected() === 11, 'spending dumps reduced the collected total')
+
+  const open = createMatch(4)
+  clearPad(open, 36, 20, 46, 32)
+  rebuildBlocked(open)
+  const beforeCreated = open.stats.map((row) => ({ ...row.created }))
+  const beforeLost = open.stats.map((row) => ({ ...row.lost }))
+  const stalker = makeUnit(open, 1, 'porter', 40.5 * TILE, 25.5 * TILE)
+  const pike = makeUnit(open, 0, 'pike', stalker.x + 18, stalker.y)
+  assert(open.stats[1]?.created.porter === (beforeCreated[1]?.porter ?? 0) + 1, 'the extra Stalker was not created')
+  assert(open.stats[0]?.created.pike === (beforeCreated[0]?.pike ?? 0) + 1, 'the extra Flasher was not created')
+  commandAttack(open, [pike.id], stalker.id, 'unit')
+  for (let i = 0; i < 40; i++) step(open, 1 / 60)
+  const taken = unitById(open, stalker.id)
+  assert(taken?.owner === 0, 'the uncovered Stalker was not captured')
+  assert(open.stats[1]?.lost.porter === (beforeLost[1]?.porter ?? 0), 'capturing a Stalker counted as a loss')
+  assert(open.stats[0]?.created.porter === (beforeCreated[0]?.porter ?? 0), 'a captured Stalker counted as created')
+
+  const duel = createMatch(2)
+  const started = duel.stats.map((row) => ({ created: { ...row.created }, lost: { ...row.lost }, dumps: row.dumps }))
+  const enemy = duel.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'missing the enemy Silo')
+  enemy.hp = 0
+  step(duel, 1 / 60)
+  assert(duel.outcome === 'win', 'destroying the Silo did not end the 1v1')
+  assert(duel.stats[0]?.silos === 1, 'the captor did not record the Silo')
+  assert(duel.stats[1]?.silos === 0, 'the fallen side recorded its own capture')
+  assert(duel.stats[0]?.dumps === started[0]?.dumps && duel.stats[1]?.dumps === started[1]?.dumps, 'capturing a bank counted as collected dumps')
+  for (const kind of UNIT_KINDS) {
+    assert(duel.stats[0]?.created[kind] === started[0]?.created[kind], `capture created a ${kind}`)
+    assert(duel.stats[1]?.created[kind] === started[1]?.created[kind], `capture created a ${kind} for the loser`)
+    assert(duel.stats[0]?.lost[kind] === started[0]?.lost[kind], `capture lost a ${kind}`)
+    assert(duel.stats[1]?.lost[kind] === started[1]?.lost[kind], `transferred ${kind}s counted as lost`)
+  }
+
+  const wiped = createMatch(4, 'ffa')
+  const victim = 1
+  const victims = wiped.units.filter((unit) => unit.owner === victim && unit.hp > 0)
+  assert(victims.length > 0, 'the wiped side had no units')
+  for (const owner of [0, 2, 3]) wiped.eliminated[owner] = true
+  const victimKeep = wiped.buildings.find((building) => building.owner === victim && building.kind === 'keep')
+  assert(victimKeep, 'missing the Silo to wipe')
+  victimKeep.hp = 0
+  step(wiped, 1 / 60)
+  assert(wiped.units.every((unit) => unit.owner !== victim), 'the wiped side kept a unit')
+  assert(wiped.stats[victim]?.lost.porter === victims.length, `the wipe lost ${wiped.stats[victim]?.lost.porter}, not ${victims.length}`)
+  assert(wiped.stats.every((row) => row.silos === 0), 'a wipe with no captor counted a Silo')
+
+  const aged = createMatch(6)
+  const elder = aged.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(elder, 'missing a Stalker to age out')
+  const graves = aged.graves.length
+  elder.age = STALKER_LIFESPAN
+  step(aged, 1 / 60)
+  assert(aged.stats[0]?.lost.porter === 1, 'an aged Stalker was not lost')
+  assert(aged.stats[0]?.created.porter === aged.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').length + 1, 'aging changed how many Stalkers were created')
+  assert(aged.graves.length === graves + 1, 'the aged Stalker left no grave')
+
+  const freed = createMatch(8)
+  const living: Record<number, Record<UnitKind, number>> = {}
+  for (let owner = 0; owner < freed.playerCount; owner++) {
+    living[owner] = { porter: 0, pike: 0, howler: 0, drone: 0 }
+  }
+  for (const unit of freed.units) {
+    const row = living[unit.owner]
+    if (row) row[unit.kind] += 1
+  }
+  assert(runCommand(freed, 'freedom'), 'freedom was rejected')
+  for (let owner = 0; owner < freed.playerCount; owner++) {
+    for (const kind of UNIT_KINDS) {
+      countsMatch(freed, owner, kind, living[owner]?.[kind] ?? 0, living[owner]?.[kind] ?? 0)
+    }
+  }
+
+  const board = createMatch(9, 'ffa8')
+  board.time = 125.9
+  board.outcome = 'win'
+  board.stats[0]!.created.howler = 13
+  board.stats[0]!.lost.drone = 2
+  board.stats[0]!.dumps = 4321
+  board.stats[0]!.silos = 6
+  board.stats[7]!.created.pike = 15
+  const html = endStatsHtml(board)
+  assert(html.includes('>02:05<'), `duration was not 02:05 in ${html.slice(0, 80)}`)
+  assert(html.includes('Duration'), 'the panel omitted the duration label')
+  assert(html.includes('Created') && html.includes('Lost'), 'the panel omitted created and lost')
+  assert(html.includes('Dumps collected') && html.includes('Silos captured'), 'the panel omitted dumps or silos')
+  for (let owner = 0; owner < 8; owner++) assert(html.includes(PLAYER_NAME[owner] ?? ''), `the panel omitted ${PLAYER_NAME[owner]}`)
+  assert(!html.includes('Silo 09'), 'the eight-player panel listed an extra side')
+  assert(html.includes('>13<') && html.includes('>4321<') && html.includes('>15<'), 'the panel dropped a recorded total')
+  assert((html.match(/class="you"/g) ?? []).length === 1, 'Silo 01 was not the only highlighted side')
+  const quiet = createMatch(1)
+  quiet.time = 0
+  assert(endStatsHtml(quiet).includes('>00:00<'), 'a new match did not format as 00:00')
+  quiet.time = 59.9
+  assert(endStatsHtml(quiet).includes('>00:59<'), '59 seconds did not format as 00:59')
+  quiet.time = 3600
+  assert(endStatsHtml(quiet).includes('>60:00<'), 'an hour did not format as 60:00')
+  assert(!endStatsHtml(quiet).includes('Silo 03'), 'a 1v1 panel listed Silo 03')
 }
 
 function keepDecidesTheField(): void {
@@ -2286,6 +2445,7 @@ aiPlacesMoreFactoriesAndSilos()
 attacksBuildings()
 combatResolves()
 keepDecidesTheField()
+endOfMatchStats()
 enemyPlays()
 wideMapHidesObjectsAndMakesDunmarchScout()
 aiBuildingsLeaveAGapAndAvoidMinerals()

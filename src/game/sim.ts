@@ -16,6 +16,10 @@ import {
   buildingTarget,
   distToRect,
   getTarget,
+  noteDumpsCollected,
+  noteSiloCaptured,
+  noteUnitCreated,
+  noteUnitLost,
   pushToast,
   rebuildBlocked,
   recomputeSupply,
@@ -758,6 +762,7 @@ function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { typ
     drop.stock += moved
   }
   state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + moved
+  noteDumpsCollected(state, unit.owner, moved)
   unit.cargo -= moved
   if (unit.owner === 0) state.tutorial = false
   state.particles.push({
@@ -977,6 +982,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     age: 0,
   }
   state.units.push(unit)
+  noteUnitCreated(state, building.owner, kind)
   if (Math.hypot(building.rallyX - spot.x, building.rallyY - spot.y) > 20) {
     unit.order = { type: 'move', x: building.rallyX, y: building.rallyY }
     setUnitDestination(state, unit, building.rallyX, building.rallyY)
@@ -1329,6 +1335,7 @@ function cleanup(state: MatchState): void {
   if (deadUnits.length) {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
+      noteUnitLost(state, unit.owner, unit.kind)
       burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
       state.events.push({ type: 'death' })
     }
@@ -1493,6 +1500,7 @@ function captorFor(state: MatchState, victim: number, struckBy: number | null): 
 function captureSide(state: MatchState, victim: number, captor: number): void {
   if (state.eliminated[victim]) return
   state.eliminated[victim] = true
+  noteSiloCaptured(state, captor)
   for (const building of state.buildings) {
     if (building.owner !== victim || building.hp <= 0) continue
     building.owner = captor
@@ -1577,6 +1585,9 @@ function dropStoragePile(state: MatchState, building: Building): void {
 function eliminateSide(state: MatchState, owner: number): void {
   if (state.eliminated[owner]) return
   state.eliminated[owner] = true
+  for (const unit of state.units) {
+    if (unit.owner === owner) noteUnitLost(state, owner, unit.kind)
+  }
   const buildingIds = new Set(state.buildings.filter((building) => building.owner === owner).map((building) => building.id))
   const unitIds = new Set(state.units.filter((unit) => unit.owner === owner).map((unit) => unit.id))
   state.buildings = state.buildings.filter((building) => building.owner !== owner)

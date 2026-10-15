@@ -18,6 +18,7 @@ import {
   SILO_REPAIR_TIME,
   STORAGE_CAP,
   GRID_CLOAK_SECONDS,
+  UNIT_KINDS,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -48,6 +49,7 @@ interface Cmd {
 
 let commandKey = ''
 let sideKey = ''
+let endKey = ''
 
 export function syncHud(state: MatchState, actions: HudActions): void {
   const ore = document.querySelector('#ore')
@@ -67,6 +69,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const endTitle = document.querySelector('#end-title')
   const endCopy = document.querySelector('#end-copy')
   const endSeed = document.querySelector('#end-seed')
+  const endStats = document.querySelector('#end-stats')
   const sides = document.querySelector('#sides')
   const side = controlledSide(state)
   const held = state.oreHeld[side] ?? 0
@@ -146,6 +149,18 @@ export function syncHud(state: MatchState, actions: HudActions): void {
           : `Your Silo is gone. ${PLAYER_NAME[1]} takes Surface.`
     }
     endSeed.textContent = `Field ${state.seed}`
+    if (endStats) {
+      if (state.outcome == null) {
+        endKey = ''
+        if (endStats.innerHTML) endStats.innerHTML = ''
+      } else {
+        const html = endStatsHtml(state)
+        if (html !== endKey) {
+          endKey = html
+          endStats.innerHTML = html
+        }
+      }
+    }
   }
 
   syncSideSwitch(state)
@@ -184,6 +199,28 @@ function syncSideSwitch(state: MatchState): void {
 export function resetHudCache(): void {
   commandKey = '\0'
   sideKey = '\0'
+  endKey = ''
+}
+
+export function endStatsHtml(state: MatchState): string {
+  const kindHeads = UNIT_KINDS.map((kind) => `<th scope="col">${escapeHtml(UNIT_STATS[kind].label)}</th>`).join('')
+  const rows = Array.from({ length: state.playerCount }, (_, owner) => {
+    const row = state.stats[owner]
+    const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
+    const color = swatchColor(PLAYER_COLOR[owner] ?? '#ffffff')
+    const created = UNIT_KINDS.map((kind) => row?.created[kind] ?? 0)
+    const lost = UNIT_KINDS.map((kind) => row?.lost[kind] ?? 0)
+    return `<tr class="${owner === 0 ? 'you' : ''}"><th scope="row"><span class="end-side"><i style="background:${color}"></i>${escapeHtml(name)}</span></th>${statCells(created, true)}${statCells(lost, true)}<td class="group">${row?.dumps ?? 0}</td><td class="group">${row?.silos ?? 0}</td></tr>`
+  }).join('')
+  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(state.time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="4" scope="colgroup">Created</th><th class="group" colspan="4" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
+}
+
+function statCells(values: number[], grouped: boolean): string {
+  return values.map((value, index) => `<td${grouped && index === 0 ? ' class="group"' : ''}>${value}</td>`).join('')
+}
+
+function swatchColor(color: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#ffffff'
 }
 
 function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
@@ -615,6 +652,13 @@ function formatTime(time: number): string {
   const min = Math.floor(seconds / 60)
   const rem = seconds % 60
   return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
+function formatDuration(time: number): string {
+  const seconds = Math.max(0, Math.floor(time))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${String(min).padStart(2, '0')}:${rem.toString().padStart(2, '0')}`
 }
 
 function escapeHtml(text: string): string {

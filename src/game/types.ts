@@ -42,6 +42,8 @@ export const STALKER_LIFESPAN = 5 * 60
 export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
 
+export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'drone']
+
 /** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
 export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
@@ -416,6 +418,18 @@ export interface Toast {
   life: number
 }
 
+/** Totals kept for one side and shown when the match ends. */
+export interface SideStats {
+  /** Units that entered the field for this side, including the Stalkers it starts with. */
+  created: Record<UnitKind, number>
+  /** Units that died, or that vanished because the side was wiped out with nobody to take them. A capture is not a loss. */
+  lost: Record<UnitKind, number>
+  /** Dumps carried home to a Silo or Storage. The starting pile and a captured bank are not included. */
+  dumps: number
+  /** Enemy Silos this side captured by destroying them. */
+  silos: number
+}
+
 export type GameEvent =
   | { type: 'order' }
   | { type: 'select' }
@@ -493,6 +507,8 @@ export interface MatchState {
   supplyUsed: number[]
   supplyCap: number[]
   time: number
+  /** Per-side totals for the end-of-match panel. Indexed by owner. */
+  stats: SideStats[]
   /** While set, the match clock and every simulation system stay where they are. */
   paused: boolean
   /** Simulation rate. 3 while the `speed x3` command is on, otherwise 1. */
