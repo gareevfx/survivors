@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, thawCryo, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -7,12 +7,12 @@ import { hoverPortraitUrl } from '../game/hoverArt'
 import { factoryPortraitUrl } from '../game/factoryArt'
 import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
-import { cryoPortraitUrl } from '../game/cryoArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
 import { buildingById, buildingCenter, cryoOccupants, unitById } from '../game/state'
 import {
   BUILDING_STATS,
+  CRYO_COST,
   CRYO_FREEZE_COST,
   CRYO_SLOTS,
   PLAYER_COLOR,
@@ -286,7 +286,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
-        placeButton(state, 'cryo', actions),
+        cryoButton(state, building),
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
@@ -299,20 +299,6 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
-    }
-    if (building.kind === 'cryo') {
-      const held = cryoOccupants(state, building.id)
-      const recovery = building.cryoRecover > 0 ? formatRecover(building.cryoRecover) : ''
-      return [
-        {
-          id: 'thaw',
-          label: 'Thaw',
-          detail: recovery ? `Recovery ${recovery}` : held ? `${held} inside` : 'empty',
-          title: `Release the frozen Stalkers beside this Cryo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
-          disabled: held === 0,
-          run: () => thawCryo(state, building.id),
-        },
-      ]
     }
     return []
   }
@@ -382,7 +368,6 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
-        placeButton(state, 'cryo', actions),
       )
     }
     return cmds
@@ -398,6 +383,35 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
     title: 'Refund the latest training order',
     disabled: false,
     run: () => cancelTrain(state, buildingId),
+  }
+}
+
+function cryoButton(state: MatchState, building: Building): Cmd {
+  if (!building.cryo) {
+    const afford = (state.oreHeld[controlledSide(state)] ?? 0) >= CRYO_COST
+    return {
+      id: 'cryo',
+      label: 'Cryo',
+      detail: `${CRYO_COST} dumps`,
+      title: afford
+        ? 'Add four glass vessels to this Silo, once. Select 4 Stalkers and send them here. Freezing costs 50 dumps each, 200 for the group. Thaw releases them beside the Silo, then the Cryo recovers for 4 minutes.'
+        : `Need ${CRYO_COST} dumps`,
+      disabled: !afford,
+      run: () => {
+        const error = installCryo(state, building.id)
+        if (error) state.toasts.push({ text: error, life: 3.5 })
+      },
+    }
+  }
+  const held = cryoOccupants(state, building.id)
+  const recovery = building.cryoRecover > 0 ? formatRecover(building.cryoRecover) : ''
+  return {
+    id: 'thaw',
+    label: 'Thaw',
+    detail: recovery ? `Recovery ${recovery}` : held ? `${held} inside` : 'empty',
+    title: `Release the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
+    disabled: held === 0,
+    run: () => thawCryo(state, building.id),
   }
 }
 
@@ -575,9 +589,7 @@ export function describeSelection(state: MatchState): string {
             ? storagePortraitUrl(building.owner)
             : building.kind === 'tower'
               ? pillarPortraitUrl(building.owner)
-              : building.kind === 'cryo'
-                ? cryoPortraitUrl(building.owner)
-                : ''
+              : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
@@ -586,8 +598,8 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
-      ${building.kind === 'cryo' && building.complete ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
-      ${building.kind === 'cryo' && building.complete && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
+      ${building.kind === 'keep' && building.cryo ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
+      ${building.kind === 'keep' && building.cryo && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}

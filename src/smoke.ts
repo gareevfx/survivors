@@ -1,7 +1,7 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -12,7 +12,7 @@ import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from '
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -5587,33 +5587,42 @@ function openPad(state: MatchState, x0: number, y0: number, x1: number, y1: numb
 }
 
 function cryoPreservesStalkers(): void {
-  assert(BUILDING_STATS.cryo.cost === 250, 'Cryo costs 250 dumps')
-  assert(BUILDING_STATS.cryo.hp === 400, 'Cryo has 400 hit points')
-  assert(BUILDING_STATS.cryo.w === 2 && BUILDING_STATS.cryo.h === 2, 'Cryo is 2×2')
+  assert(CRYO_COST === 250, 'a Silo Cryo costs 250 dumps')
   assert(CRYO_FREEZE_COST === 50, 'freezing a Stalker costs 50 dumps')
-  assert(CRYO_SLOTS === 4, 'Cryo holds 4 Stalkers')
+  assert(CRYO_SLOTS === 4, 'a Silo Cryo holds 4 Stalkers')
   assert(CRYO_RECOVER === 240, 'a Cryo recovers for 4 minutes')
   assert(
-    BUILDING_STATS.cryo.blurb.includes('250') &&
-      BUILDING_STATS.cryo.blurb.includes('50') &&
-      BUILDING_STATS.cryo.blurb.includes('200') &&
-      BUILDING_STATS.cryo.blurb.includes('4 minutes'),
-    'the Cryo tooltip lists the group cost and the recovery',
+    BUILDING_STATS.keep.blurb.includes('250') &&
+      BUILDING_STATS.keep.blurb.includes('50') &&
+      BUILDING_STATS.keep.blurb.includes('200') &&
+      BUILDING_STATS.keep.blurb.includes('4 minutes'),
+    'the Silo tooltip lists the Cryo',
   )
-  const lore = loreBody('Cryo')
+  const lore = loreBody('Silo')
   assert(
     lore.includes('250') && lore.includes('50') && lore.includes('200') && lore.includes('4 minutes'),
-    'Cryo lore lists the group cost and the recovery',
+    'Silo lore lists the Cryo',
   )
+  assert(!('cryo' in BUILDING_STATS), 'Cryo is still a separate building')
 
   const state = createMatch(21)
-  const tx = 24
-  const ty = 16
-  openPad(state, tx - 3, ty - 3, tx + 5, ty + 5)
-  const cryo = makeBuilding(state, 0, 'cryo', tx, ty, true)
+  const cryo = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(cryo, 'Silo 01 has no Silo')
+  const tx = cryo.tx
+  const ty = cryo.ty
+  openPad(state, tx - 2, ty - 2, tx + 5, ty + 6)
   rebuildBlocked(state)
-  const doorX = (tx + 1) * TILE
-  const doorY = (ty + 2) * TILE + 10
+  const doorX = (tx + 1.5) * TILE
+  const doorY = (ty + 3) * TILE + 16
+  assert(!cryo.cryo, 'a new Silo already had a Cryo')
+  assert(!commandFreeze(state, state.units.filter((unit) => unit.owner === 0).map((unit) => unit.id), cryo.id), 'a Silo without a Cryo accepted Stalkers')
+  state.oreHeld[0] = CRYO_COST
+  assert(installCryo(state, cryo.id) === null, 'the Silo did not add a Cryo')
+  assert(cryo.cryo, 'the Cryo button did not attach the vessels')
+  assert(state.oreHeld[0] === 0, 'adding a Cryo did not cost 250 dumps')
+  state.oreHeld[0] = CRYO_COST
+  assert(installCryo(state, cryo.id) !== null, 'a Silo accepted a second Cryo')
+  assert(state.oreHeld[0] === CRYO_COST, 'a second Cryo still charged dumps')
   const stalkers = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
   assert(stalkers.length >= 4, 'the match starts with four Stalkers')
   const crew = stalkers.slice(0, 4)
@@ -5730,15 +5739,19 @@ function cryoPreservesStalkers(): void {
   assert(lost() === lostAtDestroy, 'releasing a frozen Stalker counted as a loss')
 
   const packed = createMatch(23)
-  openPad(packed, tx - 3, ty - 3, tx + 5, ty + 5)
-  const full = makeBuilding(packed, 0, 'cryo', tx, ty, true)
+  const full = packed.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(full, 'Silo 01 has no Silo')
+  full.cryo = true
+  openPad(packed, full.tx - 2, full.ty - 2, full.tx + 5, full.ty + 6)
   rebuildBlocked(packed)
   const fillers = packed.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
   assert(fillers.length === 4, 'need four Stalkers to fill a Cryo')
+  const fullDoorX = (full.tx + 1.5) * TILE
+  const fullDoorY = (full.ty + 3) * TILE + 16
   packed.oreHeld[0] = 200
   for (const unit of fillers) {
-    unit.x = doorX
-    unit.y = doorY
+    unit.x = fullDoorX
+    unit.y = fullDoorY
     unit.order = null
     unit.cargo = 0
   }
@@ -5748,7 +5761,7 @@ function cryoPreservesStalkers(): void {
   assert(packed.oreHeld[0] === 0, 'the group did not cost 200 dumps')
   const extras = []
   for (let i = 0; i < 4; i++) {
-    const extra = makeUnit(packed, 0, 'porter', doorX, doorY)
+    const extra = makeUnit(packed, 0, 'porter', fullDoorX, fullDoorY)
     extra.cargo = 0
     extras.push(extra)
   }
@@ -5760,8 +5773,10 @@ function cryoPreservesStalkers(): void {
   assert(packed.toasts.some((toast) => toast.text === 'Cryo is full.'), 'a full Cryo did not say so')
 
   const dropped = createMatch(26)
-  openPad(dropped, tx - 3, ty - 3, tx + 5, ty + 5)
-  const bay = makeBuilding(dropped, 0, 'cryo', tx, ty, true)
+  const bay = dropped.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(bay, 'Silo 01 has no Silo')
+  bay.cryo = true
+  openPad(dropped, bay.tx - 2, bay.ty - 2, bay.tx + 5, bay.ty + 6)
   rebuildBlocked(dropped)
   const party = dropped.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
   assert(party.length === 4, 'need four Stalkers to cancel a freeze')
@@ -5791,7 +5806,8 @@ function cryoPreservesStalkers(): void {
   brain.oreHeld[1] = 200
   const aiKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(aiKeep, 'Dunmarch has no Silo')
-  const bank = makeBuilding(brain, 1, 'cryo', aiKeep.tx + 6, aiKeep.ty, true)
+  aiKeep.cryo = true
+  const bank = aiKeep
   rebuildBlocked(brain)
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
@@ -5914,10 +5930,8 @@ function siloAiBuysCryoFor250(): void {
   plenty.aiAcc = 0
   raiseBase(plenty, 1)
   updateSiloAi(plenty, 0.5)
-  assert(
-    !plenty.buildings.some((building) => building.owner === 1 && building.kind === 'cryo'),
-    'SiloAI built a Cryo while four Stalkers were still working',
-  )
+  const plentyKeep = plenty.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(plentyKeep && !plentyKeep.cryo, 'SiloAI added a Cryo while four Stalkers were still working')
 
   const state = createMatch(34)
   state.time = 0
@@ -5928,11 +5942,8 @@ function siloAiBuysCryoFor250(): void {
   assert(doomed, 'Dunmarch has no Stalker to lose')
   doomed.hp = 0
   updateSiloAi(state, 0.5)
-  const cryo = state.buildings.find((building) => building.owner === 1 && building.kind === 'cryo')
-  assert(cryo, 'SiloAI did not build a Cryo after Stalkers dropped low')
-  const center = buildingCenter(cryo)
-  const silo = buildingCenter(keep)
-  assert(Math.hypot(center.x - silo.x, center.y - silo.y) <= BUILDING_STATS.keep.sight, 'the Cryo was not beside the Silo')
+  assert(keep.cryo, 'SiloAI did not add a Cryo after Stalkers dropped low')
+  assert(!state.buildings.some((building) => building.kind === 'keep' && building.owner === 1 && building.id !== keep.id), 'SiloAI raised a second Silo for the Cryo')
   assert(state.oreHeld[1] === 0, 'the Cryo did not cost 250 after replacing a Stalker')
 }
 

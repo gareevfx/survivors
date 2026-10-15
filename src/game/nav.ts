@@ -266,7 +266,7 @@ export function mineralLaneTiles(state: MatchState, cx: number, cy: number): Set
 export function areaCharted(
   state: MatchState,
   owner: PlayerId,
-  kind: 'yard' | 'silo' | 'tower' | 'cryo',
+  kind: 'yard' | 'silo' | 'tower',
   tx: number,
   ty: number,
 ): boolean {
@@ -308,7 +308,7 @@ export function findTowerWatchSpot(
 
 export function findBuildSpot(
   state: MatchState,
-  kind: 'yard' | 'silo' | 'tower' | 'cryo',
+  kind: 'yard' | 'silo' | 'tower',
   anchorTx: number,
   anchorTy: number,
   owner: PlayerId,
@@ -337,7 +337,7 @@ export function findBuildSpot(
  */
 export function findBuildSpotWithin(
   state: MatchState,
-  kind: 'yard' | 'silo' | 'tower' | 'cryo',
+  kind: 'yard' | 'silo' | 'tower',
   anchorTx: number,
   anchorTy: number,
   maxRadius: number,
@@ -360,7 +360,7 @@ export function findBuildSpotWithin(
 function aiMayBuild(
   state: MatchState,
   owner: PlayerId,
-  kind: 'yard' | 'silo' | 'tower' | 'cryo',
+  kind: 'yard' | 'silo' | 'tower',
   tx: number,
   ty: number,
   lanes: Set<number>,

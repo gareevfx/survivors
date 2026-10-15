@@ -307,7 +307,7 @@ function clearSelection(state: MatchState): void {
           return
         }
       }
-      if (building && building.owner === side && building.complete && building.kind === 'cryo') {
+      if (building && building.owner === side && building.complete && building.kind === 'keep' && building.cryo) {
         if (commandFreeze(state, state.selectedUnits, hit.id)) return
       }
       if (building && building.owner !== side) {
@@ -549,7 +549,6 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyJ' ||
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
-        event.code === 'KeyO' ||
         event.code === 'KeyC' ||
         event.code === 'KeyR')
     ) {
@@ -578,10 +577,6 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyT') {
       armPlace('tower')
-      return
-    }
-    if (event.code === 'KeyO') {
-      armPlace('cryo')
       return
     }
     if (event.code === 'KeyP') {

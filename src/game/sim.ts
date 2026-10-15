@@ -103,7 +103,7 @@ export function step(state: MatchState, dt: number): void {
       building.dish += dt * (busy ? 0.95 : 0.42)
     }
     if (building.kind === 'tower') tryFireTower(state, building, dt)
-    if (building.kind === 'cryo' && building.cryoRecover > 0) {
+    if (building.kind === 'keep' && building.cryo && building.cryoRecover > 0) {
       building.cryoRecover = Math.max(0, building.cryoRecover - dt)
     }
   }
@@ -216,7 +216,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
 
 function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { type: 'freeze' }>): void {
   const building = buildingById(state, order.buildingId)
-  if (!building || building.hp <= 0 || building.kind !== 'cryo' || building.owner !== unit.owner || !building.complete) {
+  if (!building || building.hp <= 0 || building.kind !== 'keep' || !building.cryo || building.owner !== unit.owner || !building.complete) {
     unit.order = null
     stopMoving(unit)
     return
@@ -241,7 +241,7 @@ function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { ty
       stopMoving(unit)
       return
     }
-    const stats = BUILDING_STATS.cryo
+    const stats = BUILDING_STATS.keep
     const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
     if (!spot) return
     const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - spot.x, (unit.goalY ?? 0) - spot.y) > 8
@@ -1461,8 +1461,12 @@ function cleanup(state: MatchState): void {
     }
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
     state.events.push({ type: 'death' })
-    if (building.kind === 'cryo') releaseCryo(state, building)
-    if (building.kind === 'keep') fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
+    if (building.kind === 'keep') {
+      releaseCryo(state, building)
+      building.cryo = false
+      building.cryoRecover = 0
+      fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
+    }
   }
   for (const building of deadBuildings) {
     if (building.kind !== 'keep') continue

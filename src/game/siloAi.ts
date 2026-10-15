@@ -1,8 +1,8 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
@@ -930,7 +930,7 @@ function wantsGridScout(side: Brain): boolean {
  */
 function tendCryo(state: MatchState, side: Brain): void {
   const cryo = state.buildings.find(
-    (building) => building.owner === side.owner && building.kind === 'cryo' && building.complete && building.hp > 0,
+    (building) => building.owner === side.owner && building.kind === 'keep' && building.cryo && building.complete && building.hp > 0,
   )
   if (!cryo) return
   const active = state.units.filter(
@@ -969,12 +969,11 @@ function livingStalkers(state: MatchState, owner: PlayerId): number {
   return count
 }
 
-/** One Cryo beside the Silo, and only after the Stalker count has dropped low. */
+/** A Cryo on this Silo, and only after the Stalker count has dropped low. */
 function cryoWanted(state: MatchState, side: Brain): boolean {
-  if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.cryo.cost) return false
-  if (state.buildings.some((building) => building.owner === side.owner && building.kind === 'cryo' && building.hp > 0)) {
-    return false
-  }
+  if ((state.oreHeld[side.owner] ?? 0) < CRYO_COST) return false
+  const keep = ownKeep(state, side.owner)
+  if (!keep?.complete || keep.cryo) return false
   const stalkers = livingStalkers(state, side.owner)
   return stalkers > 0 && stalkers <= CRYO_LOW
 }
@@ -982,22 +981,6 @@ function cryoWanted(state: MatchState, side: Brain): boolean {
 /** Surplus dumps fill a Hover Grid before another Factory goes up. */
 function bankingHovers(state: MatchState, side: Brain, ore: number): boolean {
   return ore >= HOVER_SURPLUS && hoverRoster(state, side.owner) < HOVER_GRID
-}
-
-/** Charted ground inside Silo sight, and not under a known enemy Pillar. */
-function placeSafeCryo(state: MatchState, side: Brain): boolean {
-  const keep = ownKeep(state, side.owner)
-  if (!keep) return false
-  const spot = findBuildSpot(state, 'cryo', keep.tx, keep.ty, side.owner)
-  if (!spot) {
-    rememberBlindSpot(state, side, 'cryo', findBuildSpot(state, 'cryo', keep.tx, keep.ty, side.owner, false))
-    return false
-  }
-  const centerX = (spot.tx + BUILDING_STATS.cryo.w / 2) * TILE
-  const centerY = (spot.ty + BUILDING_STATS.cryo.h / 2) * TILE
-  if (remoteFromKeep(state, side.owner, centerX, centerY)) return false
-  if (knownPillarReaches(state, side, centerX, centerY)) return false
-  return tryPlace(state, side.owner, 'cryo', spot.tx, spot.ty, []) === null
 }
 
 function runSide(state: MatchState, owner: PlayerId): void {
@@ -1049,7 +1032,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
         placeChartedNearKeep(state, side, 'yard')
       }
     } else if (cryoWanted(state, side)) {
-      placeSafeCryo(state, side)
+      const vaultKeep = ownKeep(state, side.owner)
+      if (vaultKeep) installCryo(state, vaultKeep.id)
     } else if (ore >= BUILDING_STATS.yard.cost && !bankingHovers(state, side, ore)) {
       placeChartedNearKeep(state, side, 'yard')
     }
@@ -1281,7 +1265,7 @@ function scoutUnchartedSite(state: MatchState, side: Brain): void {
   commandMove(state, [drone.id], chart.x, chart.y, false)
 }
 
-function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'silo' | 'tower' | 'cryo'): boolean {
+function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'silo' | 'tower'): boolean {
   if (aiPlaceNearKeep(state, kind, side.owner)) return true
   const keep = ownKeep(state, side.owner)
   if (!keep) return false
@@ -1293,7 +1277,7 @@ function placeChartedNearKeep(state: MatchState, side: Brain, kind: 'yard' | 'si
 function rememberBlindSpot(
   state: MatchState,
   side: Brain,
-  kind: 'yard' | 'silo' | 'tower' | 'cryo',
+  kind: 'yard' | 'silo' | 'tower',
   spot: { tx: number; ty: number } | null,
 ): void {
   if (side.chart || !spot) return

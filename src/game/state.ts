@@ -398,6 +398,7 @@ export function makeBuilding(
     dropDumps: false,
     ruined: false,
     repairPaid: false,
+    cryo: false,
     cryoRecover: 0,
   }
   state.buildings.push(building)

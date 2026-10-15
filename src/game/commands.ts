@@ -19,6 +19,7 @@ import {
 } from './state'
 import {
   BUILDING_STATS,
+  CRYO_COST,
   CRYO_RECOVER,
   CRYO_SLOTS,
   MINERS_PER_DEPOSIT,
@@ -593,15 +594,29 @@ export function commandAttack(
   noteOrder(state, units)
 }
 
+/** Add the four glass vessels to a Silo. Once per Silo. Returns an error, or null when it is on. */
+export function installCryo(state: MatchState, buildingId: number): string | null {
+  if (state.outcome || state.paused) return 'The battle is paused'
+  const building = buildingById(state, buildingId)
+  if (!building || building.kind !== 'keep' || building.hp <= 0 || building.ruined || !building.complete) {
+    return 'That Silo is not ready'
+  }
+  if (building.cryo) return 'This Silo already has a Cryo'
+  if ((state.oreHeld[building.owner] ?? 0) < CRYO_COST) return `Need ${CRYO_COST} dumps`
+  debitDumps(state, building.owner, CRYO_COST)
+  building.cryo = true
+  return null
+}
+
 /**
- * Send exactly four Stalkers into a finished Cryo.
+ * Send exactly four Stalkers into a Silo that has a Cryo.
  * The group fee is charged when all four are inside the door, not when the order is given.
  * Returns true when the click belonged to this Cryo, including a refusal.
  */
 export function commandFreeze(state: MatchState, ids: number[], buildingId: number): boolean {
   if (state.outcome || state.paused) return false
   const building = buildingById(state, buildingId)
-  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'cryo') return false
+  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'keep' || !building.cryo) return false
   const picked = living(state, ids)
   const crew = picked.filter(
     (unit) => unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
@@ -640,7 +655,7 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
 export function releaseCryo(state: MatchState, building: Building): number {
   const held = state.units.filter((unit) => unit.frozen === building.id && unit.hp > 0)
   if (!held.length) return 0
-  const stats = BUILDING_STATS.cryo
+  const stats = BUILDING_STATS[building.kind]
   const center = buildingCenter(building)
   held.forEach((unit, index) => {
     unit.frozen = null
@@ -668,7 +683,7 @@ export function releaseCryo(state: MatchState, building: Building): number {
 
 export function thawCryo(state: MatchState, buildingId: number): void {
   const building = buildingById(state, buildingId)
-  if (!building || building.kind !== 'cryo' || building.hp <= 0) return
+  if (!building || building.kind !== 'keep' || !building.cryo || building.hp <= 0) return
   const released = releaseCryo(state, building)
   if (released > 0) building.cryoRecover = CRYO_RECOVER
 }
@@ -1026,7 +1041,7 @@ export function coverOpenSites(state: MatchState): void {
   }
 }
 
-export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower' | 'cryo', owner: PlayerId = 1): boolean {
+export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower', owner: PlayerId = 1): boolean {
   const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
   if (!keep) return false
   const spot = findBuildSpot(state, kind, keep.tx, keep.ty, owner)

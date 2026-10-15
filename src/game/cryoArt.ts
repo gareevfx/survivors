@@ -216,6 +216,33 @@ function bodySprite(color: string, held: number, stage: number): HTMLCanvasEleme
   return canvas
 }
 
+/**
+ * Four glass cylinders on the east face of a Silo. Empty glass, or a Stalker under ice.
+ * x and y are the Silo's tile origin.
+ */
+export function drawSiloCryoVessels(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  color: string,
+  held: number,
+): void {
+  const pods = Math.max(0, Math.min(4, Math.floor(held)))
+  ctx.save()
+  ctx.translate(x + 74, y + 16)
+  ctx.scale(0.62, 0.62)
+  const spots: Array<[number, number]> = [
+    [16, 32],
+    [46, 32],
+    [16, 64],
+    [46, 64],
+  ]
+  spots.forEach(([cx, base], index) => {
+    paintVessel(ctx, cx, base, index < pods, color, false, false)
+  })
+  ctx.restore()
+}
+
 export function drawCryoSprite(
   ctx: CanvasRenderingContext2D,
   x: number,
