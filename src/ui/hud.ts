@@ -302,12 +302,13 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
     }
     if (building.kind === 'cryo') {
       const held = cryoOccupants(state, building.id)
+      const recovery = building.cryoRecover > 0 ? formatRecover(building.cryoRecover) : ''
       return [
         {
           id: 'thaw',
           label: 'Thaw',
-          detail: held ? `${held} inside` : 'empty',
-          title: `Release the frozen Stalkers beside this Cryo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned.`,
+          detail: recovery ? `Recovery ${recovery}` : held ? `${held} inside` : 'empty',
+          title: `Release the frozen Stalkers beside this Cryo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
           disabled: held === 0,
           run: () => thawCryo(state, building.id),
         },
@@ -585,7 +586,8 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
-      ${building.kind === 'cryo' && building.complete ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps to freeze</p>` : ''}
+      ${building.kind === 'cryo' && building.complete ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
+      ${building.kind === 'cryo' && building.complete && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
@@ -675,6 +677,14 @@ export function describeSelection(state: MatchState): string {
 
 function formatTime(time: number): string {
   const seconds = Math.floor(time)
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
+/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
+function formatRecover(time: number): string {
+  const seconds = Math.max(0, Math.ceil(time))
   const min = Math.floor(seconds / 60)
   const rem = seconds % 60
   return `${min}:${rem.toString().padStart(2, '0')}`

@@ -11,7 +11,7 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Storage', body: 'Storage for Cells;' },
   {
     name: 'Cryo',
-    body: 'A 2×2 vault. Building it costs 250 dumps. It holds 4 Stalkers, and freezing one costs 50 dumps when it enters. A frozen Stalker leaves the map, cannot be attacked, and its 5-minute life is paused until thaw or the Cryo is destroyed.',
+    body: 'A 2×2 vault. Building it costs 250 dumps. It holds 4 Stalkers. Select 4 Stalkers to freeze them. Freezing costs 50 dumps each, 200 for the group, when they enter. Inside, a Stalker leaves the map, cannot be attacked, and its 5-minute life is paused. Thaw releases them, then the Cryo recovers for 4 minutes. Destroying the Cryo releases them too.',
   },
   { name: 'Pillar', body: 'Windmill with battle tower;' },
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },

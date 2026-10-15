@@ -12,7 +12,7 @@ import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from '
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, CRYO_FREEZE_COST, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { BUILDING_STATS, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2449,6 +2449,7 @@ endOfMatchStats()
 cryoPreservesStalkers()
 siloAiUsesHoverGrid()
 siloAiBuysCryoFor250()
+siloAiBanksHovers()
 enemyPlays()
 wideMapHidesObjectsAndMakesDunmarchScout()
 aiBuildingsLeaveAGapAndAvoidMinerals()
@@ -5591,9 +5592,19 @@ function cryoPreservesStalkers(): void {
   assert(BUILDING_STATS.cryo.w === 2 && BUILDING_STATS.cryo.h === 2, 'Cryo is 2×2')
   assert(CRYO_FREEZE_COST === 50, 'freezing a Stalker costs 50 dumps')
   assert(CRYO_SLOTS === 4, 'Cryo holds 4 Stalkers')
-  assert(BUILDING_STATS.cryo.blurb.includes('250') && BUILDING_STATS.cryo.blurb.includes('50'), 'the Cryo tooltip lists both costs')
+  assert(CRYO_RECOVER === 240, 'a Cryo recovers for 4 minutes')
+  assert(
+    BUILDING_STATS.cryo.blurb.includes('250') &&
+      BUILDING_STATS.cryo.blurb.includes('50') &&
+      BUILDING_STATS.cryo.blurb.includes('200') &&
+      BUILDING_STATS.cryo.blurb.includes('4 minutes'),
+    'the Cryo tooltip lists the group cost and the recovery',
+  )
   const lore = loreBody('Cryo')
-  assert(lore.includes('250') && lore.includes('50'), 'Cryo lore lists both costs')
+  assert(
+    lore.includes('250') && lore.includes('50') && lore.includes('200') && lore.includes('4 minutes'),
+    'Cryo lore lists the group cost and the recovery',
+  )
 
   const state = createMatch(21)
   const tx = 24
@@ -5605,25 +5616,64 @@ function cryoPreservesStalkers(): void {
   const doorY = (ty + 2) * TILE + 10
   const stalkers = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
   assert(stalkers.length >= 4, 'the match starts with four Stalkers')
-  const first = stalkers[0]
+  const crew = stalkers.slice(0, 4)
+  for (const unit of crew) {
+    unit.x = doorX
+    unit.y = doorY
+    unit.order = null
+    unit.cargo = 0
+    unit.age = 12
+  }
+  const first = crew[0]
   assert(first, 'missing a Stalker')
-  first.x = doorX
-  first.y = doorY
-  first.order = null
-  first.age = 12
-  first.cargo = 0
+  thawCryo(state, cryo.id)
+  const recover = () => cryo.cryoRecover
+  assert(recover() === 0, 'an empty thaw started a recovery')
+  const rider = makeUnit(state, 0, 'pike', doorX + 80, doorY)
+  assert(!commandFreeze(state, [rider.id], cryo.id), 'a Flasher was treated as a freeze order')
+  rider.hp = 0
   const created = () => state.stats[0]?.created.porter ?? -1
   const lost = () => state.stats[0]?.lost.porter ?? -1
   const createdBefore = created()
   const lostBefore = lost()
   state.oreHeld[0] = 80
-  assert(commandFreeze(state, [first.id], cryo.id), 'the Stalker was not sent to the Cryo')
+  assert(commandFreeze(state, [first.id], cryo.id), 'one Stalker was not refused')
+  assert(first.order == null, 'one Stalker was sent to freeze')
+  assert(
+    state.toasts.some((toast) => toast.text === 'Select 4 Stalkers to freeze.'),
+    'fewer than 4 Stalkers did not say so',
+  )
+  const mixed = makeUnit(state, 0, 'pike', doorX + 90, doorY)
+  assert(commandFreeze(state, [...crew.map((unit) => unit.id), mixed.id], cryo.id), 'a mixed selection was not refused')
+  assert(crew.every((unit) => unit.order == null), 'a mixed selection was sent to freeze')
+  mixed.hp = 0
+
+  state.oreHeld[0] = 40
+  assert(commandFreeze(state, crew.map((unit) => unit.id), cryo.id), 'the group was not sent')
   step(state, 1 / 30)
-  assert(first.frozen === cryo.id, 'a Stalker in reach did not freeze')
-  assert(state.oreHeld[0] === 30, 'freezing did not charge 50 dumps')
+  assert(crew.every((unit) => unit.frozen == null), 'the group froze without 200 dumps')
+  assert(state.oreHeld[0] === 40, 'a refused group still charged dumps')
+  assert(
+    state.toasts.some((toast) => toast.text === 'Need 200 dumps to freeze.'),
+    'a refused group did not say it needs 200 dumps',
+  )
+
+  const lagging = crew[3]
+  assert(lagging, 'missing the fourth Stalker')
+  lagging.x = doorX + 400
+  lagging.y = doorY + 400
+  state.oreHeld[0] = 200
+  assert(commandFreeze(state, crew.map((unit) => unit.id), cryo.id), 'the group was not sent again')
+  step(state, 1 / 30)
+  assert(crew.every((unit) => unit.frozen == null), 'the group froze before all four arrived')
+  lagging.x = doorX
+  lagging.y = doorY
+  step(state, 1 / 30)
+  assert(crew.every((unit) => unit.frozen === cryo.id), 'the group did not freeze together')
+  assert(state.oreHeld[0] === 0, 'the group did not cost 200 dumps')
   assert(created() === createdBefore, 'freezing counted as a new Stalker')
   assert(lost() === lostBefore, 'freezing counted as a loss')
-  assert(!viewUnitSeen(state, first), 'a frozen Stalker stayed visible')
+  assert(crew.every((unit) => !viewUnitSeen(state, unit)), 'a frozen Stalker stayed visible')
   const frozenAge = first.age
   const frozenHp = first.hp
   step(state, 1)
@@ -5632,8 +5682,9 @@ function cryoPreservesStalkers(): void {
   state.selectedBuilding = cryo.id
   state.selectedUnits = []
   const panel = describeSelection(state)
-  assert(panel.includes('1 / 4'), 'the Cryo panel hid the slot count')
-  assert(panel.includes('50 dumps to freeze'), 'the Cryo panel hid the freeze cost')
+  assert(panel.includes('4 / 4'), 'the Cryo panel hid the slot count')
+  assert(panel.includes('50 dumps each'), 'the Cryo panel hid the freeze cost')
+  assert(panel.includes('200 for the group'), 'the Cryo panel hid the group cost')
   assert(panel.includes('250'), 'the Cryo panel hid the build cost')
 
   const foe = makeUnit(state, 1, 'pike', doorX, doorY)
@@ -5642,77 +5693,102 @@ function cryoPreservesStalkers(): void {
   assert(first.hp === frozenHp && first.frozen === cryo.id, 'a frozen Stalker took a hit')
 
   thawCryo(state, cryo.id)
-  assert(first.frozen == null && first.nodeMemory === 0, 'thaw left the Stalker frozen')
+  assert(crew.every((unit) => unit.frozen == null && unit.nodeMemory === 0), 'thaw left a Stalker frozen')
+  assert(recover() === CRYO_RECOVER, 'thaw did not start the recovery')
   const thawed = buildingRect(cryo)
-  const stillInside =
-    first.x >= thawed.x && first.x <= thawed.x + thawed.w && first.y >= thawed.y && first.y <= thawed.y + thawed.h
-  assert(!stillInside, 'thaw left the Stalker inside the Cryo')
+  const stillInside = crew.some(
+    (unit) => unit.x >= thawed.x && unit.x <= thawed.x + thawed.w && unit.y >= thawed.y && unit.y <= thawed.y + thawed.h,
+  )
+  assert(!stillInside, 'thaw left a Stalker inside the Cryo')
+  const recovering = describeSelection(state)
+  assert(recovering.includes('Recovery') && recovering.includes('4:00'), 'the panel hid a full recovery')
   step(state, 1)
+  assert(recover() === CRYO_RECOVER - 1, 'recovery did not tick')
   assert(first.age > frozenAge, 'a thawed Stalker did not resume aging')
+  const ticking = describeSelection(state)
+  assert(ticking.includes('Recovery') && ticking.includes('3:59'), 'the panel hid the recovery countdown')
 
-  first.x = doorX
-  first.y = doorY
-  first.order = null
-  state.oreHeld[0] = 50
-  commandFreeze(state, [first.id], cryo.id)
+  for (const unit of crew) {
+    unit.x = doorX
+    unit.y = doorY
+    unit.order = null
+  }
+  state.oreHeld[0] = 200
+  assert(commandFreeze(state, crew.map((unit) => unit.id), cryo.id), 'a recovering Cryo ignored the order')
+  assert(crew.every((unit) => unit.order == null), 'a recovering Cryo accepted Stalkers')
+  assert(state.toasts.some((toast) => toast.text === 'Cryo is recovering.'), 'a recovering Cryo did not say so')
+
+  cryo.cryoRecover = 0
+  state.oreHeld[0] = 200
+  commandFreeze(state, crew.map((unit) => unit.id), cryo.id)
   step(state, 1 / 30)
-  assert(first.frozen === cryo.id, 'the Stalker did not freeze again')
+  assert(crew.every((unit) => unit.frozen === cryo.id), 'the group did not freeze after recovery')
   cryo.hp = 0
   const lostAtDestroy = lost()
   step(state, 1 / 30)
-  assert(first.hp > 0 && first.frozen == null, 'destroying the Cryo did not release the Stalker')
+  assert(crew.every((unit) => unit.hp > 0 && unit.frozen == null), 'destroying the Cryo did not release the Stalkers')
   assert(lost() === lostAtDestroy, 'releasing a frozen Stalker counted as a loss')
-
-  const broke = createMatch(22)
-  openPad(broke, tx - 3, ty - 3, tx + 5, ty + 5)
-  const vault = makeBuilding(broke, 0, 'cryo', tx, ty, true)
-  rebuildBlocked(broke)
-  const poor = broke.units.find((unit) => unit.owner === 0 && unit.kind === 'porter')
-  assert(poor, 'missing a Stalker for the fee')
-  poor.x = doorX
-  poor.y = doorY
-  poor.order = null
-  broke.oreHeld[0] = 40
-  commandFreeze(broke, [poor.id], vault.id)
-  step(broke, 1 / 30)
-  assert(poor.frozen == null, 'a Stalker froze without 50 dumps')
-  assert(broke.oreHeld[0] === 40, 'a refused freeze still charged dumps')
-  assert(
-    broke.toasts.some((toast) => toast.text === 'Need 50 dumps to freeze.'),
-    'a refused freeze did not say so',
-  )
 
   const packed = createMatch(23)
   openPad(packed, tx - 3, ty - 3, tx + 5, ty + 5)
   const full = makeBuilding(packed, 0, 'cryo', tx, ty, true)
   rebuildBlocked(packed)
-  const crew = packed.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
-  assert(crew.length === 4, 'need four Stalkers to fill a Cryo')
+  const fillers = packed.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
+  assert(fillers.length === 4, 'need four Stalkers to fill a Cryo')
   packed.oreHeld[0] = 200
-  for (const unit of crew) {
+  for (const unit of fillers) {
     unit.x = doorX
     unit.y = doorY
     unit.order = null
     unit.cargo = 0
   }
-  commandFreeze(packed, crew.map((unit) => unit.id), full.id)
+  commandFreeze(packed, fillers.map((unit) => unit.id), full.id)
   step(packed, 1 / 30)
-  assert(crew.every((unit) => unit.frozen === full.id), 'the Cryo did not take four Stalkers')
-  assert(packed.oreHeld[0] === 0, 'four freezes did not cost 200 dumps')
-  const extra = makeUnit(packed, 0, 'porter', doorX, doorY)
-  packed.oreHeld[0] = 80
-  commandFreeze(packed, [extra.id], full.id)
+  assert(fillers.every((unit) => unit.frozen === full.id), 'the Cryo did not take four Stalkers')
+  assert(packed.oreHeld[0] === 0, 'the group did not cost 200 dumps')
+  const extras = []
+  for (let i = 0; i < 4; i++) {
+    const extra = makeUnit(packed, 0, 'porter', doorX, doorY)
+    extra.cargo = 0
+    extras.push(extra)
+  }
+  packed.oreHeld[0] = 200
+  commandFreeze(packed, extras.map((unit) => unit.id), full.id)
   step(packed, 1 / 30)
-  assert(extra.frozen == null, 'a fifth Stalker entered a full Cryo')
-  assert(packed.oreHeld[0] === 80, 'a full Cryo still charged the freeze')
+  assert(extras.every((unit) => unit.frozen == null && unit.order == null), 'a second group entered a full Cryo')
+  assert(packed.oreHeld[0] === 200, 'a full Cryo still charged the freeze')
   assert(packed.toasts.some((toast) => toast.text === 'Cryo is full.'), 'a full Cryo did not say so')
+
+  const dropped = createMatch(26)
+  openPad(dropped, tx - 3, ty - 3, tx + 5, ty + 5)
+  const bay = makeBuilding(dropped, 0, 'cryo', tx, ty, true)
+  rebuildBlocked(dropped)
+  const party = dropped.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
+  assert(party.length === 4, 'need four Stalkers to cancel a freeze')
+  for (const unit of party) {
+    unit.x = doorX + 400
+    unit.y = doorY
+    unit.order = null
+    unit.cargo = 0
+  }
+  dropped.oreHeld[0] = 200
+  commandFreeze(dropped, party.map((unit) => unit.id), bay.id)
+  const lostMember = party[0]
+  assert(lostMember, 'missing a Stalker to drop')
+  lostMember.hp = 0
+  step(dropped, 1 / 30)
+  assert(
+    party.every((unit) => unit.order == null),
+    'a short party kept walking',
+  )
+  assert(dropped.toasts.some((toast) => toast.text === 'Freeze cancelled.'), 'a short party did not say so')
 
   const brain = createMatch(24)
   const elder = brain.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
   assert(elder, 'Dunmarch has no Stalker')
   elder.cargo = 0
   elder.order = null
-  brain.oreHeld[1] = 100
+  brain.oreHeld[1] = 200
   const aiKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(aiKeep, 'Dunmarch has no Silo')
   const bank = makeBuilding(brain, 1, 'cryo', aiKeep.tx + 6, aiKeep.ty, true)
@@ -5723,46 +5799,50 @@ function cryoPreservesStalkers(): void {
     !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
     'SiloAI froze a Stalker it still needed',
   )
-  const yard = buildingCenter(aiKeep)
-  makeUnit(brain, 1, 'porter', yard.x, yard.y + 20)
-  makeUnit(brain, 1, 'porter', yard.x + 16, yard.y + 20)
+  const pad = buildingCenter(aiKeep)
+  makeUnit(brain, 1, 'porter', pad.x, pad.y + 20)
+  makeUnit(brain, 1, 'porter', pad.x + 16, pad.y + 20)
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
   assert(
-    brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
-    'SiloAI left a spare Stalker out of the Cryo',
+    !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
+    'SiloAI froze fewer than four spare Stalkers',
+  )
+  makeUnit(brain, 1, 'porter', pad.x + 32, pad.y + 20)
+  makeUnit(brain, 1, 'porter', pad.x + 48, pad.y + 20)
+  for (const unit of brain.units) {
+    if (unit.owner === 1 && unit.kind === 'porter') {
+      unit.cargo = 0
+      unit.order = null
+    }
+  }
+  brain.oreHeld[1] = 200
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  const sent = brain.units.filter((unit) => unit.owner === 1 && unit.order?.type === 'freeze')
+  assert(sent.length === 4, 'SiloAI did not send four Stalkers together')
+  for (const unit of sent) unit.order = null
+  bank.cryoRecover = 120
+  brain.oreHeld[1] = 200
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(
+    !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
+    'SiloAI froze Stalkers during recovery',
   )
   for (const unit of brain.units) {
     if (unit.owner === 1 && unit.kind === 'porter' && unit.id !== elder.id) unit.hp = 0
   }
   elder.frozen = bank.id
   elder.order = null
-  const partner = makeUnit(brain, 1, 'porter', yard.x, yard.y + 28)
+  const partner = makeUnit(brain, 1, 'porter', pad.x, pad.y + 28)
   partner.frozen = bank.id
+  bank.cryoRecover = 0
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
   assert(elder.frozen == null && partner.frozen == null, 'SiloAI left Stalkers frozen with nobody working')
-
-  const planner = createMatch(25)
-  planner.time = 300
-  planner.oreHeld[1] = 2000
-  planner.aiAcc = 0
-  const home = planner.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
-  assert(home, 'Dunmarch has no Silo to build beside')
-  chartBase(planner, 1, home.tx + 1, home.ty + 1, 16)
-  makeBuilding(planner, 1, 'yard', 36, 16, true)
-  makeBuilding(planner, 1, 'yard', 40, 16, true)
-  makeBuilding(planner, 1, 'tower', 36, 20, true)
-  makeBuilding(planner, 1, 'tower', 40, 20, true)
-  makeBuilding(planner, 1, 'tower', 44, 20, true)
-  rebuildBlocked(planner)
-  updateSiloAi(planner, 0.5)
-  const raised = planner.buildings.some((building) => building.owner === 1 && building.kind === 'cryo')
-  const built = planner.buildings
-    .filter((building) => building.owner === 1)
-    .map((building) => building.kind)
-    .join(',')
-  assert(raised, `SiloAI built ${built} and no Cryo`)
+  const cooled = () => bank.cryoRecover
+  assert(cooled() === CRYO_RECOVER, 'SiloAI thawed without starting recovery')
 }
 
 function siloAiUsesHoverGrid(): void {
@@ -5814,27 +5894,81 @@ function siloAiUsesHoverGrid(): void {
   assert(nine.every((unit) => unit.cloak === 0), 'Grid accepted fewer than 10 Hovers')
 }
 
-function siloAiBuysCryoFor250(): void {
-  const state = createMatch(32)
-  state.time = 0
-  state.oreHeld[1] = 250
-  state.aiAcc = 0
-  const keep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+function raiseBase(state: MatchState, owner: PlayerId): Building {
+  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep')
   assert(keep, 'Dunmarch has no Silo')
-  chartBase(state, 1, keep.tx + 1, keep.ty + 1, 16)
-  const home = buildingCenter(keep)
-  makeUnit(state, 1, 'porter', home.x, home.y + 24)
-  makeUnit(state, 1, 'porter', home.x + 14, home.y + 24)
-  makeBuilding(state, 1, 'yard', 36, 16, true)
-  makeBuilding(state, 1, 'yard', 40, 16, true)
-  makeBuilding(state, 1, 'tower', 36, 20, true)
-  makeBuilding(state, 1, 'tower', 40, 20, true)
-  makeBuilding(state, 1, 'tower', 44, 20, true)
+  chartBase(state, owner, keep.tx + 1, keep.ty + 1, 16)
+  makeBuilding(state, owner, 'yard', 36, 16, true)
+  makeBuilding(state, owner, 'yard', 40, 16, true)
+  makeBuilding(state, owner, 'tower', 36, 20, true)
+  makeBuilding(state, owner, 'tower', 40, 20, true)
+  makeBuilding(state, owner, 'tower', 44, 20, true)
   rebuildBlocked(state)
+  return keep
+}
+
+function siloAiBuysCryoFor250(): void {
+  const plenty = createMatch(32)
+  plenty.time = 0
+  plenty.oreHeld[1] = 2000
+  plenty.aiAcc = 0
+  raiseBase(plenty, 1)
+  updateSiloAi(plenty, 0.5)
+  assert(
+    !plenty.buildings.some((building) => building.owner === 1 && building.kind === 'cryo'),
+    'SiloAI built a Cryo while four Stalkers were still working',
+  )
+
+  const state = createMatch(34)
+  state.time = 0
+  state.oreHeld[1] = 300
+  state.aiAcc = 0
+  const keep = raiseBase(state, 1)
+  const doomed = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(doomed, 'Dunmarch has no Stalker to lose')
+  doomed.hp = 0
   updateSiloAi(state, 0.5)
   const cryo = state.buildings.find((building) => building.owner === 1 && building.kind === 'cryo')
-  assert(cryo, 'SiloAI did not build a Cryo for 250 dumps')
+  assert(cryo, 'SiloAI did not build a Cryo after Stalkers dropped low')
   const center = buildingCenter(cryo)
   const silo = buildingCenter(keep)
   assert(Math.hypot(center.x - silo.x, center.y - silo.y) <= BUILDING_STATS.keep.sight, 'the Cryo was not beside the Silo')
+  assert(state.oreHeld[1] === 0, 'the Cryo did not cost 250 after replacing a Stalker')
+}
+
+function siloAiBanksHovers(): void {
+  const state = createMatch(35)
+  state.oreHeld[1] = 500
+  state.aiAcc = 0
+  const keep = raiseBase(state, 1)
+  const home = buildingCenter(keep)
+  makeUnit(state, 1, 'porter', home.x, home.y + 24)
+  makeUnit(state, 1, 'porter', home.x + 14, home.y + 24)
+  makeUnit(state, 1, 'drone', home.x, home.y + 40)
+  makeUnit(state, 1, 'drone', home.x + 16, home.y + 40)
+  const before = state.buildings.length
+  updateSiloAi(state, 0.5)
+  const queued = state.buildings.reduce((count, building) => {
+    if (building.owner !== 1) return count
+    return count + building.queue.filter((job) => job.kind === 'drone').length
+  }, 0)
+  assert(queued === 2, 'surplus dumps did not queue a Hover at each Factory')
+  assert(state.buildings.length === before, 'surplus dumps raised another Factory before the Grid')
+  assert(state.oreHeld[1] === 400, 'two Hovers did not cost 100 dumps')
+
+  const lean = createMatch(36)
+  lean.oreHeld[1] = 499
+  lean.aiAcc = 0
+  const leanKeep = raiseBase(lean, 1)
+  const leanHome = buildingCenter(leanKeep)
+  makeUnit(lean, 1, 'porter', leanHome.x, leanHome.y + 24)
+  makeUnit(lean, 1, 'porter', leanHome.x + 14, leanHome.y + 24)
+  makeUnit(lean, 1, 'drone', leanHome.x, leanHome.y + 40)
+  makeUnit(lean, 1, 'drone', leanHome.x + 16, leanHome.y + 40)
+  updateSiloAi(lean, 0.5)
+  const leanQueued = lean.buildings.reduce((count, building) => {
+    if (building.owner !== 1) return count
+    return count + building.queue.filter((job) => job.kind === 'drone').length
+  }, 0)
+  assert(leanQueued === 0, 'a bank under 500 dumps trained extra Hovers')
 }

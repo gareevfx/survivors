@@ -20,6 +20,7 @@ import {
   type MatchMode,
   ORE_NODE_AMOUNT,
   PLAYER_COLOR,
+  CRYO_RECOVER,
   ROCK_HP,
   TILE,
   TREE_HP,
@@ -384,6 +385,14 @@ function drawPlacement(
   ctx.restore()
 }
 
+/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
+function formatRecover(time: number): string {
+  const seconds = Math.max(0, Math.ceil(time))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
 function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building: Building): void {
   const stats = BUILDING_STATS[building.kind]
   const x = building.tx * TILE
@@ -447,6 +456,13 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
       (unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id && unit.hp > 0,
     )
     ctx.fillText(crew ? 'Raising' : 'Paused', x + w / 2, y - 12)
+  } else if (building.kind === 'cryo' && building.complete && building.cryoRecover > 0) {
+    const remain = building.cryoRecover
+    bar(ctx, x + 8, y - 8, w - 16, 1 - remain / CRYO_RECOVER, '#9fd7e8')
+    ctx.fillStyle = '#f4e7bf'
+    ctx.font = '10px "Segoe UI", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`Recovery ${formatRecover(remain)}`, x + w / 2, y - 12)
   } else if (selected || building.hp < stats.hp || building.hitFlash > 0) {
     bar(ctx, x + 8, y - 7, w - 16, building.hp / stats.hp, hpColor(building.hp / stats.hp))
   }

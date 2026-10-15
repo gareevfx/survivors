@@ -6,6 +6,8 @@ import {
   buildingCenter,
   buildingRect,
   canPlace,
+  cryoOccupants,
+  cryoParty,
   makeBuilding,
   pillarsClear,
   placementAllowed,
@@ -17,6 +19,8 @@ import {
 } from './state'
 import {
   BUILDING_STATS,
+  CRYO_RECOVER,
+  CRYO_SLOTS,
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
   GRID_CLOAK_SECONDS,
@@ -590,18 +594,32 @@ export function commandAttack(
 }
 
 /**
- * Walk selected Stalkers into a finished Cryo.
- * The freeze fee is charged when they enter, not when the order is given.
- * Returns true when at least one Stalker was sent.
+ * Send exactly four Stalkers into a finished Cryo.
+ * The group fee is charged when all four are inside the door, not when the order is given.
+ * Returns true when the click belonged to this Cryo, including a refusal.
  */
 export function commandFreeze(state: MatchState, ids: number[], buildingId: number): boolean {
   if (state.outcome || state.paused) return false
   const building = buildingById(state, buildingId)
   if (!building || building.hp <= 0 || !building.complete || building.kind !== 'cryo') return false
-  const crew = living(state, ids).filter(
+  const picked = living(state, ids)
+  const crew = picked.filter(
     (unit) => unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
   )
   if (!crew.length) return false
+  const tell = crew.some((unit) => unit.owner === controlledSide(state))
+  if (building.cryoRecover > 0) {
+    if (tell) pushToast(state, 'Cryo is recovering.')
+    return true
+  }
+  if (crew.length !== CRYO_SLOTS || picked.length !== CRYO_SLOTS) {
+    if (tell) pushToast(state, 'Select 4 Stalkers to freeze.')
+    return true
+  }
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS || cryoParty(state, building.id).length > 0) {
+    if (tell) pushToast(state, 'Cryo is full.')
+    return true
+  }
   for (const unit of crew) {
     noteProgress(unit)
     unit.order = { type: 'freeze', buildingId: building.id }
@@ -610,7 +628,7 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
     unit.scanning = false
     stopMoving(unit)
   }
-  if (crew.some((unit) => unit.owner === controlledSide(state))) {
+  if (tell) {
     const center = buildingCenter(building)
     state.pings.push({ x: center.x, y: center.y, life: 0.45, max: 0.45, color: '#9fd7e8' })
   }
@@ -618,10 +636,10 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
   return true
 }
 
-/** Put every Stalker frozen in this Cryo back on the ground beside it. */
-export function releaseCryo(state: MatchState, building: Building): void {
+/** Put every Stalker frozen in this Cryo back on the ground beside it. Returns how many left. */
+export function releaseCryo(state: MatchState, building: Building): number {
   const held = state.units.filter((unit) => unit.frozen === building.id && unit.hp > 0)
-  if (!held.length) return
+  if (!held.length) return 0
   const stats = BUILDING_STATS.cryo
   const center = buildingCenter(building)
   held.forEach((unit, index) => {
@@ -645,12 +663,14 @@ export function releaseCryo(state: MatchState, building: Building): void {
       unit.y = spot.y
     }
   })
+  return held.length
 }
 
 export function thawCryo(state: MatchState, buildingId: number): void {
   const building = buildingById(state, buildingId)
   if (!building || building.kind !== 'cryo' || building.hp <= 0) return
-  releaseCryo(state, building)
+  const released = releaseCryo(state, building)
+  if (released > 0) building.cryoRecover = CRYO_RECOVER
 }
 
 /** Spend dumps, and draw the same amount out of Storage, richest pile first. */

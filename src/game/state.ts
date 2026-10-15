@@ -318,6 +318,17 @@ export function cryoOccupants(state: MatchState, buildingId: number): number {
   return count
 }
 
+/** Stalkers walking into this Cryo who are not frozen yet. */
+export function cryoParty(state: MatchState, buildingId: number): Unit[] {
+  const party: Unit[] = []
+  for (const unit of state.units) {
+    const order = unit.order
+    if (unit.hp <= 0 || unit.frozen != null || unit.kind !== 'porter') continue
+    if (order?.type === 'freeze' && order.buildingId === buildingId) party.push(unit)
+  }
+  return party
+}
+
 export function blankSideStats(): SideStats {
   return {
     created: { porter: 0, pike: 0, howler: 0, drone: 0 },
@@ -387,6 +398,7 @@ export function makeBuilding(
     dropDumps: false,
     ruined: false,
     repairPaid: false,
+    cryoRecover: 0,
   }
   state.buildings.push(building)
   return building

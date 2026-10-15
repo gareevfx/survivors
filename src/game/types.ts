@@ -50,10 +50,12 @@ export function isCombatUnit(kind: UnitKind): boolean {
 }
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower' | 'cryo'
 
-/** Frozen Stalkers one Cryo can hold. */
+/** Frozen Stalkers one Cryo can hold. A freeze order sends this many at once. */
 export const CRYO_SLOTS = 4
-/** Dumps charged when a Stalker steps into a Cryo. */
+/** Dumps charged for each Stalker when the group of four enters. */
 export const CRYO_FREEZE_COST = 50
+/** Seconds a Cryo refuses Stalkers after a Thaw. */
+export const CRYO_RECOVER = 4 * 60
 export type TargetKind = 'unit' | 'building' | 'rock'
 
 export interface UnitStats {
@@ -208,7 +210,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   cryo: {
     label: 'Cryo',
-    blurb: '2×2 vault. Costs 250 dumps. Holds 4 Stalkers. Freezing one costs 50 dumps when it enters. A frozen Stalker leaves the map, cannot be attacked, and its 5-minute life is paused. Thaw, or destroying the Cryo, releases them beside it.',
+    blurb: '2×2 vault. Costs 250 dumps. Select 4 Stalkers to freeze them together. Freezing costs 50 dumps each (200 for the group) when they enter. A frozen Stalker leaves the map, cannot be attacked, and its 5-minute life is paused. Thaw releases them beside it, then the Cryo recovers for 4 minutes. Destroying the Cryo releases them too.',
     w: 2,
     h: 2,
     hp: 400,
@@ -341,6 +343,8 @@ export interface Building {
   ruined: boolean
   /** The repair cost has already been paid, so more Stalkers only add speed. */
   repairPaid: boolean
+  /** Seconds before this Cryo can freeze another group. Zero when it is ready. */
+  cryoRecover: number
 }
 
 /**

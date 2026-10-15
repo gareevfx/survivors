@@ -14,6 +14,8 @@ import {
   buildingCenter,
   buildingRect,
   buildingTarget,
+  cryoOccupants,
+  cryoParty,
   distToRect,
   getTarget,
   noteDumpsCollected,
@@ -101,6 +103,9 @@ export function step(state: MatchState, dt: number): void {
       building.dish += dt * (busy ? 0.95 : 0.42)
     }
     if (building.kind === 'tower') tryFireTower(state, building, dt)
+    if (building.kind === 'cryo' && building.cryoRecover > 0) {
+      building.cryoRecover = Math.max(0, building.cryoRecover - dt)
+    }
   }
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
@@ -216,42 +221,70 @@ function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { ty
     stopMoving(unit)
     return
   }
-  if (distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT) {
-    stopMoving(unit)
-    admitCryo(state, unit, building)
+  if (building.cryoRecover > 0) {
+    cancelCryoParty(state, building.id, 'Cryo is recovering.')
     return
   }
-  const stats = BUILDING_STATS.cryo
-  const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
-  if (!spot) return
-  const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - spot.x, (unit.goalY ?? 0) - spot.y) > 8
-  if (far) setUnitDestination(state, unit, spot.x, spot.y)
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS) {
+    cancelCryoParty(state, building.id, 'Cryo is full.')
+    return
+  }
+  const party = cryoParty(state, building.id).filter((member) => member.owner === building.owner)
+  if (party.length !== CRYO_SLOTS) {
+    cancelCryoParty(state, building.id, 'Freeze cancelled.')
+    return
+  }
+  const rect = buildingRect(building)
+  const arrived = party.every((member) => distToRect(member.x, member.y, rect) <= INTERACT)
+  if (!arrived) {
+    if (distToRect(unit.x, unit.y, rect) <= INTERACT) {
+      stopMoving(unit)
+      return
+    }
+    const stats = BUILDING_STATS.cryo
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    if (!spot) return
+    const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - spot.x, (unit.goalY ?? 0) - spot.y) > 8
+    if (far) setUnitDestination(state, unit, spot.x, spot.y)
+    return
+  }
+  admitCryoGroup(state, building, party)
 }
 
-function admitCryo(state: MatchState, unit: Unit, building: Building): void {
-  const held = state.units.filter((other) => other.frozen === building.id && other.hp > 0).length
-  if (held >= CRYO_SLOTS) {
+function cancelCryoParty(state: MatchState, buildingId: number, text: string): void {
+  let tell = false
+  for (const unit of state.units) {
+    const order = unit.order
+    if (order?.type !== 'freeze' || order.buildingId !== buildingId) continue
+    if (unit.owner === controlledSide(state)) tell = true
     unit.order = null
     stopMoving(unit)
-    if (unit.owner === controlledSide(state)) pushToast(state, 'Cryo is full.')
+  }
+  if (tell) pushToast(state, text)
+}
+
+/** Charge the group once, and only once every member is at the door. */
+function admitCryoGroup(state: MatchState, building: Building, party: Unit[]): void {
+  if (party.length !== CRYO_SLOTS || party.some((unit) => unit.frozen != null)) return
+  const cost = CRYO_FREEZE_COST * CRYO_SLOTS
+  if ((state.oreHeld[building.owner] ?? 0) < cost) {
+    cancelCryoParty(state, building.id, `Need ${cost} dumps to freeze.`)
     return
   }
-  if ((state.oreHeld[unit.owner] ?? 0) < CRYO_FREEZE_COST) {
-    unit.order = null
-    stopMoving(unit)
-    if (unit.owner === controlledSide(state)) pushToast(state, `Need ${CRYO_FREEZE_COST} dumps to freeze.`)
-    return
-  }
-  debitDumps(state, unit.owner, CRYO_FREEZE_COST)
+  debitDumps(state, building.owner, cost)
   const center = buildingCenter(building)
-  unit.frozen = building.id
-  unit.order = null
-  unit.idleAcquire = false
-  unit.scanning = false
-  unit.x = center.x
-  unit.y = center.y
-  stopMoving(unit)
-  state.selectedUnits = state.selectedUnits.filter((id) => id !== unit.id)
+  const ids = new Set<number>()
+  for (const member of party) {
+    ids.add(member.id)
+    member.frozen = building.id
+    member.order = null
+    member.idleAcquire = false
+    member.scanning = false
+    member.x = center.x
+    member.y = center.y
+    stopMoving(member)
+  }
+  state.selectedUnits = state.selectedUnits.filter((id) => !ids.has(id))
 }
 
 function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
