@@ -24,6 +24,7 @@ import {
   type MatchState,
   type PlayerId,
   type Rock,
+  type SideStats,
   type Target,
   type TargetKind,
   type Unit,
@@ -161,7 +162,7 @@ export function rockTarget(rock: Rock): Target {
 export function getTarget(state: MatchState, id: number, kind: TargetKind): Target | null {
   if (kind === 'unit') {
     const unit = unitById(state, id)
-    if (!unit || unit.hp <= 0) return null
+    if (!unit || unit.hp <= 0 || unit.frozen != null) return null
     return unitTarget(unit)
   }
   if (kind === 'rock') {
@@ -302,9 +303,64 @@ export function makeUnit(
     scanning: false,
     cloak: 0,
     age: 0,
+    frozen: null,
   }
   state.units.push(unit)
+  noteUnitCreated(state, owner, kind)
   return unit
+}
+
+export function cryoOccupants(state: MatchState, buildingId: number): number {
+  let count = 0
+  for (const unit of state.units) {
+    if (unit.frozen === buildingId && unit.hp > 0) count += 1
+  }
+  return count
+}
+
+/** Stalkers walking into this Cryo who are not frozen yet. */
+export function cryoParty(state: MatchState, buildingId: number): Unit[] {
+  const party: Unit[] = []
+  for (const unit of state.units) {
+    const order = unit.order
+    if (unit.hp <= 0 || unit.frozen != null || unit.kind !== 'porter') continue
+    if (order?.type === 'freeze' && order.buildingId === buildingId) party.push(unit)
+  }
+  return party
+}
+
+export function blankSideStats(): SideStats {
+  return {
+    created: { porter: 0, pike: 0, howler: 0, drone: 0 },
+    lost: { porter: 0, pike: 0, howler: 0, drone: 0 },
+    dumps: 0,
+    silos: 0,
+  }
+}
+
+export function noteUnitCreated(state: MatchState, owner: number, kind: UnitKind): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.created[kind] += 1
+}
+
+export function noteUnitLost(state: MatchState, owner: number, kind: UnitKind): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.lost[kind] += 1
+}
+
+export function noteDumpsCollected(state: MatchState, owner: number, amount: number): void {
+  if (amount <= 0) return
+  const row = state.stats[owner]
+  if (!row) return
+  row.dumps += amount
+}
+
+export function noteSiloCaptured(state: MatchState, owner: number): void {
+  const row = state.stats[owner]
+  if (!row) return
+  row.silos += 1
 }
 
 export function makeBuilding(
@@ -342,6 +398,8 @@ export function makeBuilding(
     dropDumps: false,
     ruined: false,
     repairPaid: false,
+    cryo: false,
+    cryoRecover: 0,
   }
   state.buildings.push(building)
   return building
@@ -417,6 +475,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     supplyUsed: Array.from({ length: playerCount }, () => 0),
     supplyCap: Array.from({ length: playerCount }, () => 0),
     time: 0,
+    stats: Array.from({ length: playerCount }, () => blankSideStats()),
     paused: false,
     speed: 1,
     outcome: null,
@@ -440,6 +499,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     playerAiAttacking: false,
     playerAiNext: 'pike',
     underAttackCd: 0,
+    gridAt: Array.from({ length: playerCount }, () => -1),
     events: [],
     tutorial: true,
   }

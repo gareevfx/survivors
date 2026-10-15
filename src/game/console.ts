@@ -1,5 +1,5 @@
 import { clearHands } from './control'
-import { pushToast, recomputeSupply } from './state'
+import { noteUnitLost, pushToast, recomputeSupply } from './state'
 import type { MatchState } from './types'
 import { clearFog, restoreFog } from './vision'
 
@@ -97,7 +97,10 @@ export function runCommand(state: MatchState, raw: string): boolean {
     return true
   }
   if (text === 'freedom') {
-    for (const unit of state.units) unit.hp = 0
+    for (const unit of state.units) {
+      unit.hp = 0
+      noteUnitLost(state, unit.owner, unit.kind)
+    }
     const any = state.units.length > 0
     state.units = []
     state.selectedUnits = []

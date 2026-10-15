@@ -141,6 +141,7 @@ function viewerOwns(state: MatchState, owner: PlayerId): boolean {
 }
 
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
+  if (unit.frozen != null) return false
   if (unit.cloak > 0 && !viewerOwns(state, unit.owner)) return false
   if (!state.bothCam && !state.enemyCam && unit.owner === controlledSide(state)) return true
   if (!state.bothCam && state.enemyCam && unit.owner !== 0) return true
@@ -177,6 +178,7 @@ export function depositKnown(state: MatchState, owner: PlayerId, tx: number, ty:
 }
 
 export function unitSeen(state: MatchState, unit: Unit): boolean {
+  if (unit.frozen != null) return false
   if (unit.cloak > 0 && unit.owner !== 0) return false
   if (unit.owner === 0) return true
   return tileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
@@ -195,7 +197,7 @@ export function buildingSeen(state: MatchState, building: Building): boolean {
 
 function paintSight(state: MatchState, owner: PlayerId, visible: Uint8Array, explored: Uint8Array): void {
   for (const unit of state.units) {
-    if (unit.owner !== owner || unit.hp <= 0) continue
+    if (unit.owner !== owner || unit.hp <= 0 || unit.frozen != null) continue
     reveal(state, visible, explored, unit.x, unit.y, UNIT_STATS[unit.kind].sight)
   }
   for (const building of state.buildings) {

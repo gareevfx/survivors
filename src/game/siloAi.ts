@@ -1,8 +1,8 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandHarvestOrAttack, commandMove, commandRepair, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
-import { buildingCenter, buildingRect, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, isWalkable, rockAt, rockById } from './state'
+import { BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
@@ -110,7 +110,7 @@ function tileBit(state: MatchState, grid: Uint8Array, tx: number, ty: number): b
 }
 
 function idlePorter(unit: Unit, owner: PlayerId): boolean {
-  return unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && !unit.order
+  return unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order
 }
 
 /** Unexplored ground this close to the scout is searched first, so new minerals are found before a long hunt. */
@@ -118,6 +118,15 @@ const SCOUT_LOCAL = 16 * TILE
 /** A Drone stays this far from a Bike it can see. A Bike's shot reaches 46. */
 export const DRONE_BIKE_AVOID = 80
 const DRONE_KEEP = 2
+/** Hovers that fill one Grid. Surplus dumps train up to this many. */
+const HOVER_GRID = 10
+/**
+ * Dumps past the next factory (160) and a gorilla (100).
+ * At this bank the side buys Hovers toward a Grid instead of another factory.
+ */
+const HOVER_SURPLUS = 500
+/** Living Stalkers at or below this count are few enough to raise a Cryo. Zero does not build one. */
+const CRYO_LOW = 3
 
 /**
  * Pick the next patch of fog to enter.
@@ -258,13 +267,20 @@ function droneGoal(
   return best
 }
 
-/** Every living Drone stays on a scout flight. A second Drone takes a different patch. */
+/** Seconds after a Grid order before this side may hide the flight again. The 45s cloak sits inside it. */
+const GRID_REUSE = 90
+/** Working Stalkers kept on the map. Anyone past this can be frozen as insurance. */
+const CRYO_KEEP_ACTIVE = 4
+
+/** Every living Drone stays on a scout flight. A second Drone takes a different patch. Ten or more may take the Grid instead. */
 function dispatchDrones(state: MatchState, side: Brain): void {
   const drones = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
   if (!drones.length) return
+  if (issueHoverGrid(state, side, drones)) return
   const bikes = seenEnemyBikes(state, side)
   const reserved: Array<{ x: number; y: number }> = []
   for (const drone of drones) {
+    if (drone.cloak > 0) continue
     const order = drone.order
     const traveling = order?.type === 'move' && Math.hypot(drone.x - order.x, drone.y - order.y) > 80
     const threatened =
@@ -303,7 +319,13 @@ function claimScout(state: MatchState, side: Brain, idle: Unit[]): Unit | null {
     )
     if (bike) return bike
   }
-  if (current?.kind === 'porter' && porters.length >= 2 && current.cargo <= 0 && current.order?.type !== 'construct') {
+  if (
+    current?.kind === 'porter' &&
+    porters.length >= 2 &&
+    current.cargo <= 0 &&
+    current.order?.type !== 'construct' &&
+    current.order?.type !== 'freeze'
+  ) {
     return current
   }
   if (idle.length >= 2 && porters.length >= 2) return idle[idle.length - 1] ?? null
@@ -815,30 +837,156 @@ export function updateSiloAi(state: MatchState, dt: number): void {
   runSide(state, 0)
 }
 
-function dronesToTrain(state: MatchState, side: Brain): number {
-  let living = 0
+function hoverRoster(state: MatchState, owner: PlayerId): number {
+  let count = 0
   for (const unit of state.units) {
-    if (unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0) living += 1
+    if (unit.owner === owner && unit.kind === 'drone' && unit.hp > 0) count += 1
   }
-  let queued = 0
+  for (const building of state.buildings) {
+    if (building.owner !== owner || building.hp <= 0) continue
+    for (const job of building.queue) if (job.kind === 'drone') count += 1
+  }
+  return count
+}
+
+/** Two factories and three pillars are up, and Cells are not about to run out. */
+function baseReadyForHovers(state: MatchState, side: Brain): boolean {
+  const room = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
+  if (room <= 2) return false
+  let yards = 0
+  let towers = 0
   for (const building of state.buildings) {
     if (building.owner !== side.owner || building.hp <= 0) continue
-    for (const job of building.queue) if (job.kind === 'drone') queued += 1
+    if (building.kind === 'yard') yards += 1
+    if (building.kind === 'tower') towers += 1
   }
-  const have = living + queued
-  if (have >= DRONE_KEEP) return 0
-  if (have === 0) return 1
-  let combat = 0
+  return yards >= 2 && towers >= 3
+}
+
+function dronesToTrain(state: MatchState, side: Brain): number {
+  const have = hoverRoster(state, side.owner)
+  if (have < DRONE_KEEP) {
+    if (have === 0) return 1
+    let combat = 0
+    for (const unit of state.units) {
+      if (unit.owner !== side.owner || unit.hp <= 0) continue
+      if (unit.kind === 'pike' || unit.kind === 'howler') combat += 1
+    }
+    return combat >= 2 ? 1 : 0
+  }
+  if (have >= HOVER_GRID || !baseReadyForHovers(state, side)) return 0
+  if ((state.oreHeld[side.owner] ?? 0) < HOVER_SURPLUS) return 0
+  return HOVER_GRID - have
+}
+
+/**
+ * Ten Hovers cover the map and turn invisible. Used to scout while much of the
+ * map is still dark, or when the flight or the Silo is under attack. Not again
+ * until the cooldown has run, so they are not hidden forever.
+ */
+function issueHoverGrid(state: MatchState, side: Brain, drones: Unit[]): boolean {
+  if (drones.length < HOVER_GRID) return false
+  const last = state.gridAt[side.owner] ?? -1
+  if (last >= 0 && state.time - last < GRID_REUSE) return false
+  if (!flightUnderAttack(state, side, drones) && !wantsGridScout(side)) return false
+  sendHoverGrid(state, drones)
+  const sent = drones.every((unit) => unit.cloak > 0)
+  if (!sent) return false
+  state.gridAt[side.owner] = state.time
+  return true
+}
+
+function flightUnderAttack(state: MatchState, side: Brain, drones: Unit[]): boolean {
+  const bikes = seenEnemyBikes(state, side)
+  if (drones.some((drone) => nearBike(bikes, drone.x, drone.y))) return true
+  const keep = ownKeep(state, side.owner)
+  if (!keep) return false
+  const home = buildingCenter(keep)
+  const reach = BUILDING_STATS.keep.sight
   for (const unit of state.units) {
-    if (unit.owner !== side.owner || unit.hp <= 0) continue
-    if (unit.kind === 'pike' || unit.kind === 'howler') combat += 1
+    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone' || unit.cloak > 0) continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    if (Math.hypot(unit.x - home.x, unit.y - home.y) <= reach) return true
   }
-  return combat >= 2 ? 1 : 0
+  return false
+}
+
+/** Enough of this side's map is still black that a Grid is worth a scout pass. */
+function wantsGridScout(side: Brain): boolean {
+  let dark = 0
+  let samples = 0
+  const grid = side.explored
+  for (let index = 0; index < grid.length; index += 8) {
+    samples += 1
+    if (grid[index] === 0) dark += 1
+  }
+  return samples > 0 && dark / samples >= 0.2
+}
+
+/**
+ * Freeze a group of four spare Stalkers, or defrost when the crew is too small to work.
+ * Four stay on the map, so the order waits until eight are active and the bank can pay 200.
+ * A Cryo that is still recovering accepts no one.
+ */
+function tendCryo(state: MatchState, side: Brain): void {
+  const cryo = state.buildings.find(
+    (building) => building.owner === side.owner && building.kind === 'keep' && building.cryo && building.complete && building.hp > 0,
+  )
+  if (!cryo) return
+  const active = state.units.filter(
+    (unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null,
+  )
+  const held = cryoOccupants(state, cryo.id)
+  if (held > 0 && active.length < 2) {
+    thawCryo(state, cryo.id)
+    return
+  }
+  if (cryo.cryoRecover > 0) return
+  if (held > 0 || cryoParty(state, cryo.id).length > 0) return
+  if (active.length < CRYO_KEEP_ACTIVE + CRYO_SLOTS) return
+  if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST * CRYO_SLOTS) return
+  const spares = active.filter(
+    (unit) =>
+      unit.id !== side.scout &&
+      unit.cargo <= 0 &&
+      unit.order?.type !== 'construct' &&
+      unit.order?.type !== 'repair' &&
+      unit.order?.type !== 'freeze',
+  )
+  if (spares.length < CRYO_SLOTS) return
+  commandFreeze(
+    state,
+    spares.slice(0, CRYO_SLOTS).map((unit) => unit.id),
+    cryo.id,
+  )
+}
+
+function livingStalkers(state: MatchState, owner: PlayerId): number {
+  let count = 0
+  for (const unit of state.units) {
+    if (unit.owner === owner && unit.kind === 'porter' && unit.hp > 0) count += 1
+  }
+  return count
+}
+
+/** A Cryo on this Silo, and only after the Stalker count has dropped low. */
+function cryoWanted(state: MatchState, side: Brain): boolean {
+  if ((state.oreHeld[side.owner] ?? 0) < CRYO_COST) return false
+  const keep = ownKeep(state, side.owner)
+  if (!keep?.complete || keep.cryo) return false
+  const stalkers = livingStalkers(state, side.owner)
+  return stalkers > 0 && stalkers <= CRYO_LOW
+}
+
+/** Surplus dumps fill a Hover Grid before another Factory goes up. */
+function bankingHovers(state: MatchState, side: Brain, ore: number): boolean {
+  return ore >= HOVER_SURPLUS && hoverRoster(state, side.owner) < HOVER_GRID
 }
 
 function runSide(state: MatchState, owner: PlayerId): void {
   const side = brain(state, owner)
   dispatchDrones(state, side)
+  tendCryo(state, side)
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const idle = porters.filter((unit) => idlePorter(unit, side.owner))
   const scout = claimScout(state, side, idle)
@@ -883,7 +1031,10 @@ function runSide(state: MatchState, owner: PlayerId): void {
       if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
         placeChartedNearKeep(state, side, 'yard')
       }
-    } else if (ore >= BUILDING_STATS.yard.cost) {
+    } else if (cryoWanted(state, side)) {
+      const vaultKeep = ownKeep(state, side.owner)
+      if (vaultKeep) installCryo(state, vaultKeep.id)
+    } else if (ore >= BUILDING_STATS.yard.cost && !bankingHovers(state, side, ore)) {
       placeChartedNearKeep(state, side, 'yard')
     }
   }
@@ -1105,7 +1256,9 @@ function repairPorter(state: MatchState, side: Brain, x: number, y: number): Uni
 function scoutUnchartedSite(state: MatchState, side: Brain): void {
   const chart = side.chart
   if (!chart) return
-  const drone = state.units.find((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
+  const drone = state.units.find(
+    (unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0 && unit.cloak <= 0,
+  )
   if (!drone) return
   const order = drone.order
   if (order?.type === 'move' && Math.hypot(order.x - chart.x, order.y - chart.y) < 48) return

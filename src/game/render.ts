@@ -1,7 +1,7 @@
 import { drawAnimal } from './animalArt'
 import type { Camera } from './camera'
 import { controlledSide } from './control'
-import { buildingCenter, buildingRect, getTarget, placementAllowed, sideKeep } from './state'
+import { buildingCenter, buildingRect, cryoOccupants, getTarget, placementAllowed, sideKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
@@ -9,6 +9,7 @@ import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
+import { drawSiloCryoVessels } from './cryoArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
 import { drawGraveSprite, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -19,6 +20,7 @@ import {
   type MatchMode,
   ORE_NODE_AMOUNT,
   PLAYER_COLOR,
+  CRYO_RECOVER,
   ROCK_HP,
   TILE,
   TREE_HP,
@@ -383,6 +385,14 @@ function drawPlacement(
   ctx.restore()
 }
 
+/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
+function formatRecover(time: number): string {
+  const seconds = Math.max(0, Math.ceil(time))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
 function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building: Building): void {
   const stats = BUILDING_STATS[building.kind]
   const x = building.tx * TILE
@@ -392,7 +402,12 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
   const color = building.ruined ? '#6a645c' : (PLAYER_COLOR[building.owner] ?? PLAYER_COLOR[0])
   const selected = state.selectedBuilding === building.id
   ctx.save()
-  if (building.kind !== 'keep' && building.kind !== 'yard' && building.kind !== 'silo' && building.kind !== 'tower') {
+  if (
+    building.kind !== 'keep' &&
+    building.kind !== 'yard' &&
+    building.kind !== 'silo' &&
+    building.kind !== 'tower'
+  ) {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.2)'
     ctx.beginPath()
     ctx.ellipse(x + w * 0.58, y + h * 0.7, w * 0.42, h * 0.14, 0, 0, Math.PI * 2)
@@ -439,6 +454,13 @@ function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building
       (unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id && unit.hp > 0,
     )
     ctx.fillText(crew ? 'Raising' : 'Paused', x + w / 2, y - 12)
+  } else if (building.kind === 'keep' && building.cryo && building.cryoRecover > 0) {
+    const remain = building.cryoRecover
+    bar(ctx, x + 8, y - 8, w - 16, 1 - remain / CRYO_RECOVER, '#9fd7e8')
+    ctx.fillStyle = '#f4e7bf'
+    ctx.font = '10px "Segoe UI", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`Recovery ${formatRecover(remain)}`, x + w / 2, y - 12)
   } else if (selected || building.hp < stats.hp || building.hitFlash > 0) {
     bar(ctx, x + 8, y - 7, w - 16, building.hp / stats.hp, hpColor(building.hp / stats.hp))
   }
@@ -479,6 +501,9 @@ function drawKeep(
     smoke: state.time,
   })
   ctx.restore()
+  if (building.cryo && !building.ruined) {
+    drawSiloCryoVessels(ctx, x, y, color, cryoOccupants(state, building.id))
+  }
   ctx.imageSmoothingEnabled = false
 }
 

@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, playerHovers, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandFreezeAuto, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -9,15 +9,19 @@ import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, buildingCenter, unitById } from '../game/state'
+import { buildingById, buildingCenter, cryoOccupants, cryoParty, unitById } from '../game/state'
 import {
   BUILDING_STATS,
+  CRYO_COST,
+  CRYO_FREEZE_COST,
+  CRYO_SLOTS,
   PLAYER_COLOR,
   PLAYER_NAME,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
   GRID_CLOAK_SECONDS,
+  UNIT_KINDS,
   UNIT_STATS,
   type Building,
   type BuildingKind,
@@ -48,6 +52,7 @@ interface Cmd {
 
 let commandKey = ''
 let sideKey = ''
+let endKey = ''
 
 export function syncHud(state: MatchState, actions: HudActions): void {
   const ore = document.querySelector('#ore')
@@ -67,6 +72,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const endTitle = document.querySelector('#end-title')
   const endCopy = document.querySelector('#end-copy')
   const endSeed = document.querySelector('#end-seed')
+  const endStats = document.querySelector('#end-stats')
   const sides = document.querySelector('#sides')
   const side = controlledSide(state)
   const held = state.oreHeld[side] ?? 0
@@ -83,7 +89,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   }
   if (clock) clock.textContent = formatTime(state.time)
   const idleCount = state.units.filter(
-    (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && !unit.order,
+    (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
@@ -146,6 +152,18 @@ export function syncHud(state: MatchState, actions: HudActions): void {
           : `Your Silo is gone. ${PLAYER_NAME[1]} takes Surface.`
     }
     endSeed.textContent = `Field ${state.seed}`
+    if (endStats) {
+      if (state.outcome == null) {
+        endKey = ''
+        if (endStats.innerHTML) endStats.innerHTML = ''
+      } else {
+        const html = endStatsHtml(state)
+        if (html !== endKey) {
+          endKey = html
+          endStats.innerHTML = html
+        }
+      }
+    }
   }
 
   syncSideSwitch(state)
@@ -184,6 +202,28 @@ function syncSideSwitch(state: MatchState): void {
 export function resetHudCache(): void {
   commandKey = '\0'
   sideKey = '\0'
+  endKey = ''
+}
+
+export function endStatsHtml(state: MatchState): string {
+  const kindHeads = UNIT_KINDS.map((kind) => `<th scope="col">${escapeHtml(UNIT_STATS[kind].label)}</th>`).join('')
+  const rows = Array.from({ length: state.playerCount }, (_, owner) => {
+    const row = state.stats[owner]
+    const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
+    const color = swatchColor(PLAYER_COLOR[owner] ?? '#ffffff')
+    const created = UNIT_KINDS.map((kind) => row?.created[kind] ?? 0)
+    const lost = UNIT_KINDS.map((kind) => row?.lost[kind] ?? 0)
+    return `<tr class="${owner === 0 ? 'you' : ''}"><th scope="row"><span class="end-side"><i style="background:${color}"></i>${escapeHtml(name)}</span></th>${statCells(created, true)}${statCells(lost, true)}<td class="group">${row?.dumps ?? 0}</td><td class="group">${row?.silos ?? 0}</td></tr>`
+  }).join('')
+  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(state.time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="4" scope="colgroup">Created</th><th class="group" colspan="4" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
+}
+
+function statCells(values: number[], grouped: boolean): string {
+  return values.map((value, index) => `<td${grouped && index === 0 ? ' class="group"' : ''}>${value}</td>`).join('')
+}
+
+function swatchColor(color: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#ffffff'
 }
 
 function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
@@ -246,7 +286,9 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'yard', actions),
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
+        cryoButton(state, building),
       ]
+      if (building.cryo) cmds.push(defrostButton(state, building))
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
     }
@@ -322,11 +364,34 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       })
     }
     if (porters) {
-      cmds.push(repairButton(state), placeButton(state, 'yard', actions), placeButton(state, 'silo', actions), placeButton(state, 'tower', actions))
+      cmds.push(
+        repairButton(state),
+        placeButton(state, 'yard', actions),
+        placeButton(state, 'silo', actions),
+        placeButton(state, 'tower', actions),
+      )
     }
     return cmds
   }
   return []
+}
+
+/** Labels on the command bar for the current selection. Smoke reads the Cryo and Defrost states from here. */
+export function commandSnapshot(state: MatchState): Array<{ label: string; detail: string; disabled: boolean; title: string }> {
+  const actions: HudActions = {
+    armPlace() {},
+    armMove() {},
+    armAttack() {},
+    dismissHint() {},
+    selectIdle() {},
+    restart() {},
+  }
+  return buildCommands(state, actions).map((cmd) => ({
+    label: cmd.label,
+    detail: cmd.detail ?? '',
+    disabled: cmd.disabled,
+    title: cmd.title,
+  }))
 }
 
 function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
@@ -340,13 +405,68 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
   }
 }
 
+function cryoUse(state: MatchState, building: Building): { recovering: boolean; occupied: boolean; held: number } {
+  const held = cryoOccupants(state, building.id)
+  const inbound = cryoParty(state, building.id).length > 0
+  return { recovering: building.cryoRecover > 0, occupied: held > 0 || inbound, held }
+}
+
+function cryoButton(state: MatchState, building: Building): Cmd {
+  if (!building.cryo) {
+    const afford = (state.oreHeld[controlledSide(state)] ?? 0) >= CRYO_COST
+    return {
+      id: 'cryo',
+      label: 'Cryo',
+      detail: `${CRYO_COST} dumps`,
+      title: afford
+        ? 'Add four glass vessels to this Silo, once. Select 4 Stalkers and send them here. Freezing costs 50 dumps each, 200 for the group. Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.'
+        : `Need ${CRYO_COST} dumps`,
+      disabled: !afford,
+      run: () => {
+        const error = installCryo(state, building.id)
+        if (error) state.toasts.push({ text: error, life: 3.5 })
+      },
+    }
+  }
+  const use = cryoUse(state, building)
+  const send =
+    'Send the 4 Stalkers with the most health remaining to this Silo. When health matches, the nearest ones go. Freezing costs 200 dumps for the group when they arrive. Selecting 4 Stalkers and sending them still works.'
+  const countdown = formatRecover(building.cryoRecover)
+  return {
+    id: 'cryo',
+    label: 'Cryo',
+    detail: use.recovering ? `Recovery ${countdown}` : `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
+    title: use.recovering
+      ? `The Cryo is recovering for ${countdown}.`
+      : use.occupied
+        ? 'Stalkers are frozen or already on their way. Defrost releases the ones inside.'
+        : send,
+    disabled: use.recovering || use.occupied,
+    run: () => {
+      commandFreezeAuto(state, building.id)
+    },
+  }
+}
+
+function defrostButton(state: MatchState, building: Building): Cmd {
+  const use = cryoUse(state, building)
+  return {
+    id: 'defrost',
+    label: 'Defrost',
+    detail: use.held ? `${use.held} inside` : 'empty',
+    title: `Defrost releases the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
+    disabled: use.recovering || !use.occupied,
+    run: () => thawCryo(state, building.id),
+  }
+}
+
 function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions): Cmd {
   const stats = BUILDING_STATS[kind]
   const afford = (state.oreHeld[controlledSide(state)] ?? 0) >= stats.cost
   return {
     id: `place-${kind}`,
     label: stats.label,
-    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : 'T',
+    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : kind === 'tower' ? 'T' : 'O',
     detail: `${stats.cost} dumps`,
     title: afford ? stats.blurb : `Need ${stats.cost} dumps`,
     disabled: !afford,
@@ -466,7 +586,7 @@ function nearestPlayerPorter(state: MatchState, building: Building): { id: numbe
   let best: { id: number } | undefined
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== controlledSide(state) || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== controlledSide(state) || unit.kind !== 'porter' || unit.hp <= 0 || unit.frozen != null) continue
     const distance = Math.hypot(unit.x - center.x, unit.y - center.y)
     if (distance < bestD) {
       bestD = distance
@@ -521,8 +641,10 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
-      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
+      ${building.kind === 'keep' ? '' : `<p class="lore">${escapeHtml(loreBody(stats.label))}</p>`}
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
+      ${building.kind === 'keep' && building.cryo ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
+      ${building.kind === 'keep' && building.cryo && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
@@ -615,6 +737,21 @@ function formatTime(time: number): string {
   const min = Math.floor(seconds / 60)
   const rem = seconds % 60
   return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
+/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
+function formatRecover(time: number): string {
+  const seconds = Math.max(0, Math.ceil(time))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${min}:${rem.toString().padStart(2, '0')}`
+}
+
+function formatDuration(time: number): string {
+  const seconds = Math.max(0, Math.floor(time))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${String(min).padStart(2, '0')}:${rem.toString().padStart(2, '0')}`
 }
 
 function escapeHtml(text: string): string {

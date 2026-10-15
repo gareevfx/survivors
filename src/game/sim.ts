@@ -2,7 +2,7 @@ import { updateAnimals } from './animals'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateScanners } from './scanner'
-import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter } from './commands'
+import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter, releaseCryo } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
@@ -14,8 +14,14 @@ import {
   buildingCenter,
   buildingRect,
   buildingTarget,
+  cryoOccupants,
+  cryoParty,
   distToRect,
   getTarget,
+  noteDumpsCollected,
+  noteSiloCaptured,
+  noteUnitCreated,
+  noteUnitLost,
   pushToast,
   rebuildBlocked,
   recomputeSupply,
@@ -29,6 +35,8 @@ import {
   CHASE_BREAK,
   GATHER_AMOUNT,
   GATHER_TIME,
+  CRYO_FREEZE_COST,
+  CRYO_SLOTS,
   INTERACT,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
@@ -53,9 +61,13 @@ export function step(state: MatchState, dt: number): void {
   updateSiloAi(state, dt)
   revealCloakedByScanners(state)
 
-  for (const unit of state.units) refreshUnit(state, unit, dt)
+  for (const unit of state.units) {
+    if (unit.frozen == null) refreshUnit(state, unit, dt)
+  }
   releaseFromTerrain(state)
-  for (const unit of state.units) moveUnit(state, unit, dt)
+  for (const unit of state.units) {
+    if (unit.frozen == null) moveUnit(state, unit, dt)
+  }
   separate(state)
   releaseFromTerrain(state)
   revealCloakedByScanners(state)
@@ -69,6 +81,7 @@ export function step(state: MatchState, dt: number): void {
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.cloak > 0) unit.cloak = Math.max(0, unit.cloak - dt)
+    if (unit.frozen != null) continue
     if (unit.kind === 'porter' && unit.hp > 0) {
       const lived = unit.age
       unit.age += dt
@@ -90,6 +103,9 @@ export function step(state: MatchState, dt: number): void {
       building.dish += dt * (busy ? 0.95 : 0.42)
     }
     if (building.kind === 'tower') tryFireTower(state, building, dt)
+    if (building.kind === 'keep' && building.cryo && building.cryoRecover > 0) {
+      building.cryoRecover = Math.max(0, building.cryoRecover - dt)
+    }
   }
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
@@ -190,7 +206,85 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
     return
   }
 
+  if (order.type === 'freeze') {
+    refreshFreeze(state, unit, order)
+    return
+  }
+
   refreshConstruct(state, unit, order)
+}
+
+function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { type: 'freeze' }>): void {
+  const building = buildingById(state, order.buildingId)
+  if (!building || building.hp <= 0 || building.kind !== 'keep' || !building.cryo || building.owner !== unit.owner || !building.complete) {
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  if (building.cryoRecover > 0) {
+    cancelCryoParty(state, building.id, 'Cryo is recovering.')
+    return
+  }
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS) {
+    cancelCryoParty(state, building.id, 'Cryo is full.')
+    return
+  }
+  const party = cryoParty(state, building.id).filter((member) => member.owner === building.owner)
+  if (party.length !== CRYO_SLOTS) {
+    cancelCryoParty(state, building.id, 'Freeze cancelled.')
+    return
+  }
+  const rect = buildingRect(building)
+  const arrived = party.every((member) => distToRect(member.x, member.y, rect) <= INTERACT)
+  if (!arrived) {
+    if (distToRect(unit.x, unit.y, rect) <= INTERACT) {
+      stopMoving(unit)
+      return
+    }
+    const stats = BUILDING_STATS.keep
+    const spot = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    if (!spot) return
+    const far = unit.goalX == null || Math.hypot((unit.goalX ?? 0) - spot.x, (unit.goalY ?? 0) - spot.y) > 8
+    if (far) setUnitDestination(state, unit, spot.x, spot.y)
+    return
+  }
+  admitCryoGroup(state, building, party)
+}
+
+function cancelCryoParty(state: MatchState, buildingId: number, text: string): void {
+  let tell = false
+  for (const unit of state.units) {
+    const order = unit.order
+    if (order?.type !== 'freeze' || order.buildingId !== buildingId) continue
+    if (unit.owner === controlledSide(state)) tell = true
+    unit.order = null
+    stopMoving(unit)
+  }
+  if (tell) pushToast(state, text)
+}
+
+/** Charge the group once, and only once every member is at the door. */
+function admitCryoGroup(state: MatchState, building: Building, party: Unit[]): void {
+  if (party.length !== CRYO_SLOTS || party.some((unit) => unit.frozen != null)) return
+  const cost = CRYO_FREEZE_COST * CRYO_SLOTS
+  if ((state.oreHeld[building.owner] ?? 0) < cost) {
+    cancelCryoParty(state, building.id, `Need ${cost} dumps to freeze.`)
+    return
+  }
+  debitDumps(state, building.owner, cost)
+  const center = buildingCenter(building)
+  const ids = new Set<number>()
+  for (const member of party) {
+    ids.add(member.id)
+    member.frozen = building.id
+    member.order = null
+    member.idleAcquire = false
+    member.scanning = false
+    member.x = center.x
+    member.y = center.y
+    stopMoving(member)
+  }
+  state.selectedUnits = state.selectedUnits.filter((id) => !ids.has(id))
 }
 
 function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
@@ -569,7 +663,7 @@ function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
 /** A ground unit inside a blocked tile, or clipping one, is moved to the nearest free cell. */
 function releaseFromTerrain(state: MatchState): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0 || unit.kind === 'drone') continue
+    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null) continue
     const radius = UNIT_STATS[unit.kind].radius
     if (!circleHitsSolid(state, unit.x, unit.y, radius)) continue
     const originTx = Math.floor(unit.x / TILE)
@@ -615,7 +709,7 @@ function steerAround(
   let ax = 0
   let ay = 0
   for (const other of state.units) {
-    if (other.id === unit.id || other.hp <= 0) continue
+    if (other.id === unit.id || other.hp <= 0 || other.frozen != null) continue
     if ((other.kind === 'drone') !== flying) continue
     if (closingOn(unit, other.id)) continue
     const ox = other.x - unit.x
@@ -653,10 +747,10 @@ function separate(state: MatchState): void {
   const units = state.units
   for (let i = 0; i < units.length; i++) {
       const a = units[i]
-    if (!a || a.hp <= 0 || a.kind === 'drone') continue
+    if (!a || a.hp <= 0 || a.kind === 'drone' || a.frozen != null) continue
     for (let j = i + 1; j < units.length; j++) {
       const b = units[j]
-      if (!b || b.hp <= 0 || b.kind === 'drone') continue
+      if (!b || b.hp <= 0 || b.kind === 'drone' || b.frozen != null) continue
       const dx = b.x - a.x
       const dy = b.y - a.y
       const distance = Math.hypot(dx, dy) || 0.001
@@ -758,6 +852,7 @@ function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { typ
     drop.stock += moved
   }
   state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + moved
+  noteDumpsCollected(state, unit.owner, moved)
   unit.cargo -= moved
   if (unit.owner === 0) state.tutorial = false
   state.particles.push({
@@ -975,8 +1070,10 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     scanning: false,
     cloak: 0,
     age: 0,
+    frozen: null,
   }
   state.units.push(unit)
+  noteUnitCreated(state, building.owner, kind)
   if (Math.hypot(building.rallyX - spot.x, building.rallyY - spot.y) > 20) {
     unit.order = { type: 'move', x: building.rallyX, y: building.rallyY }
     setUnitDestination(state, unit, building.rallyX, building.rallyY)
@@ -1084,7 +1181,7 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
   let best: Target | null = null
   let bestD = Infinity
   for (const unit of state.units) {
-    if (unit.owner === building.owner || unit.hp <= 0) continue
+    if (unit.owner === building.owner || unit.hp <= 0 || unit.frozen != null) continue
     const target = unitTarget(unit)
     if (!towerEngages(state, building, origin, target)) continue
     const distance = Math.hypot(target.x - origin.x, target.y - origin.y)
@@ -1220,7 +1317,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
-    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0) continue
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0 || other.frozen != null) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
     if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
     if (other.kind === 'porter' && stalkerCovered(state, other)) continue
@@ -1281,7 +1378,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   }
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
-    if (!unit || unit.hp <= 0 || unit.cloak > 0) return
+    if (!unit || unit.hp <= 0 || unit.cloak > 0 || unit.frozen != null) return
     const source = unitById(state, sourceId)
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'porter') {
@@ -1329,6 +1426,7 @@ function cleanup(state: MatchState): void {
   if (deadUnits.length) {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
+      noteUnitLost(state, unit.owner, unit.kind)
       burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
       state.events.push({ type: 'death' })
     }
@@ -1363,7 +1461,12 @@ function cleanup(state: MatchState): void {
     }
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
     state.events.push({ type: 'death' })
-    if (building.kind === 'keep') fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
+    if (building.kind === 'keep') {
+      releaseCryo(state, building)
+      building.cryo = false
+      building.cryoRecover = 0
+      fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
+    }
   }
   for (const building of deadBuildings) {
     if (building.kind !== 'keep') continue
@@ -1493,6 +1596,7 @@ function captorFor(state: MatchState, victim: number, struckBy: number | null): 
 function captureSide(state: MatchState, victim: number, captor: number): void {
   if (state.eliminated[victim]) return
   state.eliminated[victim] = true
+  noteSiloCaptured(state, captor)
   for (const building of state.buildings) {
     if (building.owner !== victim || building.hp <= 0) continue
     building.owner = captor
@@ -1577,6 +1681,9 @@ function dropStoragePile(state: MatchState, building: Building): void {
 function eliminateSide(state: MatchState, owner: number): void {
   if (state.eliminated[owner]) return
   state.eliminated[owner] = true
+  for (const unit of state.units) {
+    if (unit.owner === owner) noteUnitLost(state, owner, unit.kind)
+  }
   const buildingIds = new Set(state.buildings.filter((building) => building.owner === owner).map((building) => building.id))
   const unitIds = new Set(state.units.filter((unit) => unit.owner === owner).map((unit) => unit.id))
   state.buildings = state.buildings.filter((building) => building.owner !== owner)
@@ -1658,7 +1765,7 @@ const STUCK_SHIFT = 8
 
 function watchStuckUnits(state: MatchState, dt: number): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0) continue
+    if (unit.hp <= 0 || unit.frozen != null) continue
     if (unit.avoidNode >= 0 && state.time >= unit.avoidUntil) unit.avoidNode = -1
     if (!unit.order || workingInPlace(state, unit)) {
       noteProgress(unit)

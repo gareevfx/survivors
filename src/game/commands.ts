@@ -6,6 +6,8 @@ import {
   buildingCenter,
   buildingRect,
   canPlace,
+  cryoOccupants,
+  cryoParty,
   makeBuilding,
   pillarsClear,
   placementAllowed,
@@ -17,6 +19,10 @@ import {
 } from './state'
 import {
   BUILDING_STATS,
+  CRYO_COST,
+  CRYO_FREEZE_COST,
+  CRYO_RECOVER,
+  CRYO_SLOTS,
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
   GRID_CLOAK_SECONDS,
@@ -218,7 +224,13 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
 /** Miners who were told to gather and are waiting for a free slot. */
 export function fillOpenGatherSlots(state: MatchState): void {
   const waiting = state.units.filter(
-    (unit) => unit.kind === 'porter' && unit.hp > 0 && unit.cargo <= 0 && unit.order == null && unit.nodeMemory === 0,
+    (unit) =>
+      unit.kind === 'porter' &&
+      unit.hp > 0 &&
+      unit.frozen == null &&
+      unit.cargo <= 0 &&
+      unit.order == null &&
+      unit.nodeMemory === 0,
   )
   for (const owner of [0, 1] as const) {
     const group = waiting.filter((unit) => unit.owner === owner)
@@ -490,10 +502,13 @@ function minCostAssign(cost: number[][]): number[] {
   return assign
 }
 
-/** Send at least ten player Hovers to a map-wide grid, then leave them there. */
-export function commandHoverGrid(state: MatchState, ids: number[]): void {
+/**
+ * Send at least ten Hovers to a map-wide grid and hide them for the Grid duration.
+ * The caller chooses which Hovers. The player command only passes the side it controls.
+ */
+export function sendHoverGrid(state: MatchState, units: Unit[]): void {
   if (state.outcome || state.paused) return
-  const hovers = playerHovers(state, ids)
+  const hovers = units.filter((unit) => unit.hp > 0 && unit.kind === 'drone')
   if (hovers.length < 10) return
   const spots = hoverGridSpots(state.mapW, state.mapH, hovers.length)
   const cost = hovers.map((unit) =>
@@ -517,6 +532,11 @@ export function commandHoverGrid(state: MatchState, ids: number[]): void {
     setUnitDestination(state, unit, spot.x, spot.y)
   })
   noteOrder(state, hovers)
+}
+
+/** Send at least ten player Hovers to a map-wide grid, then leave them there. */
+export function commandHoverGrid(state: MatchState, ids: number[]): void {
+  sendHoverGrid(state, playerHovers(state, ids))
 }
 
 export function commandAttack(
@@ -573,6 +593,141 @@ export function commandAttack(
     state.pings.push({ x, y, life: 0.45, max: 0.45, color: '#ff7a68' })
   }
   noteOrder(state, units)
+}
+
+/** Add the four glass vessels to a Silo. Once per Silo. Returns an error, or null when it is on. */
+export function installCryo(state: MatchState, buildingId: number): string | null {
+  if (state.outcome || state.paused) return 'The battle is paused'
+  const building = buildingById(state, buildingId)
+  if (!building || building.kind !== 'keep' || building.hp <= 0 || building.ruined || !building.complete) {
+    return 'That Silo is not ready'
+  }
+  if (building.cryo) return 'This Silo already has a Cryo'
+  if ((state.oreHeld[building.owner] ?? 0) < CRYO_COST) return `Need ${CRYO_COST} dumps`
+  debitDumps(state, building.owner, CRYO_COST)
+  building.cryo = true
+  return null
+}
+
+/**
+ * Send exactly four Stalkers into a Silo that has a Cryo.
+ * The group fee is charged when all four are inside the door, not when the order is given.
+ * Returns true when the click belonged to this Cryo, including a refusal.
+ */
+export function commandFreeze(state: MatchState, ids: number[], buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'keep' || !building.cryo) return false
+  const picked = living(state, ids)
+  const crew = picked.filter(
+    (unit) => unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
+  )
+  if (!crew.length) return false
+  const tell = crew.some((unit) => unit.owner === controlledSide(state))
+  if (building.cryoRecover > 0) {
+    if (tell) pushToast(state, 'Cryo is recovering.')
+    return true
+  }
+  if (crew.length !== CRYO_SLOTS || picked.length !== CRYO_SLOTS) {
+    if (tell) pushToast(state, 'Select 4 Stalkers to freeze.')
+    return true
+  }
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS || cryoParty(state, building.id).length > 0) {
+    if (tell) pushToast(state, 'Cryo is full.')
+    return true
+  }
+  for (const unit of crew) {
+    noteProgress(unit)
+    unit.order = { type: 'freeze', buildingId: building.id }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    unit.scanning = false
+    stopMoving(unit)
+  }
+  if (tell) {
+    const center = buildingCenter(building)
+    state.pings.push({ x: center.x, y: center.y, life: 0.45, max: 0.45, color: '#9fd7e8' })
+  }
+  noteOrder(state, crew)
+  return true
+}
+
+/**
+ * Cryo button, after the vessels are installed.
+ * Picks four living Stalkers of this Silo's side: most health first, then nearest to the Silo.
+ * The group fee is still charged at the door. A short crew, a recovery, or a short bank is refused here.
+ */
+export function commandFreezeAuto(state: MatchState, buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'keep' || !building.cryo) return false
+  const tell = building.owner === controlledSide(state)
+  if (building.cryoRecover > 0) {
+    if (tell) pushToast(state, 'Cryo is recovering.')
+    return true
+  }
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS || cryoParty(state, building.id).length > 0) {
+    if (tell) pushToast(state, 'Cryo is full.')
+    return true
+  }
+  const center = buildingCenter(building)
+  const crew = state.units.filter(
+    (unit) => unit.hp > 0 && unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
+  )
+  if (crew.length < CRYO_SLOTS) {
+    if (tell) pushToast(state, 'Select 4 Stalkers to freeze.')
+    return true
+  }
+  const cost = CRYO_FREEZE_COST * CRYO_SLOTS
+  if ((state.oreHeld[building.owner] ?? 0) < cost) {
+    if (tell) pushToast(state, `Need ${cost} dumps to freeze.`)
+    return true
+  }
+  crew.sort((a, b) => {
+    if (b.hp !== a.hp) return b.hp - a.hp
+    const da = Math.hypot(a.x - center.x, a.y - center.y)
+    const db = Math.hypot(b.x - center.x, b.y - center.y)
+    if (da !== db) return da - db
+    return a.id - b.id
+  })
+  return commandFreeze(state, crew.slice(0, CRYO_SLOTS).map((unit) => unit.id), building.id)
+}
+
+/** Put every Stalker frozen in this Cryo back on the ground beside it. Returns how many left. */
+export function releaseCryo(state: MatchState, building: Building): number {
+  const held = state.units.filter((unit) => unit.frozen === building.id && unit.hp > 0)
+  if (!held.length) return 0
+  const stats = BUILDING_STATS[building.kind]
+  const center = buildingCenter(building)
+  held.forEach((unit, index) => {
+    unit.frozen = null
+    unit.order = null
+    unit.idleAcquire = false
+    unit.nodeMemory = 0
+    stopMoving(unit)
+    const angle = (index / held.length) * Math.PI * 2
+    const spot = nearestParking(
+      state,
+      building.tx,
+      building.ty,
+      stats.w,
+      stats.h,
+      center.x + Math.cos(angle) * 64,
+      center.y + Math.sin(angle) * 64,
+    )
+    if (spot) {
+      unit.x = spot.x
+      unit.y = spot.y
+    }
+  })
+  return held.length
+}
+
+export function thawCryo(state: MatchState, buildingId: number): void {
+  const building = buildingById(state, buildingId)
+  if (!building || building.kind !== 'keep' || !building.cryo || building.hp <= 0) return
+  const released = releaseCryo(state, building)
+  if (released > 0) building.cryoRecover = CRYO_RECOVER
 }
 
 /** Spend dumps, and draw the same amount out of Storage, richest pile first. */
@@ -884,7 +1039,7 @@ export function nearestFreeBuilder(
   let bestTier = Infinity
   let bestScore = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0) continue
+    if (unit.owner !== owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.frozen != null) continue
     const tier = freeBuilderTier(unit)
     if (tier == null) continue
     const along = builderTravel(state, unit, tx, ty, w, h)

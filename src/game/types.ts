@@ -42,11 +42,22 @@ export const STALKER_LIFESPAN = 5 * 60
 export type PlayerId = number
 export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
 
+export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'drone']
+
 /** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
 export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
 }
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
+
+/** Dumps to add a Cryo to one Silo. Once per Silo. */
+export const CRYO_COST = 250
+/** Frozen Stalkers one Silo Cryo can hold. A freeze order sends this many at once. */
+export const CRYO_SLOTS = 4
+/** Dumps charged for each Stalker when the group of four enters. */
+export const CRYO_FREEZE_COST = 50
+/** Seconds a Silo Cryo refuses Stalkers after a Defrost. */
+export const CRYO_RECOVER = 4 * 60
 export type TargetKind = 'unit' | 'building' | 'rock'
 
 export interface UnitStats {
@@ -156,7 +167,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out.',
+    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -240,6 +251,7 @@ export type Order =
   | { type: 'gather'; nodeId: number; phase: 'approach' | 'mine' | 'return'; binId?: number }
   | { type: 'construct'; buildingId: number }
   | { type: 'repair'; buildingId: number }
+  | { type: 'freeze'; buildingId: number }
 
 export interface Unit {
   id: number
@@ -278,6 +290,8 @@ export interface Unit {
   cloak: number
   /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
   age: number
+  /** Cryo this Stalker is frozen inside. Null while the Stalker is on the map. */
+  frozen: number | null
 }
 
 export interface TrainJob {
@@ -320,6 +334,10 @@ export interface Building {
   ruined: boolean
   /** The repair cost has already been paid, so more Stalkers only add speed. */
   repairPaid: boolean
+  /** This Silo has four glass vessels. Bought once for CRYO_COST. */
+  cryo: boolean
+  /** Seconds before this Silo Cryo can freeze another group. Zero when it is ready. */
+  cryoRecover: number
 }
 
 /**
@@ -416,6 +434,18 @@ export interface Toast {
   life: number
 }
 
+/** Totals kept for one side and shown when the match ends. */
+export interface SideStats {
+  /** Units that entered the field for this side, including the Stalkers it starts with. */
+  created: Record<UnitKind, number>
+  /** Units that died, or that vanished because the side was wiped out with nobody to take them. A capture is not a loss. */
+  lost: Record<UnitKind, number>
+  /** Dumps carried home to a Silo or Storage. The starting pile and a captured bank are not included. */
+  dumps: number
+  /** Enemy Silos this side captured by destroying them. */
+  silos: number
+}
+
 export type GameEvent =
   | { type: 'order' }
   | { type: 'select' }
@@ -493,6 +523,8 @@ export interface MatchState {
   supplyUsed: number[]
   supplyCap: number[]
   time: number
+  /** Per-side totals for the end-of-match panel. Indexed by owner. */
+  stats: SideStats[]
   /** While set, the match clock and every simulation system stay where they are. */
   paused: boolean
   /** Simulation rate. 3 while the `speed x3` command is on, otherwise 1. */
@@ -517,6 +549,8 @@ export interface MatchState {
   playerAiAttacking: boolean
   playerAiNext: 'pike' | 'howler'
   underAttackCd: number
+  /** Match time when this side last ordered Hover Grid. -1 until the first use. */
+  gridAt: number[]
   events: GameEvent[]
   tutorial: boolean
 }

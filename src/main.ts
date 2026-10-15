@@ -158,7 +158,14 @@ function selectIdlePorters(): void {
   const live = match
   if (!live) return
   const ids = live.units
-    .filter((unit) => unit.owner === controlledSide(live) && unit.kind === 'porter' && unit.hp > 0 && !unit.order)
+    .filter(
+      (unit) =>
+        unit.owner === controlledSide(live) &&
+        unit.kind === 'porter' &&
+        unit.hp > 0 &&
+        unit.frozen == null &&
+        !unit.order,
+    )
     .map((unit) => unit.id)
   if (!ids.length) {
     pushToast(live, 'Every stalker is already busy.')
