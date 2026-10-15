@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandFreezeAuto, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -288,6 +288,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'tower', actions),
         cryoButton(state, building),
       ]
+      if (building.cryo) cmds.push(thawButton(state, building))
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
     }
@@ -403,6 +404,20 @@ function cryoButton(state: MatchState, building: Building): Cmd {
       },
     }
   }
+  return {
+    id: 'cryo',
+    label: 'Cryo',
+    detail: `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
+    title:
+      'Send the 4 Stalkers with the most health remaining to this Silo. When health matches, the nearest ones go. Freezing costs 200 dumps for the group when they arrive. Selecting 4 Stalkers and sending them still works.',
+    disabled: false,
+    run: () => {
+      commandFreezeAuto(state, building.id)
+    },
+  }
+}
+
+function thawButton(state: MatchState, building: Building): Cmd {
   const held = cryoOccupants(state, building.id)
   const recovery = building.cryoRecover > 0 ? formatRecover(building.cryoRecover) : ''
   return {

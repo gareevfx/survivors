@@ -20,6 +20,7 @@ import {
 import {
   BUILDING_STATS,
   CRYO_COST,
+  CRYO_FREEZE_COST,
   CRYO_RECOVER,
   CRYO_SLOTS,
   MINERS_PER_DEPOSIT,
@@ -649,6 +650,47 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
   }
   noteOrder(state, crew)
   return true
+}
+
+/**
+ * Cryo button, after the vessels are installed.
+ * Picks four living Stalkers of this Silo's side: most health first, then nearest to the Silo.
+ * The group fee is still charged at the door. A short crew, a recovery, or a short bank is refused here.
+ */
+export function commandFreezeAuto(state: MatchState, buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || !building.complete || building.kind !== 'keep' || !building.cryo) return false
+  const tell = building.owner === controlledSide(state)
+  if (building.cryoRecover > 0) {
+    if (tell) pushToast(state, 'Cryo is recovering.')
+    return true
+  }
+  if (cryoOccupants(state, building.id) >= CRYO_SLOTS || cryoParty(state, building.id).length > 0) {
+    if (tell) pushToast(state, 'Cryo is full.')
+    return true
+  }
+  const center = buildingCenter(building)
+  const crew = state.units.filter(
+    (unit) => unit.hp > 0 && unit.kind === 'porter' && unit.owner === building.owner && unit.frozen == null,
+  )
+  if (crew.length < CRYO_SLOTS) {
+    if (tell) pushToast(state, 'Select 4 Stalkers to freeze.')
+    return true
+  }
+  const cost = CRYO_FREEZE_COST * CRYO_SLOTS
+  if ((state.oreHeld[building.owner] ?? 0) < cost) {
+    if (tell) pushToast(state, `Need ${cost} dumps to freeze.`)
+    return true
+  }
+  crew.sort((a, b) => {
+    if (b.hp !== a.hp) return b.hp - a.hp
+    const da = Math.hypot(a.x - center.x, a.y - center.y)
+    const db = Math.hypot(b.x - center.x, b.y - center.y)
+    if (da !== db) return da - db
+    return a.id - b.id
+  })
+  return commandFreeze(state, crew.slice(0, CRYO_SLOTS).map((unit) => unit.id), building.id)
 }
 
 /** Put every Stalker frozen in this Cryo back on the ground beside it. Returns how many left. */

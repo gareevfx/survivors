@@ -1,7 +1,7 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -2447,6 +2447,7 @@ combatResolves()
 keepDecidesTheField()
 endOfMatchStats()
 cryoPreservesStalkers()
+cryoButtonSendsTheHealthiest()
 siloAiUsesHoverGrid()
 siloAiBuysCryoFor250()
 siloAiBanksHovers()
@@ -5982,4 +5983,159 @@ function siloAiBanksHovers(): void {
     return count + building.queue.filter((job) => job.kind === 'drone').length
   }, 0)
   assert(leanQueued === 0, 'a bank under 500 dumps trained extra Hovers')
+}
+
+function cryoButtonSendsTheHealthiest(): void {
+  const field = createMatch(37)
+  const silo = field.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'Silo 01 has no Silo')
+  silo.cryo = true
+  openPad(field, silo.tx - 3, silo.ty - 3, silo.tx + 14, silo.ty + 8)
+  rebuildBlocked(field)
+  const hub = buildingCenter(silo)
+  const starters = field.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter')
+  assert(starters.length === 4, 'auto-freeze needs the starting Stalkers')
+  const sixth = makeUnit(field, 0, 'porter', hub.x, hub.y)
+  const seventh = makeUnit(field, 0, 'porter', hub.x, hub.y)
+  const sleeper = makeUnit(field, 0, 'porter', hub.x, hub.y)
+  sleeper.frozen = -1
+  sleeper.hp = 200
+  const rider = makeUnit(field, 0, 'pike', hub.x, hub.y)
+  rider.hp = 200
+  const rival = field.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(rival, 'the other Silo has no Stalker')
+  rival.hp = 200
+  rival.x = hub.x
+  rival.y = hub.y
+  rival.order = null
+
+  const ranked = [...starters, sixth, seventh]
+  assert(ranked.length === 6, 'auto-freeze needs six Stalkers')
+  const far100 = ranked[0]
+  const near90 = ranked[1]
+  const far90 = ranked[2]
+  const near80 = ranked[3]
+  const far80 = ranked[4]
+  const low = ranked[5]
+  assert(far100 && near90 && far90 && near80 && far80 && low, 'missing a ranked Stalker')
+
+  const placeRanked = (unit: Unit, hp: number, dx: number) => {
+    unit.hp = hp
+    unit.x = hub.x + dx
+    unit.y = hub.y
+    unit.order = null
+    unit.cargo = 0
+    unit.frozen = null
+  }
+  placeRanked(far100, 100, 200)
+  placeRanked(near90, 90, 48)
+  placeRanked(far90, 90, 160)
+  placeRanked(near80, 80, 240)
+  placeRanked(far80, 80, 64)
+  placeRanked(low, 40, 8)
+  assert(far80.id > near80.id, 'the nearer Stalker was not the later one')
+
+  field.oreHeld[0] = 200
+  assert(commandFreeze(field, [far80.id, low.id, near80.id, far90.id], silo.id), 'selecting 4 Stalkers did not send them')
+  assert(
+    [far80, low, near80, far90].every((unit) => unit.order?.type === 'freeze' && unit.order.buildingId === silo.id),
+    'a manual group was not ordered',
+  )
+  for (const unit of ranked) unit.order = null
+
+  far100.cargo = 8
+  far100.order = { type: 'construct', buildingId: silo.id }
+  silo.cryoRecover = 30
+  assert(commandFreezeAuto(field, silo.id), 'a recovering Cryo ignored the button')
+  assert(ranked.every((unit) => unit.order?.type !== 'freeze'), 'a recovering Cryo sent Stalkers')
+  assert(field.oreHeld[0] === 200, 'a recovering Cryo spent dumps')
+  assert(field.toasts.some((toast) => toast.text === 'Cryo is recovering.'), 'the Cryo button hid the recovery')
+  silo.cryoRecover = 0
+  far100.order = null
+
+  far80.hp = 0
+  far90.hp = 0
+  low.hp = 0
+  field.toasts.length = 0
+  assert(commandFreezeAuto(field, silo.id), 'a short crew was not refused')
+  assert(
+    ranked.every((unit) => unit.hp <= 0 || unit.order == null),
+    'a short crew was sent to freeze',
+  )
+  assert(
+    field.toasts.some((toast) => toast.text === 'Select 4 Stalkers to freeze.'),
+    'a short crew did not say to select 4',
+  )
+  placeRanked(far90, 90, 160)
+  placeRanked(far80, 80, 64)
+  placeRanked(low, 40, 8)
+
+  field.oreHeld[0] = 199
+  field.toasts.length = 0
+  assert(commandFreezeAuto(field, silo.id), 'a short bank was not refused')
+  assert(ranked.every((unit) => unit.order == null), 'a short bank sent Stalkers')
+  assert(field.oreHeld[0] === 199, 'a short bank spent dumps')
+  assert(
+    field.toasts.some((toast) => toast.text === 'Need 200 dumps to freeze.'),
+    'a short bank did not say it needs 200',
+  )
+
+  field.oreHeld[0] = 200
+  far100.cargo = 8
+  far100.order = { type: 'construct', buildingId: silo.id }
+  field.toasts.length = 0
+  assert(commandFreezeAuto(field, silo.id), 'the Cryo button did not send Stalkers')
+  const picked = [far100, near90, far90, far80]
+  const spared = [near80, low]
+  assert(
+    picked.every((unit) => unit.order?.type === 'freeze' && unit.order.buildingId === silo.id),
+    'the Cryo button did not pick the healthiest Stalkers',
+  )
+  assert(spared.every((unit) => unit.order == null), 'the Cryo button sent a weaker Stalker')
+  assert(sleeper.frozen === -1 && sleeper.order == null, 'a frozen Stalker was sent again')
+  assert(rider.order == null, 'a Flasher was sent to freeze')
+  assert(rival.order == null, 'another Silo’s Stalker was sent to freeze')
+  assert(far100.cargo === 8, 'freezing dropped the carried dumps')
+  assert(field.oreHeld[0] === 200, 'the Cryo button charged dumps before the group arrived')
+
+  for (const unit of ranked) unit.order = null
+  placeRanked(far100, 50, 40)
+  placeRanked(near90, 50, 50)
+  placeRanked(far90, 50, 60)
+  placeRanked(near80, 50, 300)
+  placeRanked(far80, 50, 300)
+  placeRanked(low, 50, 400)
+  const tied = [near80, far80].sort((a, b) => a.id - b.id)
+  const tiedFirst = tied[0]
+  const tiedSecond = tied[1]
+  assert(tiedFirst && tiedSecond && tiedFirst.id < tiedSecond.id, 'missing a tied Stalker')
+  field.toasts.length = 0
+  assert(commandFreezeAuto(field, silo.id), 'a health tie was not sent')
+  const orderType = (unit: Unit) => unit.order?.type
+  assert(
+    orderType(far100) === 'freeze' && orderType(near90) === 'freeze' && orderType(far90) === 'freeze',
+    'nearer equal-health Stalkers were left behind',
+  )
+  assert(orderType(tiedFirst) === 'freeze', 'the earlier Stalker lost a distance tie')
+  assert(tiedSecond.order == null && low.order == null, 'a later tied Stalker was sent')
+
+  field.toasts.length = 0
+  assert(commandFreezeAuto(field, silo.id), 'a busy Cryo was not refused')
+  assert(field.toasts.some((toast) => toast.text === 'Cryo is full.'), 'a second Cryo click did not say the Cryo is full')
+  assert(tiedSecond.order == null, 'a full Cryo sent another Stalker')
+
+  const gateX = (silo.tx + 1.5) * TILE
+  const gateY = (silo.ty + 3) * TILE + 16
+  for (const unit of [far100, near90, far90, tiedFirst]) {
+    unit.x = gateX
+    unit.y = gateY
+  }
+  step(field, 1 / 30)
+  assert(
+    [far100, near90, far90, tiedFirst].every((unit) => unit.frozen === silo.id),
+    'the auto-sent group did not freeze at the door',
+  )
+  const bank = () => field.oreHeld[0]
+  assert(bank() === 0, 'the auto-sent group did not cost 200 dumps')
+  assert(tiedSecond.frozen == null && low.frozen == null, 'an unpicked Stalker froze too')
 }
