@@ -9,7 +9,6 @@ import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
 import { drawPillarSprite, pillarDamageStage } from './pillarArt'
-import { drawSiloCryoVessels } from './cryoArt'
 import { drawStorageSprite, storageDamageStage, storageFill } from './storageArt'
 import { drawGraveSprite, drawOreSprite, drawRockSprite, drawTreeSprite, fogSprite, paintTerrain, terrainCss } from './terrainArt'
 import { viewBuildingSeen, viewGroundShown, viewTileExplored, viewTileVisible, viewUnitSeen } from './vision'
@@ -499,11 +498,10 @@ function drawKeep(
     dish: building.dish,
     progress: building.ruined ? -1 : progress,
     smoke: state.time,
+    cryo: building.cryo && !building.ruined,
+    held: cryoOccupants(state, building.id),
   })
   ctx.restore()
-  if (building.cryo && !building.ruined) {
-    drawSiloCryoVessels(ctx, x, y, color, cryoOccupants(state, building.id))
-  }
   ctx.imageSmoothingEnabled = false
 }
 
