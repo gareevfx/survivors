@@ -56,7 +56,7 @@ export const CRYO_COST = 250
 export const CRYO_SLOTS = 4
 /** Dumps charged for each Stalker when the group of four enters. */
 export const CRYO_FREEZE_COST = 50
-/** Seconds a Silo Cryo refuses Stalkers after a Thaw. */
+/** Seconds a Silo Cryo refuses Stalkers after a Defrost. */
 export const CRYO_RECOVER = 4 * 60
 export type TargetKind = 'unit' | 'building' | 'rock'
 
@@ -167,7 +167,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Thaw releases them beside the Silo, then the Cryo recovers for 4 minutes.',
+    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
     w: 3,
     h: 3,
     hp: 1700,

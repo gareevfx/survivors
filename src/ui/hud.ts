@@ -9,7 +9,7 @@ import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, buildingCenter, cryoOccupants, unitById } from '../game/state'
+import { buildingById, buildingCenter, cryoOccupants, cryoParty, unitById } from '../game/state'
 import {
   BUILDING_STATS,
   CRYO_COST,
@@ -288,7 +288,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'tower', actions),
         cryoButton(state, building),
       ]
-      if (building.cryo) cmds.push(thawButton(state, building))
+      if (building.cryo) cmds.push(defrostButton(state, building))
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
     }
@@ -376,6 +376,24 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
   return []
 }
 
+/** Labels on the command bar for the current selection. Smoke reads the Cryo and Defrost states from here. */
+export function commandSnapshot(state: MatchState): Array<{ label: string; detail: string; disabled: boolean; title: string }> {
+  const actions: HudActions = {
+    armPlace() {},
+    armMove() {},
+    armAttack() {},
+    dismissHint() {},
+    selectIdle() {},
+    restart() {},
+  }
+  return buildCommands(state, actions).map((cmd) => ({
+    label: cmd.label,
+    detail: cmd.detail ?? '',
+    disabled: cmd.disabled,
+    title: cmd.title,
+  }))
+}
+
 function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
   return {
     id: 'cancel-train',
@@ -387,6 +405,12 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
   }
 }
 
+function cryoUse(state: MatchState, building: Building): { recovering: boolean; occupied: boolean; held: number } {
+  const held = cryoOccupants(state, building.id)
+  const inbound = cryoParty(state, building.id).length > 0
+  return { recovering: building.cryoRecover > 0, occupied: held > 0 || inbound, held }
+}
+
 function cryoButton(state: MatchState, building: Building): Cmd {
   if (!building.cryo) {
     const afford = (state.oreHeld[controlledSide(state)] ?? 0) >= CRYO_COST
@@ -395,7 +419,7 @@ function cryoButton(state: MatchState, building: Building): Cmd {
       label: 'Cryo',
       detail: `${CRYO_COST} dumps`,
       title: afford
-        ? 'Add four glass vessels to this Silo, once. Select 4 Stalkers and send them here. Freezing costs 50 dumps each, 200 for the group. Thaw releases them beside the Silo, then the Cryo recovers for 4 minutes.'
+        ? 'Add four glass vessels to this Silo, once. Select 4 Stalkers and send them here. Freezing costs 50 dumps each, 200 for the group. Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.'
         : `Need ${CRYO_COST} dumps`,
       disabled: !afford,
       run: () => {
@@ -404,28 +428,34 @@ function cryoButton(state: MatchState, building: Building): Cmd {
       },
     }
   }
+  const use = cryoUse(state, building)
+  const send =
+    'Send the 4 Stalkers with the most health remaining to this Silo. When health matches, the nearest ones go. Freezing costs 200 dumps for the group when they arrive. Selecting 4 Stalkers and sending them still works.'
+  const countdown = formatRecover(building.cryoRecover)
   return {
     id: 'cryo',
     label: 'Cryo',
-    detail: `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
-    title:
-      'Send the 4 Stalkers with the most health remaining to this Silo. When health matches, the nearest ones go. Freezing costs 200 dumps for the group when they arrive. Selecting 4 Stalkers and sending them still works.',
-    disabled: false,
+    detail: use.recovering ? `Recovery ${countdown}` : `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
+    title: use.recovering
+      ? `The Cryo is recovering for ${countdown}.`
+      : use.occupied
+        ? 'Stalkers are frozen or already on their way. Defrost releases the ones inside.'
+        : send,
+    disabled: use.recovering || use.occupied,
     run: () => {
       commandFreezeAuto(state, building.id)
     },
   }
 }
 
-function thawButton(state: MatchState, building: Building): Cmd {
-  const held = cryoOccupants(state, building.id)
-  const recovery = building.cryoRecover > 0 ? formatRecover(building.cryoRecover) : ''
+function defrostButton(state: MatchState, building: Building): Cmd {
+  const use = cryoUse(state, building)
   return {
-    id: 'thaw',
-    label: 'Thaw',
-    detail: recovery ? `Recovery ${recovery}` : held ? `${held} inside` : 'empty',
-    title: `Release the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
-    disabled: held === 0,
+    id: 'defrost',
+    label: 'Defrost',
+    detail: use.held ? `${use.held} inside` : 'empty',
+    title: `Defrost releases the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
+    disabled: use.recovering || !use.occupied,
     run: () => thawCryo(state, building.id),
   }
 }
@@ -611,7 +641,7 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
-      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
+      ${building.kind === 'keep' ? '' : `<p class="lore">${escapeHtml(loreBody(stats.label))}</p>`}
       ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
       ${building.kind === 'keep' && building.cryo ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
       ${building.kind === 'keep' && building.cryo && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}

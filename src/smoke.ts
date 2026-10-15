@@ -30,7 +30,7 @@ import {
   viewUnitSeen,
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
-import { describeSelection, endStatsHtml } from './ui/hud'
+import { commandSnapshot, describeSelection, endStatsHtml } from './ui/hud'
 import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -2448,6 +2448,7 @@ keepDecidesTheField()
 endOfMatchStats()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
+siloCryoButtonsFollowTheVessels()
 siloAiUsesHoverGrid()
 siloAiBuysCryoFor250()
 siloAiBanksHovers()
@@ -5596,12 +5597,13 @@ function cryoPreservesStalkers(): void {
     BUILDING_STATS.keep.blurb.includes('250') &&
       BUILDING_STATS.keep.blurb.includes('50') &&
       BUILDING_STATS.keep.blurb.includes('200') &&
-      BUILDING_STATS.keep.blurb.includes('4 minutes'),
+      BUILDING_STATS.keep.blurb.includes('4 minutes') &&
+      BUILDING_STATS.keep.blurb.includes('Defrost'),
     'the Silo tooltip lists the Cryo',
   )
   const lore = loreBody('Silo')
   assert(
-    lore.includes('250') && lore.includes('50') && lore.includes('200') && lore.includes('4 minutes'),
+    lore.includes('250') && lore.includes('50') && lore.includes('200') && lore.includes('4 minutes') && lore.includes('Defrost'),
     'Silo lore lists the Cryo',
   )
   assert(!('cryo' in BUILDING_STATS), 'Cryo is still a separate building')
@@ -5695,7 +5697,7 @@ function cryoPreservesStalkers(): void {
   assert(panel.includes('4 / 4'), 'the Cryo panel hid the slot count')
   assert(panel.includes('50 dumps each'), 'the Cryo panel hid the freeze cost')
   assert(panel.includes('200 for the group'), 'the Cryo panel hid the group cost')
-  assert(panel.includes('250'), 'the Cryo panel hid the build cost')
+  assert(!panel.includes('shelter housing'), 'the Silo panel still showed its description')
 
   const foe = makeUnit(state, 1, 'pike', doorX, doorY)
   commandAttack(state, [foe.id], first.id, 'unit')
@@ -6138,4 +6140,67 @@ function cryoButtonSendsTheHealthiest(): void {
   const bank = () => field.oreHeld[0]
   assert(bank() === 0, 'the auto-sent group did not cost 200 dumps')
   assert(tiedSecond.frozen == null && low.frozen == null, 'an unpicked Stalker froze too')
+}
+
+function siloCryoButtonsFollowTheVessels(): void {
+  const dock = createMatch(47)
+  const home = dock.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'Silo 01 has no Silo')
+  dock.selectedBuilding = home.id
+  dock.selectedUnits = []
+  dock.oreHeld[0] = CRYO_COST
+  const bare = describeSelection(dock)
+  assert(!bare.includes('shelter housing'), 'a Silo without a Cryo still showed its description')
+  const buying = commandSnapshot(dock)
+  const buyCryo = buying.find((cmd) => cmd.label === 'Cryo')
+  assert(buyCryo && !buyCryo.disabled && buyCryo.detail === '250 dumps', 'the first Cryo click is not the purchase')
+  assert(!buying.some((cmd) => cmd.label === 'Defrost' || cmd.label === 'Thaw'), 'Defrost showed before the vessels were bought')
+
+  home.cryo = true
+  const emptyDock = () => commandSnapshot(dock)
+  const emptyCryo = emptyDock().find((cmd) => cmd.label === 'Cryo')
+  const emptyDefrost = emptyDock().find((cmd) => cmd.label === 'Defrost')
+  assert(emptyCryo && !emptyCryo.disabled && emptyCryo.detail === '200 dumps', 'an empty Cryo was not ready')
+  assert(emptyDefrost && emptyDefrost.disabled && emptyDefrost.detail === 'empty', 'Defrost was active in an empty Cryo')
+
+  const walkers = dock.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').slice(0, 4)
+  assert(walkers.length === 4, 'need four Stalkers to fill the Cryo button')
+  for (const unit of walkers) unit.order = { type: 'freeze', buildingId: home.id }
+  const walking = commandSnapshot(dock)
+  const walkCryo = walking.find((cmd) => cmd.label === 'Cryo')
+  const walkDefrost = walking.find((cmd) => cmd.label === 'Defrost')
+  assert(walkCryo?.disabled, 'Cryo stayed active while Stalkers were on the way')
+  assert(walkDefrost && !walkDefrost.disabled, 'Defrost stayed inactive while Stalkers were on the way')
+
+  for (const unit of walkers) {
+    unit.order = null
+    unit.frozen = home.id
+  }
+  const fullDock = commandSnapshot(dock)
+  const fullCryo = fullDock.find((cmd) => cmd.label === 'Cryo')
+  const fullDefrost = fullDock.find((cmd) => cmd.label === 'Defrost')
+  assert(fullCryo?.disabled && fullCryo.detail === '200 dumps', 'Cryo stayed active with Stalkers inside')
+  assert(fullDefrost && !fullDefrost.disabled && fullDefrost.detail === '4 inside', 'Defrost did not offer the frozen Stalkers')
+
+  thawCryo(dock, home.id)
+  const cooling = commandSnapshot(dock)
+  const coolCryo = cooling.find((cmd) => cmd.label === 'Cryo')
+  const coolDefrost = cooling.find((cmd) => cmd.label === 'Defrost')
+  assert(coolCryo?.disabled && coolCryo.detail === 'Recovery 4:00', 'Cryo hid the recovery countdown')
+  assert(coolDefrost?.disabled, 'Defrost stayed active during recovery')
+  const cooledPanel = describeSelection(dock)
+  assert(cooledPanel.includes('Recovery') && cooledPanel.includes('4:00'), 'the panel hid recovery')
+  assert(!cooledPanel.includes('shelter housing'), 'the recovering Silo panel showed its description')
+
+  home.cryoRecover = 0
+  const openDock = commandSnapshot(dock)
+  const openCryo = openDock.find((cmd) => cmd.label === 'Cryo')
+  const openDefrost = openDock.find((cmd) => cmd.label === 'Defrost')
+  assert(openCryo && !openCryo.disabled, 'Cryo stayed inactive after recovery')
+  assert(openDefrost?.disabled, 'Defrost stayed active after the vessels emptied')
+
+  const plant = makeBuilding(dock, 0, 'yard', home.tx + 8, home.ty + 8, true)
+  dock.selectedBuilding = plant.id
+  const factoryPanel = describeSelection(dock)
+  assert(factoryPanel.includes('Facility for manufacturing'), 'the Factory panel lost its description')
 }

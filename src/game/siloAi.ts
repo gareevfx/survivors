@@ -924,7 +924,7 @@ function wantsGridScout(side: Brain): boolean {
 }
 
 /**
- * Freeze a group of four spare Stalkers, or thaw when the crew is too small to work.
+ * Freeze a group of four spare Stalkers, or defrost when the crew is too small to work.
  * Four stay on the map, so the order waits until eight are active and the bank can pay 200.
  * A Cryo that is still recovering accepts no one.
  */
