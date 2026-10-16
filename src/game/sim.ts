@@ -93,7 +93,9 @@ export function step(state: MatchState, dt: number): void {
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.cloak > 0) unit.cloak = Math.max(0, unit.cloak - dt)
-    if (unit.frozen != null) continue
+    if (unit.ice > 0) unit.ice = Math.max(0, unit.ice - dt)
+    if (unit.frostCd > 0) unit.frostCd = Math.max(0, unit.frostCd - dt)
+    if (unit.frozen != null || unit.ice > 0) continue
     if (unit.kind === 'porter' && unit.hp > 0) {
       const lived = unit.age
       unit.age += dt
@@ -135,6 +137,7 @@ export function step(state: MatchState, dt: number): void {
 
 function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.repathIn = Math.max(0, unit.repathIn - dt)
+  if (unit.ice > 0) return
   if (isShutdown(unit)) {
     if (unit.order || unit.goalX != null || unit.scanning) {
       unit.order = null
@@ -150,7 +153,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
       unit.order = { type: 'gather', nodeId: unit.nodeMemory, phase: 'return' }
       return
     }
-    if (unit.kind !== 'porter' && unit.kind !== 'drone') {
+    if (unit.kind !== 'porter' && unit.kind !== 'drone' && unit.kind !== 'frog') {
       const stats = UNIT_STATS[unit.kind]
       const foe =
         nearestHostile(state, unit, stats.sight, false) ??
@@ -585,6 +588,7 @@ function approachDropoff(state: MatchState, unit: Unit): void {
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
+  if (unit.ice > 0) return
   let left = dt
   let blockedStep = false
   let guard = 0
@@ -685,7 +689,7 @@ function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
 /** A ground unit inside a blocked tile, or clipping one, is moved to the nearest free cell. */
 function releaseFromTerrain(state: MatchState): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null) continue
+    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null || unit.ice > 0) continue
     const radius = UNIT_STATS[unit.kind].radius
     if (!circleHitsSolid(state, unit.x, unit.y, radius)) continue
     const originTx = Math.floor(unit.x / TILE)
@@ -769,10 +773,10 @@ function separate(state: MatchState): void {
   const units = state.units
   for (let i = 0; i < units.length; i++) {
       const a = units[i]
-    if (!a || a.hp <= 0 || a.kind === 'drone' || a.frozen != null) continue
+    if (!a || a.hp <= 0 || a.kind === 'drone' || a.frozen != null || a.ice > 0) continue
     for (let j = i + 1; j < units.length; j++) {
       const b = units[j]
-      if (!b || b.hp <= 0 || b.kind === 'drone' || b.frozen != null) continue
+      if (!b || b.hp <= 0 || b.kind === 'drone' || b.frozen != null || b.ice > 0) continue
       const dx = b.x - a.x
       const dy = b.y - a.y
       const distance = Math.hypot(dx, dy) || 0.001
@@ -806,7 +810,7 @@ function isStationary(unit: Unit): boolean {
 function advanceGather(state: MatchState, dt: number): void {
   for (const unit of state.units) {
     const order = unit.order
-    if (!order || order.type !== 'gather') continue
+    if (!order || order.type !== 'gather' || unit.ice > 0) continue
     if (order.binId != null) {
       advanceBinGather(state, unit, order, dt)
       continue
@@ -901,7 +905,7 @@ function advanceConstruct(state: MatchState, dt: number): void {
   for (const building of state.buildings) {
     if (building.complete || building.hp <= 0) continue
     const crew = state.units.filter((unit) => {
-      if (unit.hp <= 0 || unit.order?.type !== 'construct' || unit.order.buildingId !== building.id) return false
+      if (unit.hp <= 0 || unit.ice > 0 || unit.order?.type !== 'construct' || unit.order.buildingId !== building.id) return false
       return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
     })
     // A site with no worker in range is paused. Progress stays where it is until someone returns.
@@ -927,7 +931,7 @@ function advanceRepair(state: MatchState, dt: number): void {
   for (const building of state.buildings) {
     if (!building.ruined) continue
     const crew = state.units.filter((unit) => {
-      if (unit.hp <= 0 || unit.order?.type !== 'repair' || unit.order.buildingId !== building.id) return false
+      if (unit.hp <= 0 || unit.ice > 0 || unit.order?.type !== 'repair' || unit.order.buildingId !== building.id) return false
       return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
     })
     if (!crew.length) continue
@@ -1093,6 +1097,8 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     cloak: 0,
     age: 0,
     frozen: null,
+    ice: 0,
+    frostCd: 0,
     power: 1,
   }
   state.units.push(unit)
@@ -1104,7 +1110,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
 }
 
 function tryFire(state: MatchState, unit: Unit): void {
-  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || isShutdown(unit)) return
+  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || unit.kind === 'frog' || unit.ice > 0 || isShutdown(unit)) return
   const target = pickFireTarget(state, unit)
   if (!target || !inWeaponRange(unit, target)) return
   if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
@@ -1987,6 +1993,8 @@ function fadeEffects(state: MatchState, dt: number): void {
   state.particles = state.particles.filter((particle) => particle.life > 0)
   for (const ping of state.pings) ping.life -= dt
   state.pings = state.pings.filter((ping) => ping.life > 0)
+  for (const ring of state.rings) ring.life -= dt
+  state.rings = state.rings.filter((ring) => ring.life > 0)
   for (const toast of state.toasts) toast.life -= dt
   state.toasts = state.toasts.filter((toast) => toast.life > 0)
   if (state.events.length > 48) state.events.splice(0, state.events.length - 48)

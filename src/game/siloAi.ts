@@ -1,4 +1,4 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, isWalkable, rockAt, rockById } from './state'
@@ -1004,10 +1004,15 @@ function runSide(state: MatchState, owner: PlayerId): void {
     (building) => building.owner === side.owner && building.kind === 'yard' && building.complete && building.hp > 0,
   )
   let dronesLeft = dronesToTrain(state, side)
+  let frogsLeft = frogsToTrain(state, side)
   for (const readyYard of readyYards) {
     if (readyYard.queue.length >= 1) continue
     if (dronesLeft > 0 && tryTrain(state, readyYard.id, 'drone') === null) {
       dronesLeft -= 1
+      continue
+    }
+    if (frogsLeft > 0 && tryTrain(state, readyYard.id, 'frog') === null) {
+      frogsLeft -= 1
       continue
     }
     const first = siegeMix(state, side)
@@ -1064,6 +1069,46 @@ function runSide(state: MatchState, owner: PlayerId): void {
   finish(state, side)
 }
 
+/** One Frog after a small army, a second after a larger one. Not part of the siege mix. */
+function frogsToTrain(state: MatchState, side: Brain): number {
+  let combat = 0
+  let frogs = 0
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.hp <= 0) continue
+    if (unit.kind === 'pike' || unit.kind === 'howler') combat += 1
+    if (unit.kind === 'frog') frogs += 1
+  }
+  for (const building of state.buildings) {
+    if (building.owner !== side.owner || building.hp <= 0) continue
+    for (const job of building.queue) {
+      if (job.kind === 'pike' || job.kind === 'howler') combat += 1
+      if (job.kind === 'frog') frogs += 1
+    }
+  }
+  if (frogs >= 2) return 0
+  if (frogs === 0 && combat >= 6) return 1
+  if (frogs === 1 && combat >= 12) return 1
+  return 0
+}
+
+/** Freeze when the circle holds more enemies than friendlies. The Frog itself is not counted. */
+function castFrost(state: MatchState, side: Brain): void {
+  const reach = UNIT_STATS.frog.sight
+  for (const frog of state.units) {
+    if (frog.owner !== side.owner || frog.kind !== 'frog' || frog.hp <= 0 || frog.frozen != null) continue
+    if (frog.ice > 0 || frog.frostCd > 0 || frog.power <= 0) continue
+    let foes = 0
+    let friends = 0
+    for (const unit of state.units) {
+      if (unit.id === frog.id || unit.hp <= 0 || unit.frozen != null) continue
+      if (Math.hypot(unit.x - frog.x, unit.y - frog.y) > reach) continue
+      if (unit.owner === side.owner) friends += 1
+      else foes += 1
+    }
+    if (foes > friends && foes > 0) commandFrost(state, [frog.id])
+  }
+}
+
 /** Combat units under 30% Power walk to the nearer of a seen battery or a friendly Pillar's sight. */
 function rechargeLowPower(state: MatchState, side: Brain): void {
   const reach = BUILDING_STATS.tower.sight
@@ -1103,6 +1148,7 @@ function rechargeLowPower(state: MatchState, side: Brain): void {
 }
 
 function finish(state: MatchState, side: Brain): void {
+  castFrost(state, side)
   repairRuins(state, side)
   abortThreatenedExpansion(state, side)
   retreatFromEnemyPillars(state, side)

@@ -23,10 +23,14 @@ import {
   CRYO_FREEZE_COST,
   CRYO_RECOVER,
   CRYO_SLOTS,
+  FROG_FREEZE_COOLDOWN,
+  FROG_FREEZE_SECONDS,
+  FROG_POWER_HIT,
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
   GRID_CLOAK_SECONDS,
   isShutdown,
+  powerSeconds,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -43,7 +47,7 @@ function living(state: MatchState, ids: number[]): Unit[] {
   const units: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.hp > 0 && !isShutdown(unit)) units.push(unit)
+    if (unit && unit.hp > 0 && unit.ice <= 0 && !isShutdown(unit)) units.push(unit)
   }
   return units
 }
@@ -891,7 +895,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
   if (building.kind === 'keep' && kind !== 'porter') return 'The Silo trains stalkers'
-  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains flashers, gorillas, and hovers'
+  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains flashers, gorillas, hovers, and frogs'
   if (building.kind === 'silo') return 'A storage does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
@@ -1081,6 +1085,38 @@ export function coverOpenSites(state: MatchState): void {
     worker.idleAcquire = false
     worker.nodeMemory = -1
     stopMoving(worker)
+  }
+}
+
+/**
+ * Freeze every other unit inside this Frog's sight for one minute.
+ * Each of those units that has Power loses half a bar. The caster is left out.
+ */
+export function commandFrost(state: MatchState, ids: number[]): void {
+  if (state.outcome || state.paused) return
+  const reach = UNIT_STATS.frog.sight
+  for (const id of ids) {
+    const frog = unitById(state, id)
+    if (!frog || frog.kind !== 'frog' || frog.hp <= 0 || frog.frozen != null) continue
+    if (frog.ice > 0 || frog.frostCd > 0 || isShutdown(frog)) continue
+    frog.frostCd = FROG_FREEZE_COOLDOWN
+    for (const unit of state.units) {
+      if (unit.id === frog.id || unit.hp <= 0 || unit.frozen != null) continue
+      if (Math.hypot(unit.x - frog.x, unit.y - frog.y) > reach) continue
+      unit.ice = FROG_FREEZE_SECONDS
+      if (powerSeconds(unit.kind) > 0) {
+        unit.power = Math.max(0, unit.power - FROG_POWER_HIT)
+        if (unit.power <= 0) {
+          unit.power = 0
+          unit.order = null
+          unit.idleAcquire = false
+          unit.scanning = false
+          unit.cloak = 0
+        }
+      }
+      stopMoving(unit)
+    }
+    state.rings.push({ x: frog.x, y: frog.y, life: 0.7, max: 0.7, reach })
   }
 }
 

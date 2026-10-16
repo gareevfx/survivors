@@ -1,7 +1,7 @@
 import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandFrost, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_HIT, FROG_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -1106,7 +1106,7 @@ function countsMatch(state: MatchState, owner: number, kind: UnitKind, created: 
 function endOfMatchStats(): void {
   const fresh = createMatch(4)
   for (let owner = 0; owner < fresh.playerCount; owner++) {
-    const alive: Record<UnitKind, number> = { porter: 0, pike: 0, howler: 0, drone: 0 }
+    const alive: Record<UnitKind, number> = { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }
     for (const unit of fresh.units) {
       if (unit.owner === owner && unit.hp > 0) alive[unit.kind] += 1
     }
@@ -1215,7 +1215,7 @@ function endOfMatchStats(): void {
   const freed = createMatch(8)
   const living: Record<number, Record<UnitKind, number>> = {}
   for (let owner = 0; owner < freed.playerCount; owner++) {
-    living[owner] = { porter: 0, pike: 0, howler: 0, drone: 0 }
+    living[owner] = { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }
   }
   for (const unit of freed.units) {
     const row = living[unit.owner]
@@ -2437,6 +2437,7 @@ replayCarriesSpeed()
 replayShowsRecordedStats()
 powerDebrisAndBatteries()
 pillarRechargesPower()
+frogFreeze()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6769,4 +6770,118 @@ function pillarRechargesPower(): void {
   }
   assert(Math.abs(playedUnit.power - liveUnit.power) < 1e-6, 'replay Power diverged while a Pillar was charging')
   assert(playedUnit.power > 0.2, 'replay did not recharge under the Pillar')
+}
+
+function frogFreeze(): void {
+  const stats = UNIT_STATS.frog
+  assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 12 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
+  assert(stats.speed === UNIT_STATS.pike.speed && stats.sight === UNIT_STATS.pike.sight, 'Frog speed or sight does not match a Flasher')
+  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 60 && FROG_FREEZE_COOLDOWN === 90 && FROG_POWER_HIT === 0.5, 'Frog Power or Freeze timing changed')
+  const panel = statsPanelHtml(12, 2, [blankSide(), blankSide()])
+  assert(panel.includes('Frog') && panel.includes('colspan="5"'), 'the statistics table left out the Frog')
+
+  const field = createMatch(29)
+  field.aiAcc = -30
+  field.sideAcc.fill(-30)
+  const pad = chargePad(field)
+  assert(pad, 'no open ground for a Frog')
+  const yard = makeBuilding(field, 0, 'yard', pad.tx + 14, pad.ty, true)
+  field.oreHeld[0] = 200
+  recomputeSupply(field)
+  assert(tryTrain(field, yard.id, 'frog') === null, 'the Factory rejected a Frog')
+  assert(yard.queue[0]?.kind === 'frog', 'the Frog was not queued')
+  assert(field.oreHeld[0] === 125, `training a Frog left ${field.oreHeld[0]} dumps`)
+  yard.queue = []
+  recomputeSupply(field)
+
+  const frog = makeUnit(field, 0, 'frog', (pad.tx + 0.5) * TILE, (pad.ty + 0.5) * TILE)
+  for (let i = 0; i < 60; i++) step(field, 1 / 60)
+  const frogPower = () => frog.power
+  assert(Math.abs(frogPower() - (1 - 1 / FROG_POWER_SECONDS)) < 0.001, `Frog Power is ${frog.power}`)
+  frog.power = 1
+  const foe = makeUnit(field, 1, 'pike', frog.x + 40, frog.y)
+  const stalker = makeUnit(field, 1, 'porter', frog.x, frog.y + 36)
+  stalker.order = { type: 'move', x: stalker.x + 400, y: stalker.y }
+  stalker.goalX = stalker.x + 400
+  stalker.goalY = stalker.y
+  const ally = makeUnit(field, 0, 'howler', frog.x - 28, frog.y)
+  ally.power = 0.8
+  const other = makeUnit(field, 0, 'frog', frog.x + 18, frog.y + 16)
+  const far = makeUnit(field, 1, 'drone', frog.x + 400, frog.y)
+  const weak = makeUnit(field, 1, 'pike', frog.x - 48, frog.y + 12)
+  weak.power = 0.4
+  field.selectedUnits = [frog.id]
+  const armed = commandSnapshot(field).find((cmd) => cmd.label === 'Freeze')
+  assert(armed && !armed.disabled && armed.detail === '90s', 'Freeze was missing from the Frog panel')
+  rememberLive(field, { op: 'frost', ids: [frog.id] })
+  commandFrost(field, [frog.id])
+  assert(frog.ice === 0 && frog.frostCd === FROG_FREEZE_COOLDOWN, 'the casting Frog froze itself')
+  assert(foe.ice === FROG_FREEZE_SECONDS && Math.abs(foe.power - 0.5) < 1e-6, 'the Flasher was not frozen at half Power')
+  assert(stalker.ice === FROG_FREEZE_SECONDS && stalker.goalX == null, 'the Stalker kept moving')
+  assert(ally.ice === FROG_FREEZE_SECONDS && Math.abs(ally.power - 0.3) < 1e-6, 'the friendly Gorilla was spared')
+  assert(other.ice === FROG_FREEZE_SECONDS && Math.abs(other.power - 0.5) < 1e-6, 'a second Frog was spared')
+  assert(far.ice === 0 && far.power === 1, 'Freeze reached past the Frog sight')
+  assert(weak.ice === FROG_FREEZE_SECONDS && weak.power === 0 && isShutdown(weak), 'half a bar did not shut a low-Power unit down')
+  assert(field.rings.length === 1, 'Freeze left no frost ring')
+  const held = stalker.x
+  step(field, 1 / 60)
+  assert(stalker.x === held && stalker.ice < FROG_FREEZE_SECONDS, 'a frozen Stalker walked or the countdown stalled')
+  const cooled = commandSnapshot(field).find((cmd) => cmd.label === 'Freeze')
+  assert(cooled?.disabled, 'Freeze stayed armed during its cooldown')
+  commandFrost(field, [frog.id])
+  assert(foe.ice < FROG_FREEZE_SECONDS, 'a second Freeze refreshed the ice during cooldown')
+
+  const brain = createMatch(31)
+  brain.aiAcc = 0
+  const open = chargePad(brain)
+  assert(open, 'no open ground for SiloAI Freeze')
+  const caster = makeUnit(brain, 1, 'frog', (open.tx + 0.5) * TILE, (open.ty + 0.5) * TILE)
+  const first = makeUnit(brain, 0, 'pike', caster.x + 30, caster.y)
+  const second = makeUnit(brain, 0, 'howler', caster.x - 22, caster.y + 16)
+  updateSiloAi(brain, 0.5)
+  assert(caster.frostCd === FROG_FREEZE_COOLDOWN, 'SiloAI did not Freeze a circle of enemies')
+  assert(first.ice === FROG_FREEZE_SECONDS && second.ice === FROG_FREEZE_SECONDS, 'SiloAI Freeze missed an enemy')
+
+  const hold = createMatch(33)
+  hold.aiAcc = 0
+  const home = chargePad(hold)
+  assert(home, 'no open ground for a withheld Freeze')
+  const patient = makeUnit(hold, 1, 'frog', (home.tx + 0.5) * TILE, (home.ty + 0.5) * TILE)
+  makeUnit(hold, 0, 'pike', patient.x + 26, patient.y)
+  makeUnit(hold, 1, 'pike', patient.x - 20, patient.y)
+  makeUnit(hold, 1, 'howler', patient.x + 12, patient.y + 24)
+  updateSiloAi(hold, 0.5)
+  assert(patient.frostCd === 0, 'SiloAI froze when friendlies outnumbered enemies')
+
+  const seed = 49
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  live.aiAcc = -30
+  live.sideAcc.fill(-30)
+  const replayPad = chargePad(live)
+  assert(replayPad, 'no open ground for the Freeze replay')
+  const liveFrog = makeUnit(live, 0, 'frog', (replayPad.tx + 0.5) * TILE, (replayPad.ty + 0.5) * TILE)
+  const liveFoe = makeUnit(live, 1, 'pike', liveFrog.x + 36, liveFrog.y)
+  rememberLive(live, { op: 'frost', ids: [liveFrog.id] })
+  commandFrost(live, [liveFrog.id])
+  for (let i = 0; i < 45; i++) step(live, 1 / 60)
+  const tape = finishRecording()
+  assert(tape && tape.actions.length === 1 && tape.actions[0]?.action.op === 'frost', 'Freeze was not the recorded order')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  played.aiAcc = -30
+  played.sideAcc.fill(-30)
+  const playedFrog = makeUnit(played, 0, 'frog', (replayPad.tx + 0.5) * TILE, (replayPad.ty + 0.5) * TILE)
+  const playedFoe = makeUnit(played, 1, 'pike', playedFrog.x + 36, playedFrog.y)
+  armPlayback(tape)
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(playedFoe.ice === liveFoe.ice && Math.abs(playedFoe.power - liveFoe.power) < 1e-6, 'replay Freeze diverged')
+  assert(playedFrog.frostCd === liveFrog.frostCd, 'replay dropped the Freeze cooldown')
+}
+
+function blankSide(): MatchState['stats'][number] {
+  return { created: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }, lost: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }, dumps: 0, silos: 0 }
 }

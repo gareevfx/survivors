@@ -317,6 +317,8 @@ export function makeUnit(
     cloak: 0,
     age: 0,
     frozen: null,
+    ice: 0,
+    frostCd: 0,
     power: 1,
   }
   state.units.push(unit)
@@ -345,8 +347,8 @@ export function cryoParty(state: MatchState, buildingId: number): Unit[] {
 
 export function blankSideStats(): SideStats {
   return {
-    created: { porter: 0, pike: 0, howler: 0, drone: 0 },
-    lost: { porter: 0, pike: 0, howler: 0, drone: 0 },
+    created: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 },
+    lost: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 },
     dumps: 0,
     silos: 0,
   }
@@ -483,6 +485,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     buildings: [],
     projectiles: [],
     particles: [],
+    rings: [],
     pings: [],
     toasts: [],
     nextId: 1,

@@ -51,7 +51,7 @@ export function updateScanners(state: MatchState): void {
   if (state.outcome || state.paused || handsOff(state)) return
   const side = controlledSide(state)
   const hovers = state.units.filter(
-    (unit) => unit.owner === side && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0 && unit.scanning,
+    (unit) => unit.owner === side && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0 && unit.ice <= 0 && unit.scanning,
   )
   if (!hovers.length) return
   const sight = sightGrids(state, side)
@@ -84,7 +84,7 @@ function playerHovers(state: MatchState, ids: number[]): Unit[] {
   const hovers: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.owner === side && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0) hovers.push(unit)
+    if (unit && unit.owner === side && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0 && unit.ice <= 0) hovers.push(unit)
   }
   return hovers
 }

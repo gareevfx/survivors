@@ -837,7 +837,7 @@ function pick(
   for (const unit of state.units) {
     if (unit.hp <= 0 || !viewUnitSeen(state, unit)) continue
     const d = Math.hypot(unit.x - x, unit.y - y)
-    const reach = (unit.kind === 'howler' ? 12 : 10) + 6
+    const reach = (unit.kind === 'howler' || unit.kind === 'frog' ? 12 : 10) + 6
     if (d <= reach && (!best || d < best.d)) best = { id: unit.id, d }
   }
   if (best) return { type: 'unit', id: best.id }
