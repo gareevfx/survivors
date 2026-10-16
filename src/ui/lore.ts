@@ -21,7 +21,7 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Flasher', body: 'Very fast unit;' },
   { name: 'Gorilla', body: 'Tank;' },
   { name: 'Hover', body: `Surface explorer; Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight.` },
-  { name: 'Frog', body: 'White buggy with a cryo tank. Freeze ices every other unit in its sight for 1 minute and takes half a Power bar from each of them.' },
+  { name: 'Frog', body: 'White buggy with a cryo tank. Freeze ices every other unit in its sight for 30 seconds. Frozen units keep their Power, and normal drain pauses until the ice ends.' },
 ]
 
 export function loreBody(name: string): string {

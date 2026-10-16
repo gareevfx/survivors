@@ -25,12 +25,10 @@ import {
   CRYO_SLOTS,
   FROG_FREEZE_COOLDOWN,
   FROG_FREEZE_SECONDS,
-  FROG_POWER_HIT,
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
   GRID_CLOAK_SECONDS,
   isShutdown,
-  powerSeconds,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -1089,8 +1087,8 @@ export function coverOpenSites(state: MatchState): void {
 }
 
 /**
- * Freeze every other unit inside this Frog's sight for one minute.
- * Each of those units that has Power loses half a bar. The caster is left out.
+ * Freeze every other unit inside this Frog's sight for 30 seconds.
+ * Freeze does not remove Power. The caster is left out.
  */
 export function commandFrost(state: MatchState, ids: number[]): void {
   if (state.outcome || state.paused) return
@@ -1104,16 +1102,6 @@ export function commandFrost(state: MatchState, ids: number[]): void {
       if (unit.id === frog.id || unit.hp <= 0 || unit.frozen != null) continue
       if (Math.hypot(unit.x - frog.x, unit.y - frog.y) > reach) continue
       unit.ice = FROG_FREEZE_SECONDS
-      if (powerSeconds(unit.kind) > 0) {
-        unit.power = Math.max(0, unit.power - FROG_POWER_HIT)
-        if (unit.power <= 0) {
-          unit.power = 0
-          unit.order = null
-          unit.idleAcquire = false
-          unit.scanning = false
-          unit.cloak = 0
-        }
-      }
       stopMoving(unit)
     }
     state.rings.push({ x: frog.x, y: frog.y, life: 0.7, max: 0.7, reach })

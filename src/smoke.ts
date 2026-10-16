@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_HIT, FROG_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -6776,7 +6776,7 @@ function frogFreeze(): void {
   const stats = UNIT_STATS.frog
   assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 12 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
   assert(stats.speed === UNIT_STATS.pike.speed && stats.sight === UNIT_STATS.pike.sight, 'Frog speed or sight does not match a Flasher')
-  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 60 && FROG_FREEZE_COOLDOWN === 90 && FROG_POWER_HIT === 0.5, 'Frog Power or Freeze timing changed')
+  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 30 && FROG_FREEZE_COOLDOWN === 90, 'Frog Power or Freeze timing changed')
   const panel = statsPanelHtml(12, 2, [blankSide(), blankSide()])
   assert(panel.includes('Frog') && panel.includes('colspan="5"'), 'the statistics table left out the Frog')
 
@@ -6816,16 +6816,18 @@ function frogFreeze(): void {
   rememberLive(field, { op: 'frost', ids: [frog.id] })
   commandFrost(field, [frog.id])
   assert(frog.ice === 0 && frog.frostCd === FROG_FREEZE_COOLDOWN, 'the casting Frog froze itself')
-  assert(foe.ice === FROG_FREEZE_SECONDS && Math.abs(foe.power - 0.5) < 1e-6, 'the Flasher was not frozen at half Power')
+  assert(foe.ice === FROG_FREEZE_SECONDS && foe.power === 1, 'Freeze changed the Flasher Power')
   assert(stalker.ice === FROG_FREEZE_SECONDS && stalker.goalX == null, 'the Stalker kept moving')
-  assert(ally.ice === FROG_FREEZE_SECONDS && Math.abs(ally.power - 0.3) < 1e-6, 'the friendly Gorilla was spared')
-  assert(other.ice === FROG_FREEZE_SECONDS && Math.abs(other.power - 0.5) < 1e-6, 'a second Frog was spared')
+  assert(ally.ice === FROG_FREEZE_SECONDS && ally.power === 0.8, 'Freeze changed the friendly Gorilla Power')
+  assert(other.ice === FROG_FREEZE_SECONDS && other.power === 1, 'Freeze changed the second Frog Power')
   assert(far.ice === 0 && far.power === 1, 'Freeze reached past the Frog sight')
-  assert(weak.ice === FROG_FREEZE_SECONDS && weak.power === 0 && isShutdown(weak), 'half a bar did not shut a low-Power unit down')
+  assert(weak.ice === FROG_FREEZE_SECONDS && weak.power === 0.4 && !isShutdown(weak), 'Freeze discharged a low-Power unit')
   assert(field.rings.length === 1, 'Freeze left no frost ring')
   const held = stalker.x
   step(field, 1 / 60)
   assert(stalker.x === held && stalker.ice < FROG_FREEZE_SECONDS, 'a frozen Stalker walked or the countdown stalled')
+  assert(foe.power === 1 && ally.power === 0.8 && weak.power === 0.4, 'a frozen unit kept draining Power')
+  assert(Math.abs(far.power - (1 - 1 / HOVER_POWER_SECONDS / 60)) < 1e-6, 'an unfrozen Hover stopped draining')
   const cooled = commandSnapshot(field).find((cmd) => cmd.label === 'Freeze')
   assert(cooled?.disabled, 'Freeze stayed armed during its cooldown')
   commandFrost(field, [frog.id])
@@ -6879,7 +6881,23 @@ function frogFreeze(): void {
     step(played, 1 / 60)
   }
   assert(playedFoe.ice === liveFoe.ice && Math.abs(playedFoe.power - liveFoe.power) < 1e-6, 'replay Freeze diverged')
+  assert(liveFoe.power === 1, 'a frozen Flasher drained across the replay')
   assert(playedFrog.frostCd === liveFrog.frostCd, 'replay dropped the Freeze cooldown')
+
+  const iced = createMatch(35)
+  iced.aiAcc = -30
+  iced.sideAcc.fill(-30)
+  const bed = chargePad(iced)
+  assert(bed, 'no open ground for a frozen recharge')
+  makeBuilding(iced, 0, 'tower', bed.tx, bed.ty, true)
+  rebuildBlocked(iced)
+  const charging = makeUnit(iced, 0, 'pike', (bed.tx + 1.5) * TILE, (bed.ty + 0.5) * TILE)
+  charging.power = 0.5
+  const charger = makeUnit(iced, 1, 'frog', charging.x + 20, charging.y)
+  commandFrost(iced, [charger.id])
+  assert(charging.ice === FROG_FREEZE_SECONDS && charging.power === 0.5, 'Freeze changed Power before the Pillar ticked')
+  step(iced, 1)
+  assert(Math.abs(charging.power - (0.5 + 1 / PILLAR_CHARGE_SECONDS)) < 1e-6, 'a friendly Pillar stopped charging a frozen unit')
 }
 
 function blankSide(): MatchState['stats'][number] {

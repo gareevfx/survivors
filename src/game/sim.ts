@@ -1733,6 +1733,7 @@ function drainPower(state: MatchState, dt: number): void {
       unit.power = Math.min(1, unit.power + dt / PILLAR_CHARGE_SECONDS)
       continue
     }
+    if (unit.ice > 0) continue
     if (unit.power <= 0) {
       unit.power = 0
       continue

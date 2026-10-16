@@ -34,12 +34,10 @@ export const FLASHER_POWER_SECONDS = 3 * 60
 export const GORILLA_POWER_SECONDS = 10 * 60
 export const HOVER_POWER_SECONDS = 8 * 60
 export const FROG_POWER_SECONDS = 6 * 60
-/** Frog Freeze holds every other unit in its sight this long. */
-export const FROG_FREEZE_SECONDS = 60
+/** Frog Freeze holds every other unit in its sight this long. Power does not drain while that lasts. */
+export const FROG_FREEZE_SECONDS = 30
 /** Seconds before that Frog can Freeze again. */
 export const FROG_FREEZE_COOLDOWN = 90
-/** Fraction of a full Power bar removed from each frozen unit that has Power. */
-export const FROG_POWER_HIT = 0.5
 /** SiloAI sends a combat unit to a battery or a friendly Pillar below this fraction of Power. */
 export const POWER_LOW = 0.3
 /** A friendly Pillar refills Power from empty to full in this many seconds, and drain stops while that lasts. */
@@ -185,7 +183,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   frog: {
     label: 'Frog',
-    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 1 minute and takes half a Power bar. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
+    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 30 seconds. Frozen units keep their Power, and normal drain pauses until the ice ends. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
     hp: 64,
     speed: 104,
     radius: 11,
@@ -344,7 +342,7 @@ export interface Unit {
   age: number
   /** Cryo this Stalker is frozen inside. Null while the Stalker is on the map. */
   frozen: number | null
-  /** Seconds left in a Frog Freeze. The unit stays on the map and cannot move or act. */
+  /** Seconds left in a Frog Freeze. The unit stays on the map, cannot move or act, and its Power does not drain. */
   ice: number
   /** Seconds until this Frog can Freeze again. */
   frostCd: number
