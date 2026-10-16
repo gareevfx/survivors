@@ -148,28 +148,12 @@ export function renderWorld(
 
   const selected = new Set(state.selectedUnits)
   const units = state.units.slice().sort((a, b) => a.y - b.y)
-  const ground = state.animals
-    .filter((animal) => animal.kind === 'bear' || animal.kind === 'moose')
-    .sort((a, b) => a.y - b.y)
-  let groundAt = 0
-  const drawGroundUntil = (y: number) => {
-    while (groundAt < ground.length) {
-      const animal = ground[groundAt]
-      if (!animal || animal.y > y) break
-      groundAt += 1
-      if (animal.x < view.l || animal.y < view.t || animal.x > view.r || animal.y > view.b) continue
-      if (!viewTileVisible(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE))) continue
-      drawAnimal(ctx, animal)
-    }
-  }
   for (const unit of units) {
-    drawGroundUntil(unit.y)
     if (!viewUnitSeen(state, unit)) continue
     if (unit.x < view.l || unit.y < view.t || unit.x > view.r || unit.y > view.b) continue
     if (selected.has(unit.id)) drawOrderLine(ctx, unit)
     drawUnit(ctx, state, unit, selected.has(unit.id))
   }
-  drawGroundUntil(Number.POSITIVE_INFINITY)
 
   const viewer = state.bothCam ? -1 : state.enemyCam ? 1 : controlledSide(state)
   for (const shot of state.projectiles) {
@@ -292,7 +276,7 @@ function drawBirds(
   view: { l: number; t: number; r: number; b: number },
 ): void {
   for (const animal of state.animals) {
-    if (animal.kind !== 'crow' && animal.kind !== 'eagle') continue
+    if (animal.kind !== 'crow') continue
     if (animal.x < view.l || animal.y < view.t || animal.x > view.r || animal.y > view.b) continue
     if (!viewTileVisible(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE))) continue
     drawAnimal(ctx, animal)

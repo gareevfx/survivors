@@ -175,6 +175,7 @@ button, canvas { font: inherit; }
 
 .top-actions button,
 #hint button,
+#replay,
 #again,
 #to-menu,
 #donat-close,
@@ -190,6 +191,7 @@ button, canvas { font: inherit; }
 
 .top-actions button:hover,
 #hint button:hover,
+#replay:hover,
 #again:hover,
 #to-menu:hover,
 #donat-close:hover,
@@ -527,8 +529,19 @@ button, canvas { font: inherit; }
   line-height: 1.05;
 }
 
-#again, #to-menu { margin-top: 14px; }
-#to-menu { margin-left: 8px; }
+.end-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+#replay, #again, #to-menu { margin: 0; }
+
+#cams[aria-pressed='true'],
+#speed[aria-pressed='true'] {
+  color: var(--paper);
+  border-color: var(--gold);
+}
 
 .end-card {
   width: min(880px, 100%);

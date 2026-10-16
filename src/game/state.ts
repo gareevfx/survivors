@@ -478,6 +478,8 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     stats: Array.from({ length: playerCount }, () => blankSideStats()),
     paused: false,
     speed: 1,
+    simTick: 0,
+    replay: false,
     outcome: null,
     selectedUnits: [],
     selectedBuilding: null,

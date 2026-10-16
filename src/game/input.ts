@@ -14,6 +14,7 @@ import {
   tryPlace,
   tryTrain,
 } from './commands'
+import { rememberAlways, rememberLive } from './replay'
 import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, pushToast, rockAt, sideAnchor, unitById } from './state'
 import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
@@ -91,7 +92,7 @@ export function attachInput(opts: {
 
   function armPlace(kind: BuildingKind): void {
     const state = opts.getState()
-    if (state.outcome || state.paused || handsOff(state)) return
+    if (state.outcome || state.paused || state.replay || handsOff(state)) return
     const side = controlledSide(state)
     const keep = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
@@ -107,8 +108,10 @@ export function attachInput(opts: {
 
   function trainSelected(kind: UnitKind): void {
     const state = opts.getState()
+    if (state.replay) return
     const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     if (!building || building.owner !== controlledSide(state)) return
+    rememberLive(state, { op: 'train', buildingId: building.id, kind })
     const error = tryTrain(state, building.id, kind)
     if (error) pushToast(state, error)
   }
@@ -141,7 +144,7 @@ function clearSelection(state: MatchState): void {
 
   function onLeftClick(sx: number, sy: number, shift: boolean, touch: boolean): void {
     const state = opts.getState()
-    if (state.outcome) return
+    if (state.outcome || state.replay) return
     const world = worldAt(sx, sy)
     opts.onActivity()
 
@@ -153,17 +156,20 @@ function clearSelection(state: MatchState): void {
         const tx = Math.floor(world.x / TILE)
         const ty = Math.floor(world.y / TILE)
         const porters = state.selectedUnits.filter((id) => unitById(state, id)?.kind === 'porter')
+        rememberLive(state, { op: 'place', owner: side, kind: state.placement, tx, ty, porters })
         const error = tryPlace(state, side, state.placement, tx, ty, porters)
         if (error) pushToast(state, error)
         return
       }
 
       if (state.attackMoveArmed && state.selectedUnits.length) {
+        rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: true })
         commandMove(state, state.selectedUnits, world.x, world.y, true)
         state.attackMoveArmed = false
         return
       }
       if (state.moveArmed && state.selectedUnits.length) {
+        rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: false })
         commandMove(state, state.selectedUnits, world.x, world.y, false)
         state.moveArmed = false
         return
@@ -173,6 +179,7 @@ function clearSelection(state: MatchState): void {
       if (touch && state.selectedUnits.length && touchHit?.type === 'unit') {
         const unit = unitById(state, touchHit.id)
         if (unit && unit.owner !== side) {
+          rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: touchHit.id, kind: 'unit' })
           commandAttack(state, state.selectedUnits, touchHit.id, 'unit')
           return
         }
@@ -180,24 +187,33 @@ function clearSelection(state: MatchState): void {
       if (touch && state.selectedUnits.length && touchHit?.type === 'building') {
         const building = buildingById(state, touchHit.id)
         if (building?.ruined) {
+          rememberLive(state, { op: 'repair', ids: state.selectedUnits, buildingId: touchHit.id })
           const error = commandRepair(state, state.selectedUnits, touchHit.id)
           if (error) pushToast(state, error)
           return
         }
         if (building && building.owner !== side) {
+          rememberLive(state, { op: 'harvest', ids: state.selectedUnits, buildingId: touchHit.id })
           if (!commandHarvestOrAttack(state, state.selectedUnits, touchHit.id)) {
+            rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: touchHit.id, kind: 'building' })
             commandAttack(state, state.selectedUnits, touchHit.id, 'building')
           }
           return
         }
       }
       if (touch && state.selectedUnits.length && touchHit?.type === 'rock') {
+        rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: touchHit.id, kind: 'rock' })
         commandAttack(state, state.selectedUnits, touchHit.id, 'rock')
         return
       }
       if (touch && state.selectedUnits.length && (!touchHit || touchHit.type === 'ore')) {
-        if (touchHit?.type === 'ore') commandGather(state, state.selectedUnits, touchHit.id)
-        else commandMove(state, state.selectedUnits, world.x, world.y, false)
+        if (touchHit?.type === 'ore') {
+          rememberLive(state, { op: 'gather', ids: state.selectedUnits, nodeId: touchHit.id })
+          commandGather(state, state.selectedUnits, touchHit.id)
+        } else {
+          rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: false })
+          commandMove(state, state.selectedUnits, world.x, world.y, false)
+        }
         return
       }
     }
@@ -268,7 +284,7 @@ function clearSelection(state: MatchState): void {
 
   function onRightClick(sx: number, sy: number): void {
     const state = opts.getState()
-    if (state.outcome) return
+    if (state.outcome || state.replay) return
     opts.onActivity()
     const side = controlledSide(state)
     if (handsOff(state)) return
@@ -281,6 +297,7 @@ function clearSelection(state: MatchState): void {
     if (state.paused) return
     const world = worldAt(sx, sy)
     if (state.selectedBuilding != null && state.selectedUnits.length === 0) {
+      rememberLive(state, { op: 'rally', buildingId: state.selectedBuilding, x: world.x, y: world.y })
       commandRally(state, state.selectedBuilding, world.x, world.y)
       return
     }
@@ -289,6 +306,7 @@ function clearSelection(state: MatchState): void {
     if (hit?.type === 'unit') {
       const unit = unitById(state, hit.id)
       if (unit && unit.owner !== side) {
+        rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: hit.id, kind: 'unit' })
         commandAttack(state, state.selectedUnits, hit.id, 'unit')
         return
       }
@@ -296,6 +314,7 @@ function clearSelection(state: MatchState): void {
     if (hit?.type === 'building') {
       const building = buildingById(state, hit.id)
       if (building?.ruined) {
+        rememberLive(state, { op: 'repair', ids: state.selectedUnits, buildingId: hit.id })
         const error = commandRepair(state, state.selectedUnits, hit.id)
         if (error) pushToast(state, error)
         return
@@ -303,28 +322,35 @@ function clearSelection(state: MatchState): void {
       if (building && building.owner === side && !building.complete) {
         const workers = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter' && unitById(state, id)?.hp)
         if (workers) {
+          rememberLive(state, { op: 'construct', ids: state.selectedUnits, buildingId: hit.id })
           commandConstruct(state, state.selectedUnits, hit.id)
           return
         }
       }
       if (building && building.owner === side && building.complete && building.kind === 'keep' && building.cryo) {
+        rememberLive(state, { op: 'freeze', ids: state.selectedUnits, buildingId: hit.id })
         if (commandFreeze(state, state.selectedUnits, hit.id)) return
       }
       if (building && building.owner !== side) {
+        rememberLive(state, { op: 'harvest', ids: state.selectedUnits, buildingId: hit.id })
         if (!commandHarvestOrAttack(state, state.selectedUnits, hit.id)) {
+          rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: hit.id, kind: 'building' })
           commandAttack(state, state.selectedUnits, hit.id, 'building')
         }
         return
       }
     }
     if (hit?.type === 'ore') {
+      rememberLive(state, { op: 'gather', ids: state.selectedUnits, nodeId: hit.id })
       commandGather(state, state.selectedUnits, hit.id)
       return
     }
     if (hit?.type === 'rock') {
+      rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: hit.id, kind: 'rock' })
       commandAttack(state, state.selectedUnits, hit.id, 'rock')
       return
     }
+    rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: false })
     commandMove(state, state.selectedUnits, world.x, world.y, false)
   }
 
@@ -512,9 +538,10 @@ function clearSelection(state: MatchState): void {
       state.paused = !state.paused
       return
     }
-    if (event.code === 'Tab' && state.doubleGame && !state.outcome && !opts.commandOpen()) {
+    if (event.code === 'Tab' && state.doubleGame && !state.outcome && !state.replay && !opts.commandOpen()) {
       event.preventDefault()
       cycleSide(state)
+      rememberAlways(state, { op: 'side', owner: state.control })
       const keep = sideAnchor(state, state.control)
       if (keep) {
         const center = buildingCenter(keep)
@@ -539,6 +566,22 @@ function clearSelection(state: MatchState): void {
     }
     if (state.outcome) return
     if (
+      state.replay &&
+      (event.code === 'KeyQ' ||
+        event.code === 'KeyX' ||
+        event.code === 'KeyY' ||
+        event.code === 'KeyL' ||
+        event.code === 'KeyP' ||
+        event.code === 'KeyK' ||
+        event.code === 'KeyJ' ||
+        event.code === 'KeyH' ||
+        event.code === 'KeyT' ||
+        event.code === 'KeyC' ||
+        event.code === 'KeyR')
+    ) {
+      return
+    }
+    if (
       handsOff(state) &&
       (event.code === 'KeyQ' ||
         event.code === 'KeyX' ||
@@ -562,6 +605,7 @@ function clearSelection(state: MatchState): void {
       return
     }
     if (event.code === 'KeyX') {
+      rememberLive(state, { op: 'stop', ids: state.selectedUnits })
       commandStop(state, state.selectedUnits)
       state.attackMoveArmed = false
       state.moveArmed = false
@@ -598,6 +642,7 @@ function clearSelection(state: MatchState): void {
     if (event.code === 'KeyR') {
       if (state.paused) return
       if (state.selectedUnits.length) {
+        rememberLive(state, { op: 'repairNearest', ids: state.selectedUnits })
         const error = commandRepairNearest(state, state.selectedUnits)
         if (error) pushToast(state, error)
         return
@@ -614,6 +659,7 @@ function clearSelection(state: MatchState): void {
         pushToast(state, 'You need a stalker to repair')
         return
       }
+      rememberLive(state, { op: 'repair', ids: [worker.id], buildingId: building.id })
       const error = commandRepair(state, [worker.id], building.id)
       if (error) pushToast(state, error)
       return
@@ -624,7 +670,10 @@ function clearSelection(state: MatchState): void {
         const unit = unitById(state, id)
         return !!unit && unit.owner === controlledSide(state) && unit.kind === 'drone' && unit.hp > 0
       })
-      if (ids.length) toggleScanner(state, ids)
+      if (ids.length) {
+        rememberLive(state, { op: 'scan', ids })
+        toggleScanner(state, ids)
+      }
       return
     }
     if (event.code === 'KeyF') {
