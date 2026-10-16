@@ -1288,7 +1288,10 @@ function siloControlled(state: MatchState, unit: Unit): boolean {
   return unit.owner === 0 ? state.aiControl : unit.owner > 0
 }
 
-/** Gorillas on a SiloAI attack-move shoot buildings before units. */
+/**
+ * Gorillas on a SiloAI attack-move shoot buildings before units.
+ * Other SiloAI fighters take a combat unit or a structure inside aggro before a Stalker.
+ */
 function nearestSiegeBuilding(state: MatchState, unit: Unit, radius: number): Target | null {
   let best: Target | null = null
   let bestD = radius
@@ -1305,14 +1308,50 @@ function nearestSiegeBuilding(state: MatchState, unit: Unit, radius: number): Ta
   return best
 }
 
+function nearestCombatUnit(state: MatchState, unit: Unit, radius: number): Target | null {
+  let best: Target | null = null
+  let bestD = radius
+  for (const other of state.units) {
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0 || other.frozen != null) continue
+    if (other.kind === 'porter') continue
+    if (other.kind === 'drone' && unit.kind === 'howler') continue
+    const distance = Math.hypot(other.x - unit.x, other.y - unit.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = unitTarget(other)
+    }
+  }
+  return best
+}
+
+function nearestEnemyStructure(state: MatchState, unit: Unit, radius: number): Target | null {
+  let best: Target | null = null
+  let bestD = radius
+  const castleFirst = siloControlled(state, unit) && sideKnowsEnemyKeep(state, unit.owner)
+  for (const building of state.buildings) {
+    if (building.owner === unit.owner || building.hp <= 0) continue
+    if (castleFirst && building.kind !== 'keep') continue
+    const center = buildingCenter(building)
+    const distance = Math.hypot(center.x - unit.x, center.y - unit.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = buildingTarget(building)
+    }
+  }
+  return best
+}
+
 function nearestHostile(state: MatchState, unit: Unit, radius: number, buildingsToo: boolean): Target | null {
-  if (
-    buildingsToo &&
-    unit.kind === 'howler' &&
-    unit.order?.type === 'attackMove' &&
-    siloControlled(state, unit)
-  ) {
+  const aiFighter = (unit.kind === 'pike' || unit.kind === 'howler') && siloControlled(state, unit)
+  if (buildingsToo && unit.kind === 'howler' && unit.order?.type === 'attackMove' && aiFighter) {
     const structure = nearestSiegeBuilding(state, unit, radius)
+    if (structure) return structure
+  }
+  if (aiFighter) {
+    const gate = Math.min(radius, AGGRO_RANGE)
+    const combat = nearestCombatUnit(state, unit, gate)
+    if (combat) return combat
+    const structure = nearestEnemyStructure(state, unit, gate)
     if (structure) return structure
   }
   let best: Target | null = null

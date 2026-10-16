@@ -2,7 +2,7 @@ import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandCo
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, isWalkable, rockAt, rockById } from './state'
-import { BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
@@ -1629,16 +1629,35 @@ function arrivedAt(unit: Unit, point: { x: number; y: number }): boolean {
   return unit.path.length === 0 && Math.hypot(unit.x - point.x, unit.y - point.y) <= GUARD_ARRIVE
 }
 
+/** A combat unit or enemy structure already inside this fighter's engagement range. */
+function engagementOccupied(state: MatchState, fighter: Unit): boolean {
+  for (const other of state.units) {
+    if (other.owner === fighter.owner || other.hp <= 0 || other.cloak > 0 || other.frozen != null) continue
+    if (other.kind === 'porter') continue
+    if (other.kind === 'drone' && fighter.kind === 'howler') continue
+    if (Math.hypot(other.x - fighter.x, other.y - fighter.y) <= AGGRO_RANGE) return true
+  }
+  for (const building of state.buildings) {
+    if (building.owner === fighter.owner || building.hp <= 0) continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - fighter.x, center.y - fighter.y) <= AGGRO_RANGE) return true
+  }
+  return false
+}
+
 /**
  * Waiting Flashers and Gorillas patrol assets instead of standing at the rally.
  * The most exposed posts are filled first. An enemy beside one of them is attacked
- * at once. A fighter who has reached a post is sent to the next, so nobody stands.
+ * at once. Combat units come before Stalkers, and a Stalker is left alone while a
+ * structure or combat unit is inside engagement range. A fighter who has reached a
+ * post is sent to the next, so nobody stands.
  */
 function guardDuty(state: MatchState, side: Brain, units: Unit[], keepPoint: { x: number; y: number }): void {
   if (!units.length) return
   const posts = guardPosts(state, side, keepPoint).sort((a, b) => b.exposure - a.exposure || (a.key < b.key ? -1 : 1))
   if (!posts.length) return
   const busy = new Set<number>()
+  const enemies: Unit[] = []
   for (const enemy of state.units) {
     if (enemy.owner === side.owner || enemy.hp <= 0 || enemy.kind === 'drone' || enemy.cloak > 0) continue
     if (!tileBit(state, side.visible, Math.floor(enemy.x / TILE), Math.floor(enemy.y / TILE))) continue
@@ -1646,7 +1665,10 @@ function guardDuty(state: MatchState, side: Brain, units: Unit[], keepPoint: { x
     for (const post of posts) {
       if (Math.hypot(enemy.x - post.x, enemy.y - post.y) <= GUARD_ALERT) near = true
     }
-    if (!near) continue
+    if (near) enemies.push(enemy)
+  }
+  enemies.sort((a, b) => Number(a.kind === 'porter') - Number(b.kind === 'porter') || a.id - b.id)
+  for (const enemy of enemies) {
     let chosen: Unit | undefined
     let chosenD = Infinity
     for (const unit of units) {
@@ -1663,6 +1685,7 @@ function guardDuty(state: MatchState, side: Brain, units: Unit[], keepPoint: { x
       }
     }
     if (!chosen) continue
+    if (enemy.kind === 'porter' && engagementOccupied(state, chosen)) continue
     busy.add(chosen.id)
     const order = chosen.order
     if (order?.type === 'attack' && order.kind === 'unit' && order.targetId === enemy.id) continue

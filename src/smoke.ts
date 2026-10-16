@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2486,6 +2486,7 @@ siloAiRaisesStorageAtRemoteDumps()
 siloAiWidensNarrowPassages()
 siloAiStoresAtNewDumpsWhileHomeRemains()
 siloAiAimsGorillasAtBuildings()
+siloAiFightsStructuresBeforeStalkers()
 humanPlacementIgnoresAiGap()
 siloAiAttacksInWaves()
 combatUnitsGuardWhileTheWaveGathers()
@@ -4606,6 +4607,93 @@ function siloAiAimsGorillasAtBuildings(): void {
     recomputeSupply(train)
   }
   assert(howlers === 4 && pikes === 2, `siege mix was ${howlers} Gorillas and ${pikes} Flashers`)
+}
+
+function focusOf(unit: Unit | undefined): { kind: string; id: number } | null {
+  const order = unit?.order
+  if (order?.type === 'attackMove' && order.focusKind != null && order.focusId != null) {
+    return { kind: order.focusKind, id: order.focusId }
+  }
+  if (order?.type === 'attack') return { kind: order.kind, id: order.targetId }
+  return null
+}
+
+/** Open ground far from every structure, with room for a Stalker, a Flasher, and a Factory. */
+function engagementGround(state: MatchState): { tx: number; ty: number; x: number; y: number } {
+  for (let ty = 8; ty < state.mapH - 8; ty++) {
+    for (let tx = 8; tx < state.mapW - 8; tx++) {
+      if (!isWalkable(state, tx, ty) || !isWalkable(state, tx + 2, ty) || !isWalkable(state, tx - 5, ty)) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      let clear = true
+      for (const building of state.buildings) {
+        if (building.hp <= 0) continue
+        const center = buildingCenter(building)
+        if (Math.hypot(center.x - x, center.y - y) < 420) clear = false
+      }
+      if (clear) return { tx, ty, x, y }
+    }
+  }
+  throw new Error('no open ground for the engagement test')
+}
+
+function siloAiFightsStructuresBeforeStalkers(): void {
+  assert(AGGRO_RANGE === 176, `engagement range is ${AGGRO_RANGE}`)
+  const state = createMatch(43)
+  state.aiAcc = -30
+  const origin = engagementGround(state)
+  const fighter = makeUnit(state, 1, 'pike', origin.x, origin.y)
+  const stalker = makeUnit(state, 0, 'porter', (origin.tx + 2.5) * TILE, origin.y)
+  const foe = makeUnit(state, 0, 'pike', (origin.tx - 4.5) * TILE, origin.y)
+  assert(Math.hypot(foe.x - stalker.x, foe.y - stalker.y) > UNIT_STATS.pike.sight, 'the enemy Flasher covers the Stalker')
+  const foeGap = Math.hypot(fighter.x - foe.x, fighter.y - foe.y)
+  const stalkerGap = Math.hypot(fighter.x - stalker.x, fighter.y - stalker.y)
+  assert(foeGap <= AGGRO_RANGE, 'the enemy Flasher is outside engagement range')
+  assert(stalkerGap < foeGap, 'the Stalker was not the closer target')
+  commandMove(state, [fighter.id], origin.x + 8, origin.y, true)
+  step(state, 1 / 60)
+  const combatFocus = focusOf(unitById(state, fighter.id))
+  assert(
+    combatFocus?.kind === 'unit' && combatFocus.id === foe.id,
+    'SiloAI captured a Stalker while a Flasher was in engagement range',
+  )
+
+  foe.hp = 0
+  const yard = makeBuilding(state, 0, 'yard', origin.tx + 1, origin.ty - 5, true)
+  const stood = unitById(state, fighter.id)
+  assert(stood, 'the Flasher vanished before the Factory check')
+  const yardGap = Math.hypot(buildingCenter(yard).x - stood.x, buildingCenter(yard).y - stood.y)
+  const stalkerNow = Math.hypot(stalker.x - stood.x, stalker.y - stood.y)
+  assert(yardGap <= AGGRO_RANGE, 'the Factory is outside engagement range')
+  assert(stalkerNow < yardGap, 'the Stalker was not closer than the Factory')
+  stood.order = { type: 'attackMove', x: origin.x + 8, y: origin.y, focusId: null, focusKind: null }
+  step(state, 1 / 60)
+  const buildingFocus = focusOf(unitById(state, fighter.id))
+  assert(
+    buildingFocus?.kind === 'building' && buildingFocus.id === yard.id,
+    'SiloAI captured a Stalker while a Factory was in engagement range',
+  )
+
+  yard.hp = 0
+  const again = unitById(state, fighter.id)
+  assert(again, 'the Flasher vanished before the Stalker check')
+  again.order = { type: 'attackMove', x: origin.x + 8, y: origin.y, focusId: null, focusKind: null }
+  step(state, 1 / 60)
+  const stalkerFocus = focusOf(unitById(state, fighter.id))
+  assert(
+    stalkerFocus?.kind === 'unit' && stalkerFocus.id === stalker.id,
+    'SiloAI ignored a Stalker once the engagement range was clear',
+  )
+
+  const human = createMatch(44)
+  const spot = engagementGround(human)
+  const player = makeUnit(human, 0, 'pike', spot.x, spot.y)
+  const worker = makeUnit(human, 1, 'porter', (spot.tx + 2.5) * TILE, spot.y)
+  makeUnit(human, 1, 'pike', (spot.tx - 4.5) * TILE, spot.y)
+  commandMove(human, [player.id], spot.x + 8, spot.y, true)
+  step(human, 1 / 60)
+  const playerFocus = focusOf(unitById(human, player.id))
+  assert(playerFocus?.kind === 'unit' && playerFocus.id === worker.id, 'a player attack-move skipped the closer Stalker')
 }
 
 function humanPlacementIgnoresAiGap(): void {
