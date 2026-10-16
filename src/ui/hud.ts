@@ -9,7 +9,7 @@ import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, buildingCenter, cryoOccupants, cryoParty, unitById } from '../game/state'
+import { buildingById, buildingCenter, cryoOccupants, cryoParty, inFriendlyPillarSight, unitById } from '../game/state'
 import {
   BUILDING_STATS,
   CRYO_COST,
@@ -17,6 +17,7 @@ import {
   CRYO_SLOTS,
   PLAYER_COLOR,
   PLAYER_NAME,
+  powerSeconds,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
@@ -663,6 +664,15 @@ function nearestPlayerPorter(state: MatchState, building: Building): { id: numbe
   return best
 }
 
+function powerReadout(state: MatchState, unit: { kind: UnitKind; owner: number; x: number; y: number; power: number }): string {
+  if (powerSeconds(unit.kind) <= 0) return ''
+  const charging = inFriendlyPillarSight(state, unit) && unit.power < 1
+  const shut = unit.power <= 0 && !charging
+  const pct = Math.round(Math.max(0, Math.min(1, unit.power)) * 100)
+  const width = Math.max(0, Math.min(1, unit.power)) * 100
+  return `<div class="meter power${charging ? ' charging' : ''}"><span style="width:${width}%"></span></div><p class="meta">Power ${pct}%${shut ? ' · Shut down' : ''}${charging ? ' · Recharging' : ''}</p>`
+}
+
 export function describeSelection(state: MatchState): string {
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building?.ruined && state.selectedUnits.length === 0) {
@@ -770,6 +780,7 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
+      ${powerReadout(state, unit)}
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}

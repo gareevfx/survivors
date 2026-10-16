@@ -19,6 +19,7 @@ import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, pushToast, rockAt, sideAnchor, unitById } from './state'
 import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
 import {
+  powerSeconds,
   TILE,
   type BuildingKind,
   type MatchState,
@@ -206,6 +207,9 @@ function clearSelection(state: MatchState): void {
         commandAttack(state, state.selectedUnits, touchHit.id, 'rock')
         return
       }
+      if (touch && state.selectedUnits.length && touchHit?.type === 'battery') {
+        if (orderBattery(state, touchHit.id)) return
+      }
       if (touch && state.selectedUnits.length && (!touchHit || touchHit.type === 'ore')) {
         if (touchHit?.type === 'ore') {
           rememberLive(state, { op: 'gather', ids: state.selectedUnits, nodeId: touchHit.id })
@@ -339,6 +343,9 @@ function clearSelection(state: MatchState): void {
         }
         return
       }
+    }
+    if (hit?.type === 'battery') {
+      if (orderBattery(state, hit.id)) return
     }
     if (hit?.type === 'ore') {
       rememberLive(state, { op: 'gather', ids: state.selectedUnits, nodeId: hit.id })
@@ -793,11 +800,33 @@ function clearSelection(state: MatchState): void {
   }
 }
 
+/** Right-click sends selected Flashers, Gorillas, and Hovers onto a battery. The move is recorded. */
+function orderBattery(state: MatchState, batteryId: number): boolean {
+  const battery = state.batteries.find((entry) => entry.id === batteryId)
+  if (!battery) return false
+  const ids = state.selectedUnits.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.hp > 0 && unit.power > 0 && powerSeconds(unit.kind) > 0
+  })
+  if (!ids.length) return false
+  const x = (battery.tx + 0.5) * TILE
+  const y = (battery.ty + 0.5) * TILE
+  rememberLive(state, { op: 'move', ids, x, y, attack: false })
+  commandMove(state, ids, x, y, false)
+  return true
+}
+
 function pick(
   state: MatchState,
   x: number,
   y: number,
-): { type: 'unit' | 'building' | 'ore' | 'rock' | 'grave'; id: number } | null {
+): { type: 'unit' | 'building' | 'ore' | 'rock' | 'grave' | 'battery'; id: number } | null {
+  for (const battery of state.batteries) {
+    if (!viewGroundShown(state, battery.tx, battery.ty)) continue
+    const cx = (battery.tx + 0.5) * TILE
+    const cy = (battery.ty + 0.5) * TILE
+    if (Math.hypot(cx - x, cy - y) <= 14) return { type: 'battery', id: battery.id }
+  }
   for (const node of state.ore) {
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     const cx = (node.tx + 0.5) * TILE

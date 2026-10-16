@@ -26,6 +26,7 @@ import {
   MINERS_PER_DEPOSIT,
   SILO_REPAIR_COST,
   GRID_CLOAK_SECONDS,
+  isShutdown,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -42,7 +43,7 @@ function living(state: MatchState, ids: number[]): Unit[] {
   const units: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.hp > 0) units.push(unit)
+    if (unit && unit.hp > 0 && !isShutdown(unit)) units.push(unit)
   }
   return units
 }

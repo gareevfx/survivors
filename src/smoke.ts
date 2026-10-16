@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2435,6 +2435,8 @@ endOfMatchStats()
 replayRepeatsTheMatch()
 replayCarriesSpeed()
 replayShowsRecordedStats()
+powerDebrisAndBatteries()
+pillarRechargesPower()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6454,4 +6456,317 @@ function replayShowsRecordedStats(): void {
   const still = statsPanelHtml(recorded.time, recorded.playerCount, recorded.stats)
   assert(still === frozen, 'playback changed the recorded statistics')
   assert(currentTape()?.actions.length === 0, 'sealing the statistics wrote an order')
+}
+
+function countAmount(state: MatchState, amount: number, seen: Set<number>): number {
+  return state.ore.filter((node) => node.amount === amount && !seen.has(node.id)).length
+}
+
+function powerDebrisAndBatteries(): void {
+  const debris = createMatch(11)
+  debris.aiAcc = -30
+  debris.sideAcc.fill(-30)
+  const seen = new Set(debris.ore.map((node) => node.id))
+  const yard = makeBuilding(debris, 0, 'yard', 8, 8, true)
+  yard.hp = 0
+  step(debris, 1 / 60)
+  const factoryPiles = debris.ore.filter((node) => node.amount === 15 && !seen.has(node.id))
+  assert(factoryPiles.length === 6, `a Factory left ${factoryPiles.length} piles of 15`)
+  for (const pile of factoryPiles) seen.add(pile.id)
+  const vault = makeBuilding(debris, 1, 'silo', 14, 8, true)
+  vault.stock = 30
+  vault.dropDumps = true
+  debris.oreHeld[1] = 80
+  vault.hp = 0
+  step(debris, 1 / 60)
+  assert(countAmount(debris, 10, seen) === 4, 'a Storage did not leave 4 piles of 10')
+  assert(countAmount(debris, 30, seen) === 1, 'a combat kill did not leave the stored dumps')
+  assert(debris.oreHeld[1] === 50, `the stored pile did not leave the bank (${debris.oreHeld[1]})`)
+  for (const node of debris.ore) if (node.amount === 10 || node.amount === 30) seen.add(node.id)
+  const pillar = makeBuilding(debris, 0, 'tower', 20, 8, true)
+  pillar.hp = 0
+  step(debris, 1 / 60)
+  assert(countAmount(debris, 50, seen) === 1, 'a Pillar did not leave one pile of 50')
+  const quiet = makeBuilding(debris, 1, 'silo', 24, 8, true)
+  quiet.stock = 15
+  quiet.hp = 0
+  const bank = debris.oreHeld[1]
+  step(debris, 1 / 60)
+  assert(!debris.ore.some((node) => node.amount === 15 && !seen.has(node.id)), 'a Storage dropped its stock without a combat kill')
+  assert(debris.oreHeld[1] === bank, 'debris changed the bank')
+  const pile = factoryPiles[0]
+  assert(pile, 'missing a Factory pile to gather')
+  const porter = makeUnit(debris, 0, 'porter', (pile.tx + 1.5) * TILE, (pile.ty + 0.5) * TILE)
+  commandGather(debris, [porter.id], pile.id)
+  let cargo = 0
+  for (let i = 0; i < 8 * 60; i++) {
+    step(debris, 1 / 60)
+    cargo = unitById(debris, porter.id)?.cargo ?? 0
+    if (cargo > 0) break
+  }
+  assert(cargo === GATHER_AMOUNT, `a Stalker gathered ${cargo} from building debris`)
+
+  const rates = createMatch(13)
+  rates.aiAcc = -30
+  rates.sideAcc.fill(-30)
+  const flasher = makeUnit(rates, 0, 'pike', 200, 200)
+  const ape = makeUnit(rates, 0, 'howler', 280, 200)
+  const hover = makeUnit(rates, 0, 'drone', 360, 200)
+  for (let i = 0; i < 60; i++) step(rates, 1 / 60)
+  const flasherPower = () => flasher.power
+  const apePower = () => ape.power
+  const hoverPower = () => hover.power
+  assert(Math.abs(flasherPower() - (1 - 1 / FLASHER_POWER_SECONDS)) < 0.001, `Flasher Power is ${flasher.power}`)
+  assert(Math.abs(apePower() - (1 - 1 / GORILLA_POWER_SECONDS)) < 0.001, `Gorilla Power is ${ape.power}`)
+  assert(Math.abs(hoverPower() - (1 - 1 / HOVER_POWER_SECONDS)) < 0.001, `Hover Power is ${hover.power}`)
+  ape.power = 0.00001
+  ape.order = { type: 'move', x: 800, y: 200 }
+  const held = ape.x
+  step(rates, 1 / 60)
+  assert(ape.power === 0 && isShutdown(ape), 'empty Power did not shut the Gorilla down')
+  assert(ape.hp > 0 && ape.order == null && ape.x === held, 'a shut-down Gorilla died or kept moving')
+  commandMove(rates, [ape.id], 900, 200, false)
+  assert(ape.order == null, 'a shut-down Gorilla accepted an order')
+
+  flasher.hp = 0
+  step(rates, 1 / 60)
+  const cellX = Math.floor(flasher.x / TILE)
+  const cellY = Math.floor(flasher.y / TILE)
+  const battery = rates.batteries.find((entry) => entry.tx === cellX && entry.ty === cellY)
+  assert(battery, 'a destroyed Flasher left no battery')
+  assert(!rates.units.some((unit) => unit.id === flasher.id), 'the destroyed Flasher stayed on the field')
+  hover.x = (cellX + 0.5) * TILE
+  hover.y = (cellY + 0.5) * TILE
+  hover.power = 0.2
+  step(rates, 1 / 60)
+  assert(hover.power === 1, 'standing on a battery did not refill Power')
+  assert(!rates.batteries.some((entry) => entry.id === battery.id), 'the battery stayed after it was picked up')
+
+  const brain = createMatch(14)
+  brain.aiAcc = 0
+  const home = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the battery run')
+  const spot = buildingCenter(home)
+  const tired = makeUnit(brain, 1, 'pike', spot.x + 48, spot.y)
+  tired.power = POWER_LOW - 0.05
+  const bx = Math.floor(tired.x / TILE) + 3
+  const by = Math.floor(tired.y / TILE)
+  brain.batteries.push({ id: brain.nextId++, tx: bx, ty: by })
+  brain.aiExplored[by * brain.mapW + bx] = 1
+  brain.aiVisible[by * brain.mapW + bx] = 1
+  updateSiloAi(brain, 0.5)
+  const sent = tired.order
+  const chargeX = (bx + 0.5) * TILE
+  const chargeY = (by + 0.5) * TILE
+  assert(sent?.type === 'move', 'SiloAI left a low-Power Flasher in place')
+  assert(Math.hypot(sent.x - chargeX, sent.y - chargeY) <= 8, 'SiloAI did not send the Flasher to the battery')
+  const fresh = makeUnit(brain, 1, 'howler', spot.x - 36, spot.y)
+  fresh.power = POWER_LOW
+  updateSiloAi(brain, 0.5)
+  const stayed = fresh.order
+  assert(stayed?.type !== 'move' || Math.hypot(stayed.x - chargeX, stayed.y - chargeY) > 8, 'SiloAI sent a Flasher that still had 30% Power')
+
+  const seed = 46
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  live.aiAcc = -30
+  live.sideAcc.fill(-30)
+  const victim = makeUnit(live, 1, 'pike', 320, 280)
+  victim.hp = 1
+  const hunter = makeUnit(live, 0, 'pike', victim.x + 30, victim.y)
+  rememberLive(live, { op: 'attack', ids: [hunter.id], targetId: victim.id, kind: 'unit' })
+  commandAttack(live, [hunter.id], victim.id, 'unit')
+  for (let i = 0; i < 90 && live.units.some((unit) => unit.id === victim.id); i++) step(live, 1 / 60)
+  assert(!live.units.some((unit) => unit.id === victim.id), 'the recorded shot left the Flasher alive')
+  assert(live.batteries.length === 1, 'the recorded kill left no battery')
+  const tape = finishRecording()
+  assert(tape && tape.actions.length === 1 && tape.actions[0]?.action.op === 'attack', 'the kill was not the only recorded order')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  played.aiAcc = -30
+  played.sideAcc.fill(-30)
+  const playedVictim = makeUnit(played, 1, 'pike', 320, 280)
+  playedVictim.hp = 1
+  makeUnit(played, 0, 'pike', playedVictim.x + 30, playedVictim.y)
+  armPlayback(tape)
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(played.batteries.length === live.batteries.length, 'replay dropped the battery')
+  assert(played.batteries[0]?.tx === live.batteries[0]?.tx && played.batteries[0]?.ty === live.batteries[0]?.ty, 'replay moved the battery')
+  const liveHunter = live.units.find((unit) => unit.kind === 'pike' && unit.owner === 0)
+  const playedHunter = played.units.find((unit) => unit.kind === 'pike' && unit.owner === 0)
+  assert(liveHunter && playedHunter, 'replay lost the hunter')
+  assert(Math.abs(playedHunter.power - liveHunter.power) < 1e-6, 'replay Power diverged from the match')
+}
+
+function chargePad(state: MatchState): { tx: number; ty: number } | null {
+  const margin = 12
+  for (let ty = margin; ty < state.mapH - margin; ty++) {
+    for (let tx = margin; tx < state.mapW - margin; tx++) {
+      if (!isWalkable(state, tx, ty) || !isWalkable(state, tx + 1, ty) || !isWalkable(state, tx + 10, ty)) continue
+      if (!isWalkable(state, tx + 20, ty) || !isWalkable(state, tx + 21, ty)) continue
+      const x = (tx + 0.5) * TILE
+      const y = (ty + 0.5) * TILE
+      let far = true
+      for (const building of state.buildings) {
+        const center = buildingCenter(building)
+        if (Math.hypot(x - center.x, y - center.y) < 480) {
+          far = false
+          break
+        }
+      }
+      if (!far) continue
+      const outside = Math.hypot(10 * TILE, 0)
+      if (outside <= BUILDING_STATS.tower.sight) continue
+      return { tx, ty }
+    }
+  }
+  return null
+}
+
+function pillarRechargesPower(): void {
+  const field = createMatch(17)
+  field.aiAcc = -30
+  field.sideAcc.fill(-30)
+  const pad = chargePad(field)
+  assert(pad, 'no open ground for a charging Pillar')
+  const pillar = makeBuilding(field, 0, 'tower', pad.tx, pad.ty, true)
+  const enemyPillar = makeBuilding(field, 1, 'tower', pad.tx + 20, pad.ty, true)
+  rebuildBlocked(field)
+  const center = buildingCenter(pillar)
+  const inside = makeUnit(field, 0, 'pike', (pad.tx + 1.5) * TILE, (pad.ty + 0.5) * TILE)
+  inside.power = 0
+  const outside = makeUnit(field, 0, 'howler', (pad.tx + 10.5) * TILE, (pad.ty + 0.5) * TILE)
+  outside.power = 0.5
+  const besideEnemy = makeUnit(field, 0, 'drone', (pad.tx + 21.5) * TILE, (pad.ty + 0.5) * TILE)
+  besideEnemy.power = 0.5
+  assert(Math.hypot(besideEnemy.x - buildingCenter(enemyPillar).x, besideEnemy.y - buildingCenter(enemyPillar).y) < BUILDING_STATS.tower.sight, 'the enemy Pillar test stood outside its sight')
+  assert(Math.hypot(besideEnemy.x - center.x, besideEnemy.y - center.y) > BUILDING_STATS.tower.sight, 'the enemy Pillar test was also inside a friendly Pillar')
+  step(field, 1 / 60)
+  assert(inside.power > 0 && !isShutdown(inside), 'a shut-down Flasher inside a friendly Pillar did not wake')
+  commandMove(field, [inside.id], inside.x + 40, inside.y, false)
+  assert(inside.order?.type === 'move', 'a Flasher that regained Power still refused orders')
+  inside.order = null
+  inside.path = []
+  inside.goalX = null
+  inside.goalY = null
+  inside.power = 0
+  outside.power = 0.5
+  besideEnemy.power = 0.5
+  const held = inside.x
+  for (let i = 0; i < 60; i++) step(field, 1 / 60)
+  const insidePower = () => inside.power
+  const outsidePower = () => outside.power
+  const enemyPower = () => besideEnemy.power
+  assert(Math.abs(insidePower() - 1 / PILLAR_CHARGE_SECONDS) < 1e-6, `friendly Pillar charged to ${inside.power}`)
+  assert(inside.x === held, 'the charging Flasher walked out of the Pillar')
+  assert(Math.abs(outsidePower() - (0.5 - 1 / GORILLA_POWER_SECONDS)) < 0.001, `a Gorilla outside the Pillar charged (${outside.power})`)
+  assert(Math.abs(enemyPower() - (0.5 - 1 / HOVER_POWER_SECONDS)) < 0.001, `an enemy Pillar recharged the Hover (${besideEnemy.power})`)
+  inside.power = 1
+  step(field, 1 / 60)
+  assert(inside.power === 1, 'a Pillar charged Power past full')
+
+  const brain = createMatch(19)
+  brain.aiAcc = 0
+  const home = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the Pillar run')
+  const spot = buildingCenter(home)
+  const inward = spot.x < (brain.mapW * TILE) / 2 ? 1 : -1
+  const tired = makeUnit(brain, 1, 'pike', spot.x + inward * 180, spot.y)
+  tired.power = POWER_LOW - 0.05
+  const pillarCenterX = tired.x + inward * 300
+  const ownPillar = makeBuilding(brain, 1, 'tower', Math.floor(pillarCenterX / TILE), Math.floor(tired.y / TILE), true)
+  const ownCenter = buildingCenter(ownPillar)
+  const gap = Math.hypot(tired.x - ownCenter.x, tired.y - ownCenter.y)
+  const stand = BUILDING_STATS.tower.sight - PILLAR_CHARGE_INSET
+  assert(gap > BUILDING_STATS.tower.sight, 'the low-Power Flasher already stood inside the Pillar')
+  const approachX = ownCenter.x + ((tired.x - ownCenter.x) / gap) * stand
+  const approachY = ownCenter.y + ((tired.y - ownCenter.y) / gap) * stand
+  const walk = gap - stand
+  const batteryDistance = walk + 140
+  const batteryX = Math.floor((tired.x - inward * batteryDistance) / TILE)
+  const batteryY = Math.floor(tired.y / TILE)
+  brain.batteries.push({ id: brain.nextId++, tx: batteryX, ty: batteryY })
+  const batteryIndex = batteryY * brain.mapW + batteryX
+  brain.aiExplored[batteryIndex] = 1
+  brain.aiVisible[batteryIndex] = 1
+  updateSiloAi(brain, 0.5)
+  const toPillar = tired.order
+  assert(toPillar?.type === 'move', 'SiloAI left a low-Power Flasher outside the nearer Pillar')
+  assert(Math.hypot(toPillar.x - approachX, toPillar.y - approachY) <= 8, 'SiloAI did not stop inside the Pillar sight')
+  const batteryCenterX = (batteryX + 0.5) * TILE
+  const batteryCenterY = (batteryY + 0.5) * TILE
+  assert(Math.hypot(toPillar.x - batteryCenterX, toPillar.y - batteryCenterY) > 8, 'SiloAI preferred a farther battery over the Pillar')
+
+  const nearer = createMatch(21)
+  nearer.aiAcc = 0
+  const nearerHome = nearer.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(nearerHome, 'missing a Silo for the battery choice')
+  const nearerSpot = buildingCenter(nearerHome)
+  const nearerIn = nearerSpot.x < (nearer.mapW * TILE) / 2 ? 1 : -1
+  const chooser = makeUnit(nearer, 1, 'pike', nearerSpot.x + nearerIn * 160, nearerSpot.y)
+  chooser.power = POWER_LOW - 0.05
+  makeBuilding(nearer, 1, 'tower', Math.floor((chooser.x + nearerIn * 520) / TILE), Math.floor(chooser.y / TILE), true)
+  const nearTx = Math.floor(chooser.x / TILE) + nearerIn * 2
+  const nearTy = Math.floor(chooser.y / TILE)
+  nearer.batteries.push({ id: nearer.nextId++, tx: nearTx, ty: nearTy })
+  const nearIndex = nearTy * nearer.mapW + nearTx
+  nearer.aiExplored[nearIndex] = 1
+  nearer.aiVisible[nearIndex] = 1
+  updateSiloAi(nearer, 0.5)
+  const toBattery = chooser.order
+  const nearX = (nearTx + 0.5) * TILE
+  const nearY = (nearTy + 0.5) * TILE
+  assert(toBattery?.type === 'move', 'SiloAI ignored the nearer battery')
+  assert(Math.hypot(toBattery.x - nearX, toBattery.y - nearY) <= 8, 'SiloAI did not send the Flasher to the nearer battery')
+
+  const ignored = createMatch(23)
+  ignored.aiAcc = 0
+  const ignoredHome = ignored.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(ignoredHome, 'missing a Silo for the enemy Pillar')
+  const ignoredSpot = buildingCenter(ignoredHome)
+  const ignoredIn = ignoredSpot.x < (ignored.mapW * TILE) / 2 ? 1 : -1
+  const loyal = makeUnit(ignored, 1, 'howler', ignoredSpot.x + ignoredIn * 140, ignoredSpot.y)
+  loyal.power = POWER_LOW - 0.05
+  makeBuilding(ignored, 0, 'tower', Math.floor(loyal.x / TILE) + ignoredIn, Math.floor(loyal.y / TILE), true)
+  const farTx = Math.floor(loyal.x / TILE) - ignoredIn * 4
+  const farTy = Math.floor(loyal.y / TILE)
+  ignored.batteries.push({ id: ignored.nextId++, tx: farTx, ty: farTy })
+  const farIndex = farTy * ignored.mapW + farTx
+  ignored.aiExplored[farIndex] = 1
+  ignored.aiVisible[farIndex] = 1
+  updateSiloAi(ignored, 0.5)
+  const stillBattery = loyal.order
+  assert(stillBattery?.type === 'move', 'SiloAI treated an enemy Pillar as a charger')
+  assert(Math.hypot(stillBattery.x - (farTx + 0.5) * TILE, stillBattery.y - (farTy + 0.5) * TILE) <= 8, 'SiloAI did not keep the battery when the Pillar was hostile')
+
+  const seed = 47
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  live.aiAcc = -30
+  live.sideAcc.fill(-30)
+  const replayPad = chargePad(live)
+  assert(replayPad, 'no open ground for the charging replay')
+  makeBuilding(live, 0, 'tower', replayPad.tx, replayPad.ty, true)
+  const liveUnit = makeUnit(live, 0, 'pike', (replayPad.tx + 1.5) * TILE, (replayPad.ty + 0.5) * TILE)
+  liveUnit.power = 0.2
+  for (let i = 0; i < 90; i++) step(live, 1 / 60)
+  const tape = finishRecording()
+  assert(tape && tape.actions.length === 0, 'Pillar charging recorded an order')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  played.aiAcc = -30
+  played.sideAcc.fill(-30)
+  makeBuilding(played, 0, 'tower', replayPad.tx, replayPad.ty, true)
+  const playedUnit = makeUnit(played, 0, 'pike', (replayPad.tx + 1.5) * TILE, (replayPad.ty + 0.5) * TILE)
+  playedUnit.power = 0.2
+  armPlayback(tape)
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(Math.abs(playedUnit.power - liveUnit.power) < 1e-6, 'replay Power diverged while a Pillar was charging')
+  assert(playedUnit.power > 0.2, 'replay did not recharge under the Pillar')
 }
