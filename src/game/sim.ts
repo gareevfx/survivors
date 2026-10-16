@@ -42,6 +42,7 @@ import {
   CRYO_SLOTS,
   INTERACT,
   isShutdown,
+  FROG_THAW_POWER,
   PILLAR_CHARGE_SECONDS,
   PILLAR_DEBRIS_AMOUNT,
   PILLAR_DEBRIS_PILES,
@@ -93,7 +94,10 @@ export function step(state: MatchState, dt: number): void {
     unit.hitFlash = Math.max(0, unit.hitFlash - dt)
     unit.hurtTimer = Math.max(0, unit.hurtTimer - dt)
     if (unit.cloak > 0) unit.cloak = Math.max(0, unit.cloak - dt)
-    if (unit.ice > 0) unit.ice = Math.max(0, unit.ice - dt)
+    if (unit.ice > 0) {
+      unit.ice = Math.max(0, unit.ice - dt)
+      if (unit.ice === 0) applyThawPower(unit)
+    }
     if (unit.frostCd > 0) unit.frostCd = Math.max(0, unit.frostCd - dt)
     if (unit.frozen != null || unit.ice > 0) continue
     if (unit.kind === 'porter' && unit.hp > 0) {
@@ -1725,6 +1729,19 @@ function captureSide(state: MatchState, victim: number, captor: number): void {
   pushToast(state, `${PLAYER_NAME[victim] ?? 'A side'} is eliminated.`)
 }
 
+/** Half a Power bar comes off at the moment Freeze ends. Empty Power shuts the unit down. */
+function applyThawPower(unit: Unit): void {
+  if (powerSeconds(unit.kind) <= 0 || unit.hp <= 0) return
+  unit.power = Math.max(0, unit.power - FROG_THAW_POWER)
+  if (unit.power > 0) return
+  unit.power = 0
+  unit.order = null
+  unit.idleAcquire = false
+  unit.scanning = false
+  unit.cloak = 0
+  stopMoving(unit)
+}
+
 function drainPower(state: MatchState, dt: number): void {
   for (const unit of state.units) {
     const life = powerSeconds(unit.kind)
@@ -1733,6 +1750,7 @@ function drainPower(state: MatchState, dt: number): void {
       unit.power = Math.min(1, unit.power + dt / PILLAR_CHARGE_SECONDS)
       continue
     }
+    if (unit.ice > 0) continue
     if (unit.power <= 0) {
       unit.power = 0
       continue
