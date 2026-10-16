@@ -215,7 +215,7 @@ function northmarkPlaysItself(): void {
   assert(hidden, 'every mineral started inside Northmark sight')
   state.aiExplored[hidden.ty * MAP_W + hidden.tx] = 1
   state.oreHeld[0] = 800
-  for (let i = 0; i < 90; i++) step(state, 1 / 60)
+  for (let i = 0; i < 20; i++) step(state, 1 / 60)
 
   const porters = state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   const mined = porters.filter((unit) => {
@@ -1052,6 +1052,8 @@ function aiPlacesMoreFactoriesAndSilos(): void {
     state.buildings.some((building) => building.owner === 1 && building.kind === 'yard'),
     'Dunmarch did not start a factory',
   )
+  const homePoint = buildingCenter(home)
+  makeUnit(state, 1, 'porter', homePoint.x, homePoint.y + 36)
   finishSites()
   step(state, 0.5)
   const yards = state.buildings.filter((building) => building.owner === 1 && building.kind === 'yard')
@@ -4816,6 +4818,7 @@ function siloAiLeavesUnfinishedStorageExposed(): void {
   )
   escort.x = escortOrder.x
   escort.y = escortOrder.y
+  makeUnit(quiet, 1, 'porter', home.x, home.y + 36)
   quiet.aiAcc = 0
   updateSiloAi(quiet, 0.5)
   const raised = quiet.buildings.find((building) => building.owner === 1 && building.kind === 'silo' && !building.complete)
@@ -5032,6 +5035,8 @@ function siloAiRefusesUnchartedGround(): void {
   assert(areaCharted(state, 1, 'silo', blind.tx, blind.ty), 'charting the disk left the Storage site black')
   state.oreHeld[1] = 2000
   state.aiAcc = 0
+  const keepPoint = buildingCenter(keep)
+  makeUnit(state, 1, 'porter', keepPoint.x, keepPoint.y + 36)
   rebuildBlocked(state)
   updateSiloAi(state, 0.5)
   const built = state.buildings.find(
@@ -5555,6 +5560,13 @@ function fullStorageRefusesAHaul(): void {
   const remote = { id: field.nextId++, tx: cx, ty: cy, amount: 420, base: null }
   field.ore.push(remote)
   chartDisk(field, 1, cx, cy, radius)
+  const purseTx = aiKeep.tx < cx ? Math.max(1, aiKeep.tx - 6) : Math.min(field.mapW - 4, aiKeep.tx + 6)
+  const purse = makeBuilding(field, 1, 'silo', purseTx, Math.max(1, aiKeep.ty - 4), true)
+  purse.stock = STORAGE_CAP
+  assert(
+    footprintGap(purse.tx, purse.ty, BUILDING_STATS.silo.w, BUILDING_STATS.silo.h, remote.tx, remote.ty) > SILO_AI_EXPANSION_REACH,
+    'the Cryo purse Storage sits close enough to the remote heap to count as its drop-off',
+  )
   const filled = makeBuilding(field, 1, 'silo', cx + 5, cy, true)
   filled.stock = STORAGE_CAP
   const aiHome = buildingCenter(aiKeep)
@@ -5804,45 +5816,36 @@ function cryoPreservesStalkers(): void {
   assert(dropped.toasts.some((toast) => toast.text === 'Freeze cancelled.'), 'a short party did not say so')
 
   const brain = createMatch(24)
-  const elder = brain.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  const starters = brain.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(starters.length === 4, 'Dunmarch did not start with four Stalkers')
+  const elder = starters[0]
   assert(elder, 'Dunmarch has no Stalker')
-  elder.cargo = 0
-  elder.order = null
-  brain.oreHeld[1] = 200
+  for (const unit of starters) {
+    unit.cargo = 0
+    unit.order = null
+  }
+  brain.oreHeld[1] = 199
   const aiKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(aiKeep, 'Dunmarch has no Silo')
   aiKeep.cryo = true
   const bank = aiKeep
+  const pad = buildingCenter(aiKeep)
   rebuildBlocked(brain)
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
   assert(
     !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
-    'SiloAI froze a Stalker it still needed',
+    'SiloAI froze without 200 dumps',
   )
-  const pad = buildingCenter(aiKeep)
-  makeUnit(brain, 1, 'porter', pad.x, pad.y + 20)
-  makeUnit(brain, 1, 'porter', pad.x + 16, pad.y + 20)
+  elder.hp = 0
+  brain.oreHeld[1] = 200
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
   assert(
     !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
-    'SiloAI froze fewer than four spare Stalkers',
+    'SiloAI froze fewer than four Stalkers',
   )
-  makeUnit(brain, 1, 'porter', pad.x + 32, pad.y + 20)
-  makeUnit(brain, 1, 'porter', pad.x + 48, pad.y + 20)
-  for (const unit of brain.units) {
-    if (unit.owner === 1 && unit.kind === 'porter') {
-      unit.cargo = 0
-      unit.order = null
-    }
-  }
-  brain.oreHeld[1] = 200
-  brain.aiAcc = 0
-  updateSiloAi(brain, 0.5)
-  const sent = brain.units.filter((unit) => unit.owner === 1 && unit.order?.type === 'freeze')
-  assert(sent.length === 4, 'SiloAI did not send four Stalkers together')
-  for (const unit of sent) unit.order = null
+  elder.hp = UNIT_STATS.porter.hp
   bank.cryoRecover = 120
   brain.oreHeld[1] = 200
   brain.aiAcc = 0
@@ -5851,19 +5854,36 @@ function cryoPreservesStalkers(): void {
     !brain.units.some((unit) => unit.owner === 1 && unit.order?.type === 'freeze'),
     'SiloAI froze Stalkers during recovery',
   )
-  for (const unit of brain.units) {
-    if (unit.owner === 1 && unit.kind === 'porter' && unit.id !== elder.id) unit.hp = 0
-  }
-  elder.frozen = bank.id
-  elder.order = null
-  const partner = makeUnit(brain, 1, 'porter', pad.x, pad.y + 28)
-  partner.frozen = bank.id
   bank.cryoRecover = 0
+  for (const unit of brain.units) {
+    if (unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0) {
+      unit.cargo = 0
+      unit.order = null
+    }
+  }
+  brain.oreHeld[1] = 200
   brain.aiAcc = 0
   updateSiloAi(brain, 0.5)
-  assert(elder.frozen == null && partner.frozen == null, 'SiloAI left Stalkers frozen with nobody working')
+  const sent = brain.units.filter((unit) => unit.owner === 1 && unit.order?.type === 'freeze')
+  assert(sent.length === 4, 'SiloAI did not press Cryo for four Stalkers')
+  const extra = makeUnit(brain, 1, 'porter', pad.x, pad.y + 20)
+  const extraOrder = () => extra.order?.type
+  brain.oreHeld[1] = 200
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  const still = brain.units.filter((unit) => unit.owner === 1 && unit.order?.type === 'freeze')
+  assert(still.length === 4 && extraOrder() !== 'freeze', 'SiloAI pressed Cryo while a group was already inbound')
+  for (const unit of sent) {
+    unit.order = null
+    unit.frozen = bank.id
+  }
+  brain.oreHeld[1] = 200
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(sent.every((unit) => unit.frozen === bank.id), 'SiloAI defrosted a filled Cryo')
+  assert(extraOrder() !== 'freeze', 'SiloAI pressed Cryo while Stalkers were already inside')
   const cooled = () => bank.cryoRecover
-  assert(cooled() === CRYO_RECOVER, 'SiloAI thawed without starting recovery')
+  assert(cooled() === 0, 'a filled Cryo started recovery on its own')
 }
 
 function siloAiUsesHoverGrid(): void {
@@ -5936,7 +5956,12 @@ function siloAiBuysCryoFor250(): void {
   raiseBase(plenty, 1)
   updateSiloAi(plenty, 0.5)
   const plentyKeep = plenty.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
-  assert(plentyKeep && !plentyKeep.cryo, 'SiloAI added a Cryo while four Stalkers were still working')
+  assert(plentyKeep?.cryo, 'SiloAI waited to buy Cryo while it could pay 250')
+  assert(plenty.oreHeld[1] <= 2000 - CRYO_COST, 'the Cryo did not cost 250 while four Stalkers were working')
+  assert(
+    !plenty.buildings.some((building) => building.kind === 'keep' && building.owner === 1 && building.id !== plentyKeep?.id),
+    'SiloAI raised a second Silo for the Cryo',
+  )
 
   const state = createMatch(34)
   state.time = 0
@@ -5965,11 +5990,35 @@ function siloAiBuysCryoFor250(): void {
   assert(earlyKeep.cryo, 'SiloAI waited on Storage, Factory, and Pillar before the Cryo')
   assert(early.buildings.length === before, 'the early Cryo raised a building')
   assert(early.oreHeld[1] === 0, 'the early Cryo did not cost 250')
+
+  const bare = createMatch(39)
+  bare.time = 0
+  bare.oreHeld[1] = 250
+  bare.aiAcc = 0
+  const bareKeep = bare.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(bareKeep, 'Dunmarch has no Silo for a Cryo with no Stalkers')
+  for (const unit of bare.units) {
+    if (unit.owner === 1 && unit.kind === 'porter') unit.hp = 0
+  }
+  const bareBefore = bare.buildings.length
+  updateSiloAi(bare, 0.5)
+  assert(bareKeep.cryo, 'SiloAI skipped Cryo with no Stalkers on the map')
+  assert(bare.buildings.length === bareBefore, 'a Cryo with no Stalkers raised a building')
+  assert(bare.oreHeld[1] === 0, 'a Cryo with no Stalkers did not cost 250')
+
+  const short = createMatch(40)
+  short.time = 0
+  short.oreHeld[1] = 249
+  short.aiAcc = 0
+  const shortKeep = short.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(shortKeep, 'Dunmarch has no Silo for a short bank')
+  updateSiloAi(short, 0.5)
+  assert(!shortKeep.cryo, 'SiloAI bought Cryo with 249 dumps')
 }
 
 function siloAiBanksHovers(): void {
   const state = createMatch(35)
-  state.oreHeld[1] = 500
+  state.oreHeld[1] = 750
   state.aiAcc = 0
   const keep = raiseBase(state, 1)
   const home = buildingCenter(keep)

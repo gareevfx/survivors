@@ -1,4 +1,4 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreeze, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, isWalkable, rockAt, rockById } from './state'
@@ -125,8 +125,6 @@ const HOVER_GRID = 10
  * At this bank the side buys Hovers toward a Grid instead of another factory.
  */
 const HOVER_SURPLUS = 500
-/** Buy the Silo Cryo while fewer than this many Stalkers are on the map. */
-const CRYO_ACTIVE_LIMIT = 4
 
 /**
  * Pick the next patch of fog to enter.
@@ -269,8 +267,6 @@ function droneGoal(
 
 /** Seconds after a Grid order before this side may hide the flight again. The 45s cloak sits inside it. */
 const GRID_REUSE = 90
-/** Working Stalkers kept on the map. Anyone past this can be frozen as insurance. */
-const CRYO_KEEP_ACTIVE = 4
 
 /** Every living Drone stays on a scout flight. A second Drone takes a different patch. Ten or more may take the Grid instead. */
 function dispatchDrones(state: MatchState, side: Brain): void {
@@ -919,57 +915,29 @@ function wantsGridScout(side: Brain): boolean {
 }
 
 /**
- * Freeze a group of four spare Stalkers, or defrost when the crew is too small to work.
- * Four stay on the map, so the order waits until eight are active and the bank can pay 200.
- * A Cryo that is still recovering accepts no one.
+ * Press Cryo for a group of four whenever the vessels are empty, recovery is done,
+ * four Stalkers are on the map, and the bank can pay 200. A filled Cryo stays filled.
  */
 function tendCryo(state: MatchState, side: Brain): void {
   const cryo = state.buildings.find(
     (building) => building.owner === side.owner && building.kind === 'keep' && building.cryo && building.complete && building.hp > 0,
   )
-  if (!cryo) return
-  const active = state.units.filter(
-    (unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null,
-  )
-  const held = cryoOccupants(state, cryo.id)
-  if (held > 0 && active.length < 2) {
-    thawCryo(state, cryo.id)
-    return
-  }
-  if (cryo.cryoRecover > 0) return
-  if (held > 0 || cryoParty(state, cryo.id).length > 0) return
-  if (active.length < CRYO_KEEP_ACTIVE + CRYO_SLOTS) return
-  if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST * CRYO_SLOTS) return
-  const spares = active.filter(
-    (unit) =>
-      unit.id !== side.scout &&
-      unit.cargo <= 0 &&
-      unit.order?.type !== 'construct' &&
-      unit.order?.type !== 'repair' &&
-      unit.order?.type !== 'freeze',
-  )
-  if (spares.length < CRYO_SLOTS) return
-  commandFreeze(
-    state,
-    spares.slice(0, CRYO_SLOTS).map((unit) => unit.id),
-    cryo.id,
-  )
-}
-
-function activeStalkers(state: MatchState, owner: PlayerId): number {
-  let count = 0
+  if (!cryo || cryo.cryoRecover > 0) return
+  if (cryoOccupants(state, cryo.id) > 0 || cryoParty(state, cryo.id).length > 0) return
+  let active = 0
   for (const unit of state.units) {
-    if (unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null) count += 1
+    if (unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null) active += 1
   }
-  return count
+  if (active < CRYO_SLOTS) return
+  if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST * CRYO_SLOTS) return
+  commandFreezeAuto(state, cryo.id)
 }
 
-/** The Silo Cryo upgrade. It comes first whenever fewer than four Stalkers are active. */
+/** The Silo Cryo upgrade. Bought as soon as the Silo is finished and the bank can pay 250. */
 function cryoWanted(state: MatchState, side: Brain): boolean {
   if ((state.oreHeld[side.owner] ?? 0) < CRYO_COST) return false
   const keep = ownKeep(state, side.owner)
-  if (!keep?.complete || keep.cryo) return false
-  return activeStalkers(state, side.owner) < CRYO_ACTIVE_LIMIT
+  return !!keep?.complete && !keep.cryo
 }
 
 /** Surplus dumps fill a Hover Grid before another Factory goes up. */
