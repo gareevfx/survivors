@@ -441,6 +441,16 @@ button, canvas { font: inherit; }
   background: linear-gradient(90deg, #1a8cff, #7af0ff);
 }
 
+.meter.power.charging span {
+  animation: power-charge 1.1s ease-in-out infinite;
+}
+
+@keyframes power-charge {
+  0%,
+  100% { filter: brightness(1); }
+  50% { filter: brightness(1.55); }
+}
+
 #commands {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

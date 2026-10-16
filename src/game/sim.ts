@@ -12,6 +12,7 @@ import {
   buildingById,
   isWalkable,
   buildingCenter,
+  inFriendlyPillarSight,
   buildingRect,
   buildingTarget,
   cryoOccupants,
@@ -41,6 +42,7 @@ import {
   CRYO_SLOTS,
   INTERACT,
   isShutdown,
+  PILLAR_CHARGE_SECONDS,
   PILLAR_DEBRIS_AMOUNT,
   PILLAR_DEBRIS_PILES,
   powerSeconds,
@@ -1721,6 +1723,10 @@ function drainPower(state: MatchState, dt: number): void {
   for (const unit of state.units) {
     const life = powerSeconds(unit.kind)
     if (life <= 0 || unit.hp <= 0 || unit.frozen != null) continue
+    if (inFriendlyPillarSight(state, unit)) {
+      unit.power = Math.min(1, unit.power + dt / PILLAR_CHARGE_SECONDS)
+      continue
+    }
     if (unit.power <= 0) {
       unit.power = 0
       continue

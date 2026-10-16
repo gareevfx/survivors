@@ -33,8 +33,12 @@ export const INTERACT = 42
 export const FLASHER_POWER_SECONDS = 3 * 60
 export const GORILLA_POWER_SECONDS = 10 * 60
 export const HOVER_POWER_SECONDS = 8 * 60
-/** SiloAI sends a combat unit to a battery below this fraction of Power. */
+/** SiloAI sends a combat unit to a battery or a friendly Pillar below this fraction of Power. */
 export const POWER_LOW = 0.3
+/** A friendly Pillar refills Power from empty to full in this many seconds, and drain stops while that lasts. */
+export const PILLAR_CHARGE_SECONDS = 30
+/** SiloAI stops this far inside a Pillar's sight so the unit is charging, not standing on the edge. */
+export const PILLAR_CHARGE_INSET = 16
 /** Dumps left on the ground when a building is destroyed. */
 export const FACTORY_DEBRIS_PILES = 6
 export const FACTORY_DEBRIS_AMOUNT = 15
@@ -122,7 +126,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   pike: {
     label: 'Flasher',
-    blurb: 'Quick rider with a short reach. Power lasts 3 minutes, then the Flasher shuts down until a battery recharges it.',
+    blurb: 'Quick rider with a short reach. Power lasts 3 minutes, then the Flasher shuts down until a battery recharges it. Inside a friendly Pillar\'s sight, Power refills in 30 seconds instead of draining.',
     hp: 58,
     speed: 104,
     radius: 10,
@@ -139,7 +143,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   howler: {
     label: 'Gorilla',
-    blurb: 'Slow gunner with a long reach. Power lasts 10 minutes, then the Gorilla shuts down until a battery recharges it.',
+    blurb: 'Slow gunner with a long reach. Power lasts 10 minutes, then the Gorilla shuts down until a battery recharges it. Inside a friendly Pillar\'s sight, Power refills in 30 seconds instead of draining.',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -156,7 +160,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   drone: {
     label: 'Hover',
-    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight. Power lasts 8 minutes, then the Hover shuts down until a battery recharges it.`,
+    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight. Power lasts 8 minutes, then the Hover shuts down until a battery recharges it. Inside a friendly Pillar's sight, Power refills in 30 seconds instead of draining.`,
     hp: 80,
     speed: 118,
     radius: 8,
@@ -223,7 +227,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. Destruction leaves one pile of 50 dumps.',
+    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, or Hover inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
     w: 1,
     h: 1,
     hp: 160,
@@ -317,7 +321,8 @@ export interface Unit {
   frozen: number | null
   /**
    * Fraction of Power left, from 1 down to 0. Only a Flasher, Gorilla, or Hover drains it.
-   * At 0 the unit shuts down: it stays on the map, but it does not move, fire, or take orders until a battery refills it.
+   * At 0 the unit shuts down: it stays on the map, but it does not move, fire, or take orders until Power is above 0.
+   * A battery refills it. A finished friendly Pillar refills it while the unit is inside that Pillar's sight.
    */
   power: number
 }

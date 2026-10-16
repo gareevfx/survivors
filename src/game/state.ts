@@ -108,6 +108,19 @@ export function buildingCenter(building: Building): { x: number; y: number } {
   return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
 }
 
+/** True when this unit stands inside a finished Pillar of its own side. Sight is the Pillar's circle. */
+export function inFriendlyPillarSight(state: MatchState, unit: { owner: PlayerId; x: number; y: number }): boolean {
+  const reach = BUILDING_STATS.tower.sight
+  for (const building of state.buildings) {
+    if (building.kind !== 'tower' || building.owner !== unit.owner || building.hp <= 0 || building.ruined || !building.complete) {
+      continue
+    }
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - unit.x, center.y - unit.y) <= reach) return true
+  }
+  return false
+}
+
 export function distToRect(
   px: number,
   py: number,

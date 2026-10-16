@@ -1,7 +1,7 @@
 import { drawAnimal } from './animalArt'
 import type { Camera } from './camera'
 import { controlledSide } from './control'
-import { buildingCenter, buildingRect, cryoOccupants, getTarget, placementAllowed, sideKeep } from './state'
+import { buildingCenter, buildingRect, cryoOccupants, getTarget, inFriendlyPillarSight, placementAllowed, sideKeep } from './state'
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
@@ -684,8 +684,19 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   const showHp = powered || selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
   if (showHp) bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
   if (powered) {
-    const powerColor = unit.power <= 0 ? '#6d7c84' : '#3ec6ff'
-    bar(ctx, unit.x - 12, unit.y - stats.radius - 4, 24, unit.power, powerColor)
+    const charging = inFriendlyPillarSight(state, unit) && unit.power < 1
+    const wave = 0.5 + 0.5 * Math.sin(state.time * 5)
+    const powerColor = !charging ? (unit.power <= 0 ? '#6d7c84' : '#3ec6ff') : wave > 0.5 ? '#d8fbff' : '#3ec6ff'
+    const barX = unit.x - 12
+    const barY = unit.y - stats.radius - 4
+    bar(ctx, barX, barY, 24, unit.power, powerColor)
+    if (charging) {
+      ctx.save()
+      ctx.strokeStyle = `rgba(186, 244, 255, ${0.25 + wave * 0.55})`
+      ctx.lineWidth = 1
+      ctx.strokeRect(barX - 0.5, barY - 0.5, 25, 5)
+      ctx.restore()
+    }
   }
 
   if (unit.cloak > 0) {
