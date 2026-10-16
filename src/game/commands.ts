@@ -1088,7 +1088,7 @@ export function coverOpenSites(state: MatchState): void {
 
 /**
  * Freeze every other unit inside this Frog's sight for 30 seconds.
- * Freeze does not remove Power. The caster is left out.
+ * Power is not removed now. Half a bar comes off when the ice ends. The caster is left out.
  */
 export function commandFrost(state: MatchState, ids: number[]): void {
   if (state.outcome || state.paused) return

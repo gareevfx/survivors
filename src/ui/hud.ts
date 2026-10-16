@@ -445,7 +445,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         label: 'Freeze',
         hotkey: 'F',
         detail: ready.length ? `${FROG_FREEZE_COOLDOWN}s` : `${Math.ceil(wait)}s`,
-        title: `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS} seconds. Frozen units keep their Power, and normal drain pauses until the ice ends. Cooldown ${FROG_FREEZE_COOLDOWN} seconds.`,
+        title: `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS} seconds. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown ${FROG_FREEZE_COOLDOWN} seconds.`,
         disabled: ready.length === 0,
         run: () => {
           const ids = ready.map((unit) => unit.id)

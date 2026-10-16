@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_SECONDS, FROG_THAW_POWER, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -6776,7 +6776,7 @@ function frogFreeze(): void {
   const stats = UNIT_STATS.frog
   assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 12 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
   assert(stats.speed === UNIT_STATS.pike.speed && stats.sight === UNIT_STATS.pike.sight, 'Frog speed or sight does not match a Flasher')
-  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 30 && FROG_FREEZE_COOLDOWN === 90, 'Frog Power or Freeze timing changed')
+  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 30 && FROG_FREEZE_COOLDOWN === 90 && FROG_THAW_POWER === 0.5, 'Frog Power or Freeze timing changed')
   const panel = statsPanelHtml(12, 2, [blankSide(), blankSide()])
   assert(panel.includes('Frog') && panel.includes('colspan="5"'), 'the statistics table left out the Frog')
 
@@ -6898,6 +6898,56 @@ function frogFreeze(): void {
   assert(charging.ice === FROG_FREEZE_SECONDS && charging.power === 0.5, 'Freeze changed Power before the Pillar ticked')
   step(iced, 1)
   assert(Math.abs(charging.power - (0.5 + 1 / PILLAR_CHARGE_SECONDS)) < 1e-6, 'a friendly Pillar stopped charging a frozen unit')
+
+  const thawSeed = 51
+  beginRecording(thawSeed, 'duel')
+  const thaw = createMatch(thawSeed, 'duel')
+  thaw.aiAcc = -60
+  thaw.sideAcc.fill(-60)
+  const thawPad = chargePad(thaw)
+  assert(thawPad, 'no open ground for a thaw')
+  const thawFrog = makeUnit(thaw, 0, 'frog', (thawPad.tx + 0.5) * TILE, (thawPad.ty + 0.5) * TILE)
+  const thawFoe = makeUnit(thaw, 1, 'pike', thawFrog.x + 36, thawFrog.y)
+  const thawLow = makeUnit(thaw, 1, 'pike', thawFrog.x - 40, thawFrog.y)
+  thawLow.power = 0.4
+  thawLow.order = { type: 'move', x: thawLow.x + 200, y: thawLow.y }
+  const thawPorter = makeUnit(thaw, 1, 'porter', thawFrog.x, thawFrog.y + 24)
+  rememberLive(thaw, { op: 'frost', ids: [thawFrog.id] })
+  commandFrost(thaw, [thawFrog.id])
+  const thawFoePower = () => thawFoe.power
+  const thawFoeIce = () => thawFoe.ice
+  const thawLowPower = () => thawLow.power
+  assert(thawFoePower() === 1 && thawLowPower() === 0.4 && !isShutdown(thawLow), 'Freeze removed Power at the cast')
+  for (let i = 0; i < FROG_FREEZE_SECONDS - 1; i++) step(thaw, 1)
+  assert(thawFoeIce() === 1 && thawFoePower() === 1, 'Power dropped before the ice ended')
+  assert(thawLowPower() === 0.4 && !isShutdown(thawLow), 'a frozen unit shut down before thaw')
+  step(thaw, 1)
+  assert(thawFoeIce() === 0 && Math.abs(thawFoePower() - (1 - FROG_THAW_POWER)) < 1e-9, 'thaw did not take half a Power bar')
+  assert(!isShutdown(thawFoe), 'half a bar shut a full unit down')
+  assert(thawLow.ice === 0 && thawLowPower() === 0 && isShutdown(thawLow) && thawLow.order === null, 'thaw did not shut a low-Power unit down')
+  assert(thawPorter.ice === 0 && thawPorter.power === 1, 'thaw changed a Stalker that has no Power')
+  step(thaw, 1)
+  assert(Math.abs(thawFoe.power - (1 - FROG_THAW_POWER - 1 / FLASHER_POWER_SECONDS)) < 1e-6, 'drain did not resume after thaw')
+  const thawTape = finishRecording()
+  assert(thawTape && thawTape.actions.length === 1 && thawTape.actions[0]?.action.op === 'frost', 'the thaw replay lost the Freeze order')
+  const playedThaw = createMatch(thawSeed, 'duel')
+  playedThaw.replay = true
+  playedThaw.aiAcc = -60
+  playedThaw.sideAcc.fill(-60)
+  const playedThawFrog = makeUnit(playedThaw, 0, 'frog', (thawPad.tx + 0.5) * TILE, (thawPad.ty + 0.5) * TILE)
+  const playedThawFoe = makeUnit(playedThaw, 1, 'pike', playedThawFrog.x + 36, playedThawFrog.y)
+  const playedThawLow = makeUnit(playedThaw, 1, 'pike', playedThawFrog.x - 40, playedThawFrog.y)
+  playedThawLow.power = 0.4
+  playedThawLow.order = { type: 'move', x: playedThawLow.x + 200, y: playedThawLow.y }
+  const playedThawPorter = makeUnit(playedThaw, 1, 'porter', playedThawFrog.x, playedThawFrog.y + 24)
+  armPlayback(thawTape)
+  while (playedThaw.simTick < thaw.simTick) {
+    applyDue(playedThaw)
+    step(playedThaw, 1)
+  }
+  assert(playedThawFoe.ice === 0 && Math.abs(playedThawFoe.power - thawFoe.power) < 1e-9, 'replay thaw Power diverged')
+  assert(playedThawLow.power === 0 && isShutdown(playedThawLow) && playedThawLow.order === null, 'replay thaw did not shut the low-Power unit down')
+  assert(playedThawPorter.power === thawPorter.power, 'replay thaw changed the Stalker')
 }
 
 function blankSide(): MatchState['stats'][number] {
