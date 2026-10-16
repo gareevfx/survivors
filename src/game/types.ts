@@ -371,24 +371,17 @@ export interface Grave {
   ty: number
 }
 
-/** Ambient Surface wildlife. Not a unit: it cannot be selected, ordered, or attacked. */
-export type AnimalKind = 'bear' | 'moose' | 'crow' | 'eagle'
+/** Ambient crows. Not a unit: they cannot be selected, ordered, or attacked. */
+export type AnimalKind = 'crow'
 
 export interface Animal {
   kind: AnimalKind
   x: number
   y: number
   facing: number
-  /** Wander point for a bear or moose. Birds ignore it. */
-  goalX: number
-  goalY: number
-  /** Eagle circle. Crows leave these at zero. */
-  orbitX: number
-  orbitY: number
-  orbitR: number
-  /** Walk cycle or wing beat. */
+  /** Wing beat. */
   phase: number
-  /** Bumps each time a wanderer or a crow picks a new heading. */
+  /** Bumps each time a crow picks a new heading. */
   turn: number
 }
 
@@ -507,7 +500,7 @@ export interface MatchState {
   ore: OreNode[]
   rocks: Rock[]
   graves: Grave[]
-  /** Bears, moose, crows, and eagles. Ambient only. */
+  /** Crows. Ambient only. */
   animals: Animal[]
   units: Unit[]
   buildings: Building[]

@@ -8,7 +8,7 @@ import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
 import { minimapFrame } from './game/render'
 import { keepEntrance } from './game/siloArt'
-import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
+import { animalCounts, CROW_COUNT } from './game/animals'
 import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, rememberLive } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
@@ -1534,17 +1534,8 @@ function bothCamMergesSight(): void {
 function wildlifeStaysAmbient(): void {
   for (const mode of ['duel', 'ffa'] as const) {
     const state = createMatch(4, mode)
-    const count = (kind: 'bear' | 'moose' | 'crow' | 'eagle') => state.animals.filter((animal) => animal.kind === kind).length
-    assert(count('bear') === BEAR_COUNT, `${mode} spawned ${count('bear')} bears`)
-    assert(count('moose') === MOOSE_COUNT, `${mode} spawned ${count('moose')} moose`)
-    assert(count('crow') === CROW_COUNT, `${mode} spawned ${count('crow')} crows`)
-    assert(count('eagle') === EAGLE_COUNT, `${mode} spawned ${count('eagle')} eagles`)
-    for (const animal of state.animals) {
-      if (animal.kind !== 'bear' && animal.kind !== 'moose') continue
-      const tx = Math.floor(animal.x / TILE)
-      const ty = Math.floor(animal.y / TILE)
-      assert(isWalkable(state, tx, ty), `${animal.kind} spawned on a blocked tile`)
-    }
+    const crows = state.animals.filter((animal) => animal.kind === 'crow').length
+    assert(state.animals.length === CROW_COUNT && crows === CROW_COUNT, `${mode} spawned ${state.animals.length} animals, ${crows} crows`)
   }
 
   const state = createMatch(4)
@@ -1562,17 +1553,9 @@ function wildlifeStaysAmbient(): void {
     const animal = state.animals[i]
     const start = starts[i]
     if (!animal || !start) continue
-    if (animal.kind === 'bear' || animal.kind === 'moose') {
-      assert(isWalkable(state, Math.floor(animal.x / TILE), Math.floor(animal.y / TILE)), `${animal.kind} left walkable ground`)
-    }
     if (Math.hypot(animal.x - start.x, animal.y - start.y) > 4) moved = true
   }
-  assert(moved, 'wildlife stood still')
-
-  const eagle = state.animals.find((animal) => animal.kind === 'eagle')
-  assert(eagle, 'missing an eagle')
-  const along = Math.hypot(eagle.x - eagle.orbitX, (eagle.y - eagle.orbitY) / 0.72)
-  assert(Math.abs(along - eagle.orbitR) < 1.5, 'an eagle left its circle')
+  assert(moved, 'crows stood still')
 
   const crow = state.animals.find((animal) => animal.kind === 'crow')
   assert(crow, 'missing a crow')
@@ -2789,7 +2772,7 @@ function eightPlayerFieldPlacesEightSilos(): void {
   const four = createMatch(2, 'ffa')
   assert(four.mode === 'ffa' && four.mapW === 90 && four.mapH === 50 && four.playerCount === 4, '4-player free-for-all changed size')
   const quota = animalCounts(FFA8_MAP_W, FFA8_MAP_H)
-  assert(quota.bear > BEAR_COUNT && quota.moose > MOOSE_COUNT && quota.crow > CROW_COUNT && quota.eagle > EAGLE_COUNT, 'wildlife did not grow with the 100×100 field')
+  assert(quota.crow > CROW_COUNT, 'crows did not grow with the 100×100 field')
 
   for (const seed of [2, 7]) {
     const state = createMatch(seed, 'ffa8')
@@ -2839,16 +2822,8 @@ function eightPlayerFieldPlacesEightSilos(): void {
     assert(minD > 40, `Silos are only ${minD.toFixed(1)} tiles apart`)
     assert(state.rocks.length > duel.rocks.length * 2, 'rocks and trees did not scale with the 100×100 field')
     assert(state.ore.length > four.ore.length, 'the 100×100 field has fewer dumps than the 4-player map')
-    const counts = {
-      bear: state.animals.filter((animal) => animal.kind === 'bear').length,
-      moose: state.animals.filter((animal) => animal.kind === 'moose').length,
-      crow: state.animals.filter((animal) => animal.kind === 'crow').length,
-      eagle: state.animals.filter((animal) => animal.kind === 'eagle').length,
-    }
-    assert(
-      counts.bear === quota.bear && counts.moose === quota.moose && counts.crow === quota.crow && counts.eagle === quota.eagle,
-      `wildlife is ${counts.bear}/${counts.moose}/${counts.crow}/${counts.eagle}`,
-    )
+    const crows = state.animals.filter((animal) => animal.kind === 'crow').length
+    assert(state.animals.length === quota.crow && crows === quota.crow, `crows are ${crows} of ${state.animals.length}`)
   }
 
   const state = createMatch(4, 'ffa8')
