@@ -537,7 +537,8 @@ button, canvas { font: inherit; }
 }
 #replay, #again, #to-menu { margin: 0; }
 
-#cams[aria-pressed='true'] {
+#cams[aria-pressed='true'],
+#speed[aria-pressed='true'] {
   color: var(--paper);
   border-color: var(--gold);
 }

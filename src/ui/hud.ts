@@ -61,6 +61,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const clock = document.querySelector('#clock')
   const idle = document.querySelector('#idle')
   const cams = document.querySelector<HTMLButtonElement>('#cams')
+  const speed = document.querySelector<HTMLButtonElement>('#speed')
   const hint = document.querySelector('#hint')
   const mode = document.querySelector('#modeflag')
   const pause = document.querySelector<HTMLButtonElement>('#pause')
@@ -94,9 +95,14 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
+  const replayLive = state.replay && state.outcome == null
   if (cams) {
-    cams.classList.toggle('hidden', !state.replay || state.outcome != null)
+    cams.classList.toggle('hidden', !replayLive)
     cams.setAttribute('aria-pressed', state.bothCam ? 'true' : 'false')
+  }
+  if (speed) {
+    speed.classList.toggle('hidden', !replayLive)
+    speed.setAttribute('aria-pressed', state.speed === 3 ? 'true' : 'false')
   }
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
   if (pause) {

@@ -9,7 +9,7 @@ import { yardEntrance } from './game/factoryArt'
 import { minimapFrame } from './game/render'
 import { keepEntrance } from './game/siloArt'
 import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
-import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberLive } from './game/replay'
+import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, rememberLive } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
@@ -2450,6 +2450,7 @@ combatResolves()
 keepDecidesTheField()
 endOfMatchStats()
 replayRepeatsTheMatch()
+replayCarriesSpeed()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6320,4 +6321,37 @@ function replayRepeatsTheMatch(): void {
     step(plainB, 1 / 60)
   }
   assert(matchFingerprint(plainA) === matchFingerprint(plainB), 'the same seed diverged with no orders')
+}
+
+function replayCarriesSpeed(): void {
+  const seed = 42
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  const liveSpeed = () => live.speed
+  assert(liveSpeed() === 1, 'a match started sped up')
+  rememberAlways(live, { op: 'console', text: 'speed x3' })
+  assert(runCommand(live, 'speed x3'), 'speed x3 was rejected on the tape')
+  for (let i = 0; i < 5; i++) step(live, 1 / 60)
+  assert(liveSpeed() === 3, 'the live match dropped speed x3')
+  rememberAlways(live, { op: 'console', text: 'speed x3 off' })
+  assert(runCommand(live, 'speed x3 off'), 'speed x3 off was rejected on the tape')
+  step(live, 1 / 60)
+  const tape = finishRecording()
+  assert(tape && tape.actions.length === 2, 'speed changes were not recorded')
+  assert(tape.actions[0]?.tick === 0 && tape.actions[0].action.op === 'console', 'speed x3 was stamped on the wrong step')
+  assert(tape.actions[1]?.tick === 5 && tape.actions[1].action.op === 'console', 'speed x3 off was stamped on the wrong step')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  const playedSpeed = () => played.speed
+  armPlayback(tape)
+  applyDue(played)
+  assert(playedSpeed() === 3, 'replay did not turn speed x3 on with the tape')
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(playedSpeed() === 1, 'replay left speed x3 on after the tape turned it off')
+  assert(runCommand(played, 'speed x3') && playedSpeed() === 3, 'a replay could not turn speed x3 on')
+  assert(tape.actions.length === 2, 'a replay speed toggle was written onto the tape')
+  assert(runCommand(played, 'speed x3 off') && playedSpeed() === 1, 'a replay could not turn speed x3 off')
 }

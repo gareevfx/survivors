@@ -17,6 +17,7 @@ const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
 const again = document.querySelector<HTMLButtonElement>('#again')
 const replayButton = document.querySelector<HTMLButtonElement>('#replay')
 const camsButton = document.querySelector<HTMLButtonElement>('#cams')
+const speedButton = document.querySelector<HTMLButtonElement>('#speed')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
 
 if (!view || !minimap) {
@@ -255,6 +256,11 @@ camsButton?.addEventListener('click', () => {
   if (!match?.replay) return
   sfx.unlock()
   runCommand(match, match.bothCam ? 'all cams off' : 'all cams')
+})
+speedButton?.addEventListener('click', () => {
+  if (!match?.replay) return
+  sfx.unlock()
+  runCommand(match, match.speed === 3 ? 'speed x3 off' : 'speed x3')
 })
 idle?.addEventListener('click', () => {
   sfx.unlock()
