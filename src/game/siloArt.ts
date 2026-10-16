@@ -5,7 +5,6 @@ import { BUILDING_STATS, PLAYER_COLOR, TILE } from './types'
  * The door, dump windows, and roof dish are drawn when the building is shown.
  */
 
-const FOOT = 96
 const OX = 18
 const OY = 14
 const BODY_W = 132
@@ -492,5 +491,3 @@ export function siloPortraitUrl(owner: number): string {
   portraits.set(owner, url)
   return url
 }
-
-export const KEEP_FOOT = FOOT

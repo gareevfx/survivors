@@ -125,8 +125,8 @@ const HOVER_GRID = 10
  * At this bank the side buys Hovers toward a Grid instead of another factory.
  */
 const HOVER_SURPLUS = 500
-/** Living Stalkers at or below this count are few enough to raise a Cryo. Zero does not build one. */
-const CRYO_LOW = 3
+/** Buy the Silo Cryo while fewer than this many Stalkers are on the map. */
+const CRYO_ACTIVE_LIMIT = 4
 
 /**
  * Pick the next patch of fog to enter.
@@ -357,11 +357,6 @@ function spottedKeep(state: MatchState, owner: PlayerId): { id: number; x: numbe
     if (!best || distance < best.distance) best = { id: building.id, x: spot.x, y: spot.y, distance }
   }
   return best ? { id: best.id, x: best.x, y: best.y } : null
-}
-
-/** The player Castle, once a Dunmarch unit has seen it. Destroying it is the attack objective. */
-export function spottedPlayerKeep(state: MatchState): { id: number; x: number; y: number } | null {
-  return spottedKeep(state, 1)
 }
 
 /** True when this side has seen the enemy Castle. Northmark's memory is its own sight. */
@@ -961,21 +956,20 @@ function tendCryo(state: MatchState, side: Brain): void {
   )
 }
 
-function livingStalkers(state: MatchState, owner: PlayerId): number {
+function activeStalkers(state: MatchState, owner: PlayerId): number {
   let count = 0
   for (const unit of state.units) {
-    if (unit.owner === owner && unit.kind === 'porter' && unit.hp > 0) count += 1
+    if (unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null) count += 1
   }
   return count
 }
 
-/** A Cryo on this Silo, and only after the Stalker count has dropped low. */
+/** The Silo Cryo upgrade. It comes first whenever fewer than four Stalkers are active. */
 function cryoWanted(state: MatchState, side: Brain): boolean {
   if ((state.oreHeld[side.owner] ?? 0) < CRYO_COST) return false
   const keep = ownKeep(state, side.owner)
   if (!keep?.complete || keep.cryo) return false
-  const stalkers = livingStalkers(state, side.owner)
-  return stalkers > 0 && stalkers <= CRYO_LOW
+  return activeStalkers(state, side.owner) < CRYO_ACTIVE_LIMIT
 }
 
 /** Surplus dumps fill a Hover Grid before another Factory goes up. */
@@ -1002,6 +996,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
     finish(state, side)
     return
   }
+
+  if (cryoWanted(state, side)) installCryo(state, keep.id)
 
   const queuedPorters = keep.queue.filter((job) => job.kind === 'porter').length
   if (porters.length + queuedPorters < 6 && keep.queue.length < 2) {
@@ -1031,9 +1027,6 @@ function runSide(state: MatchState, owner: PlayerId): void {
       if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
         placeChartedNearKeep(state, side, 'yard')
       }
-    } else if (cryoWanted(state, side)) {
-      const vaultKeep = ownKeep(state, side.owner)
-      if (vaultKeep) installCryo(state, vaultKeep.id)
     } else if (ore >= BUILDING_STATS.yard.cost && !bankingHovers(state, side, ore)) {
       placeChartedNearKeep(state, side, 'yard')
     }

@@ -184,17 +184,6 @@ export function unitSeen(state: MatchState, unit: Unit): boolean {
   return tileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
 
-export function buildingSeen(state: MatchState, building: Building): boolean {
-  if (building.owner === 0) return true
-  const stats = BUILDING_STATS[building.kind]
-  for (let y = 0; y < stats.h; y++) {
-    for (let x = 0; x < stats.w; x++) {
-      if (tileVisible(state, building.tx + x, building.ty + y)) return true
-    }
-  }
-  return false
-}
-
 function paintSight(state: MatchState, owner: PlayerId, visible: Uint8Array, explored: Uint8Array): void {
   for (const unit of state.units) {
     if (unit.owner !== owner || unit.hp <= 0 || unit.frozen != null) continue

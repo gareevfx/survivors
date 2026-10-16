@@ -12,9 +12,6 @@ export const FFA8_MAP_W = 100
 export const FFA8_MAP_H = 100
 export type MatchMode = 'duel' | 'ffa' | 'ffa8'
 
-export const PLAYER_KEEP_TX = 6
-export const PLAYER_KEEP_TY = 34
-
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
 export const ORE_NODE_AMOUNT = 420

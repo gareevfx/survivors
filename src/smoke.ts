@@ -5948,6 +5948,21 @@ function siloAiBuysCryoFor250(): void {
   assert(keep.cryo, 'SiloAI did not add a Cryo after Stalkers dropped low')
   assert(!state.buildings.some((building) => building.kind === 'keep' && building.owner === 1 && building.id !== keep.id), 'SiloAI raised a second Silo for the Cryo')
   assert(state.oreHeld[1] === 0, 'the Cryo did not cost 250 after replacing a Stalker')
+
+  const early = createMatch(38)
+  early.time = 0
+  early.oreHeld[1] = 250
+  early.aiAcc = 0
+  const earlyKeep = early.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(earlyKeep, 'Dunmarch has no Silo for an early Cryo')
+  const spare = early.units.find((unit) => unit.owner === 1 && unit.kind === 'porter')
+  assert(spare, 'Dunmarch has no Stalker to count')
+  spare.hp = 0
+  const before = early.buildings.length
+  updateSiloAi(early, 0.5)
+  assert(earlyKeep.cryo, 'SiloAI waited on Storage, Factory, and Pillar before the Cryo')
+  assert(early.buildings.length === before, 'the early Cryo raised a building')
+  assert(early.oreHeld[1] === 0, 'the early Cryo did not cost 250')
 }
 
 function siloAiBanksHovers(): void {

@@ -1,38 +1,12 @@
-import { PLAYER_COLOR } from './types'
-
 /**
  * Cryo is four glass cylinders in a 2×2 grid. An empty vessel is clear glass.
  * An occupied vessel shows a Stalker standing inside, covered in ice.
  * The drawing is cached. Team color is only the collar.
  */
 
-const W = 64
-const H = 64
-const PAD_X = 10
-const PAD_Y = 12
-
-/** Centers and bases, back row then front row, so the front pair paints last. */
-const VESSELS: ReadonlyArray<readonly [number, number]> = [
-  [16, 28],
-  [48, 28],
-  [16, 58],
-  [48, 58],
-]
-
 const RX = 12
 const RY = 4.2
 const TALL = 26
-
-const bodies = new Map<string, HTMLCanvasElement>()
-const portraits = new Map<number, string>()
-
-export function cryoDamageStage(hp: number, full: number): number {
-  const ratio = full > 0 ? hp / full : 1
-  if (ratio > 0.75) return 0
-  if (ratio > 0.5) return 1
-  if (ratio > 0.25) return 2
-  return 3
-}
 
 function cylinderPath(ctx: CanvasRenderingContext2D, cx: number, top: number, base: number): void {
   ctx.beginPath()
@@ -193,29 +167,6 @@ function paintVessel(
   }
 }
 
-function paintBody(ctx: CanvasRenderingContext2D, color: string, held: number, stage: number): void {
-  VESSELS.forEach(([cx, base], index) => {
-    paintVessel(ctx, cx, base, index < held, color, stage >= 1 && index % 2 === 0, stage >= 3 && index === 1)
-  })
-}
-
-function bodySprite(color: string, held: number, stage: number): HTMLCanvasElement {
-  const key = `${color}:${held}:${stage}`
-  const cached = bodies.get(key)
-  if (cached) return cached
-  const canvas = document.createElement('canvas')
-  canvas.width = W + PAD_X * 2
-  canvas.height = H + PAD_Y * 2
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return canvas
-  ctx.translate(PAD_X, PAD_Y)
-  ctx.lineJoin = 'round'
-  ctx.lineCap = 'round'
-  paintBody(ctx, color, held, stage)
-  bodies.set(key, canvas)
-  return canvas
-}
-
 /**
  * Four glass cylinders on the east face of a Silo. Empty glass, or a Stalker under ice.
  * x and y are the Silo's tile origin.
@@ -241,38 +192,4 @@ export function drawSiloCryoVessels(
     paintVessel(ctx, cx, base, index < pods, color, false, false)
   })
   ctx.restore()
-}
-
-export function drawCryoSprite(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  color: string,
-  held: number,
-  stage: number,
-): void {
-  const pods = Math.max(0, Math.min(4, Math.floor(held)))
-  ctx.drawImage(bodySprite(color, pods, stage), x - PAD_X, y - PAD_Y)
-}
-
-/** Selection portrait. Empty when there is no document, so smoke can call it. */
-export function cryoPortraitUrl(owner: number): string {
-  if (typeof document === 'undefined') return ''
-  const cached = portraits.get(owner)
-  if (cached) return cached
-  const canvas = document.createElement('canvas')
-  canvas.width = 72
-  canvas.height = 72
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return ''
-  ctx.fillStyle = '#3d5560'
-  ctx.fillRect(0, 0, 72, 72)
-  ctx.save()
-  ctx.translate(6, 4)
-  ctx.scale(0.9, 0.9)
-  drawCryoSprite(ctx, 0, 0, PLAYER_COLOR[owner] ?? '#5ec8ff', 2, 0)
-  ctx.restore()
-  const url = canvas.toDataURL()
-  portraits.set(owner, url)
-  return url
 }

@@ -97,40 +97,6 @@ export function flasherPortraitUrl(owner: number): string {
   return url
 }
 
-/** Directions across, idle and firing down, on a plain ground. */
-export function paintFlasherSheet(canvas: HTMLCanvasElement): void {
-  const cell = 68
-  const cols = 8
-  const rows: Array<{ owner: number; frame: number; firing: boolean; flash: boolean }> = [
-    { owner: 0, frame: 0, firing: false, flash: false },
-    { owner: 0, frame: 1, firing: false, flash: false },
-    { owner: 1, frame: 0, firing: true, flash: false },
-    { owner: 1, frame: 1, firing: true, flash: true },
-    { owner: 2, frame: 0, firing: false, flash: false },
-    { owner: 3, frame: 1, firing: true, flash: true },
-  ]
-  canvas.width = cols * cell
-  canvas.height = rows.length * cell
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.fillStyle = '#e7e0d2'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.font = '10px sans-serif'
-  ctx.fillStyle = '#5c564c'
-  ctx.strokeStyle = 'rgba(40, 32, 24, 0.12)'
-  const names = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
-  for (let col = 0; col < cols; col++) {
-    ctx.fillText(names[col] ?? '', col * cell + 4, 12)
-    for (let row = 0; row < rows.length; row++) {
-      const pose = rows[row]
-      if (!pose) continue
-      const sprite = flasherFrame(pose.owner, col, pose.frame, pose.firing, pose.flash)
-      ctx.drawImage(sprite, col * cell + (cell - SIZE) / 2, row * cell + 10)
-      ctx.strokeRect(col * cell + 0.5, row * cell + 0.5, cell - 1, cell - 1)
-    }
-  }
-}
-
 function paintFlasher(
   ctx: CanvasRenderingContext2D,
   dir: number,

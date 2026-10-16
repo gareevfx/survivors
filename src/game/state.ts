@@ -591,19 +591,3 @@ export function sideAnchor(state: MatchState, owner: PlayerId): Building | undef
 export function playerKeep(state: MatchState): Building | undefined {
   return sideKeep(state, 0)
 }
-
-export function nearestOre(state: MatchState, x: number, y: number): { id: number; tx: number; ty: number } | null {
-  let best: { id: number; tx: number; ty: number } | null = null
-  let bestD = Infinity
-  for (const node of state.ore) {
-    if (node.amount <= 0) continue
-    const dx = (node.tx + 0.5) * TILE - x
-    const dy = (node.ty + 0.5) * TILE - y
-    const d = dx * dx + dy * dy
-    if (d < bestD) {
-      bestD = d
-      best = node
-    }
-  }
-  return best
-}
