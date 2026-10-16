@@ -94,40 +94,6 @@ export function stalkerPortraitUrl(owner: number): string {
   return url
 }
 
-/** Directions across, poses down, on a plain ground. */
-export function paintStalkerSheet(canvas: HTMLCanvasElement): void {
-  const cell = 56
-  const cols = 8
-  const rows: Array<{ owner: number; frame: number; working: boolean; cargo: boolean }> = [
-    { owner: 0, frame: 0, working: false, cargo: false },
-    { owner: 0, frame: 1, working: false, cargo: false },
-    { owner: 1, frame: 0, working: false, cargo: true },
-    { owner: 1, frame: 1, working: false, cargo: true },
-    { owner: 0, frame: 0, working: true, cargo: false },
-    { owner: 2, frame: 1, working: true, cargo: false },
-  ]
-  canvas.width = cols * cell
-  canvas.height = rows.length * cell
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.fillStyle = '#e7e0d2'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.strokeStyle = 'rgba(40, 32, 24, 0.12)'
-  ctx.font = '10px sans-serif'
-  ctx.fillStyle = '#5c564c'
-  const names = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']
-  for (let col = 0; col < cols; col++) {
-    ctx.fillText(names[col] ?? '', col * cell + 4, 12)
-    for (let row = 0; row < rows.length; row++) {
-      const pose = rows[row]
-      if (!pose) continue
-      const sprite = stalkerFrame(pose.owner, col, pose.frame, pose.working, pose.cargo)
-      ctx.drawImage(sprite, col * cell + (cell - SIZE) / 2, row * cell + 8)
-      ctx.strokeRect(col * cell + 0.5, row * cell + 0.5, cell - 1, cell - 1)
-    }
-  }
-}
-
 function paintStalker(
   ctx: CanvasRenderingContext2D,
   dir: number,

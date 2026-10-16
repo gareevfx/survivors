@@ -8,7 +8,6 @@
   --muted: #b4c2a6;
   --gold: #e6c15a;
   --blue: #6ecfff;
-  --red: #ff6d5e;
   --paper: #f3f0e4;
   font-family: "Avenir Next", "Segoe UI", sans-serif;
 }
@@ -462,7 +461,6 @@ button, canvas { font: inherit; }
 
 .cmd-label { display: block; font-size: 14px; }
 
-.stalker-icon,
 .unit-icon {
   width: 34px;
   height: 34px;

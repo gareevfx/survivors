@@ -359,11 +359,6 @@ function spottedKeep(state: MatchState, owner: PlayerId): { id: number; x: numbe
   return best ? { id: best.id, x: best.x, y: best.y } : null
 }
 
-/** The player Castle, once a Dunmarch unit has seen it. Destroying it is the attack objective. */
-export function spottedPlayerKeep(state: MatchState): { id: number; x: number; y: number } | null {
-  return spottedKeep(state, 1)
-}
-
 /** True when this side has seen the enemy Castle. Northmark's memory is its own sight. */
 export function sideKnowsEnemyKeep(state: MatchState, owner: PlayerId): boolean {
   return spottedKeep(state, owner) != null
