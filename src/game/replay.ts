@@ -6,6 +6,7 @@ import {
   commandConstruct,
   commandFreeze,
   commandFreezeAuto,
+  commandFrost,
   commandGather,
   commandHarvestOrAttack,
   commandHoverGrid,
@@ -43,6 +44,7 @@ export type ReplayAction =
   | { op: 'cryo'; buildingId: number }
   | { op: 'grid'; ids: number[] }
   | { op: 'scan'; ids: number[] }
+  | { op: 'frost'; ids: number[] }
   | { op: 'console'; text: string }
   | { op: 'side'; owner: number }
 
@@ -200,6 +202,9 @@ function dispatch(state: MatchState, action: ReplayAction): void {
       return
     case 'scan':
       toggleScanner(state, action.ids)
+      return
+    case 'frost':
+      commandFrost(state, action.ids)
       return
     case 'console':
       runCommand(state, action.text)

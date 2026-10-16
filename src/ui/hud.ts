@@ -1,9 +1,10 @@
-import { cancelBuilding, cancelTrain, commandFreezeAuto, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
+import { cancelBuilding, cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
+import { frogPortraitUrl } from '../game/frogArt'
 import { factoryPortraitUrl } from '../game/factoryArt'
 import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
@@ -15,6 +16,8 @@ import {
   CRYO_COST,
   CRYO_FREEZE_COST,
   CRYO_SLOTS,
+  FROG_FREEZE_COOLDOWN,
+  FROG_FREEZE_SECONDS,
   PLAYER_COLOR,
   PLAYER_NAME,
   powerSeconds,
@@ -263,7 +266,8 @@ export function statsPanelHtml(time: number, playerCount: number, stats: MatchSt
     const lost = UNIT_KINDS.map((kind) => row?.lost[kind] ?? 0)
     return `<tr class="${owner === 0 ? 'you' : ''}"><th scope="row"><span class="end-side"><i style="background:${color}"></i>${escapeHtml(name)}</span></th>${statCells(created, true)}${statCells(lost, true)}<td class="group">${row?.dumps ?? 0}</td><td class="group">${row?.silos ?? 0}</td></tr>`
   }).join('')
-  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="4" scope="colgroup">Created</th><th class="group" colspan="4" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
+  const span = UNIT_KINDS.length
+  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="${span}" scope="colgroup">Created</th><th class="group" colspan="${span}" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
 }
 
 function statCells(values: number[], grouped: boolean): string {
@@ -349,6 +353,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         trainButton(state, building.id, 'pike'),
         trainButton(state, building.id, 'howler'),
         trainButton(state, building.id, 'drone'),
+        trainButton(state, building.id, 'frog'),
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
       return cmds
@@ -428,6 +433,28 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
       )
+    }
+    const frogs = state.selectedUnits
+      .map((id) => unitById(state, id))
+      .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.kind === 'frog' && unit.hp > 0 && unit.owner === controlledSide(state))
+    if (frogs.length) {
+      const ready = frogs.filter((unit) => unit.frostCd <= 0 && unit.ice <= 0 && unit.power > 0)
+      const wait = Math.min(...frogs.map((unit) => unit.frostCd))
+      cmds.push({
+        id: 'frost',
+        label: 'Freeze',
+        hotkey: 'F',
+        detail: ready.length ? `${FROG_FREEZE_COOLDOWN}s` : `${Math.ceil(wait)}s`,
+        title: `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS / 60} minute. Each unit with Power loses half a bar. Cooldown ${FROG_FREEZE_COOLDOWN} seconds.`,
+        disabled: ready.length === 0,
+        run: () => {
+          const ids = ready.map((unit) => unit.id)
+          rememberLive(state, { op: 'frost', ids })
+          commandFrost(state, ids)
+          state.moveArmed = false
+          state.attackMoveArmed = false
+        },
+      })
     }
     return cmds
   }
@@ -583,7 +610,7 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   return {
     id: `train-${kind}`,
     label: stats.label,
-    hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : 'H',
+    hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : kind === 'drone' ? 'H' : 'G',
     detail,
     title,
     disabled: !afford || !room,
@@ -773,7 +800,9 @@ export function describeSelection(state: MatchState): string {
             ? gorillaPortraitUrl(unit.owner)
             : unit.kind === 'drone'
               ? hoverPortraitUrl(unit.owner)
-              : ''
+              : unit.kind === 'frog'
+                ? frogPortraitUrl(unit.owner)
+                : ''
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
@@ -784,6 +813,7 @@ export function describeSelection(state: MatchState): string {
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
+      ${unit.ice > 0 ? `<p class="meta">Frozen ${Math.ceil(unit.ice)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }
@@ -800,7 +830,9 @@ export function describeSelection(state: MatchState): string {
         ? gorillaPortraitUrl(portraitOwner)
         : units.some((unit) => unit.kind === 'drone')
           ? hoverPortraitUrl(portraitOwner)
-          : ''
+          : units.some((unit) => unit.kind === 'frog')
+            ? frogPortraitUrl(portraitOwner)
+            : ''
   const portrait = groupPortrait ? `<img class="unit-icon" alt="" src="${groupPortrait}" />` : ''
   return `
     <p class="eyebrow">${PLAYER_NAME[portraitOwner] ?? 'Silo'}</p>

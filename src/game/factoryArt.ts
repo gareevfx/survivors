@@ -1,4 +1,5 @@
 import { flasherFrame } from './flasherArt'
+import { frogFrame } from './frogArt'
 import { gorillaFrame } from './gorillaArt'
 import { hoverFrame, paintHoverRotors } from './hoverArt'
 import { BUILDING_STATS, PLAYER_COLOR, TILE, type UnitKind } from './types'
@@ -451,6 +452,16 @@ function paintAssembly(
     ctx.moveTo(-12, 0)
     ctx.lineTo(12, 0)
     ctx.stroke()
+  } else if (kind === 'frog') {
+    ctx.strokeRect(-16, -5, 32, 10)
+    ctx.beginPath()
+    ctx.arc(-8, 6, 3, 0, Math.PI * 2)
+    ctx.arc(8, 6, 3, 0, Math.PI * 2)
+    ctx.moveTo(6, -5)
+    ctx.lineTo(6, -14)
+    ctx.lineTo(14, -14)
+    ctx.lineTo(14, -5)
+    ctx.stroke()
   } else {
     ctx.strokeRect(-15, -4, 30, 8)
     ctx.beginPath()
@@ -463,7 +474,9 @@ function paintAssembly(
       ? gorillaFrame(owner, 2, 0, false, false)
       : kind === 'drone'
         ? hoverFrame(owner, 2, 0)
-        : flasherFrame(owner, 2, 0, false, false)
+        : kind === 'frog'
+          ? frogFrame(owner, 2, 0)
+          : flasherFrame(owner, 2, 0, false, false)
   const scale = 0.2 + grown * 0.22
   ctx.globalAlpha = 0.15 + grown * 0.85
   ctx.scale(scale, scale)

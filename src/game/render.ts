@@ -5,6 +5,7 @@ import { buildingCenter, buildingRect, cryoOccupants, getTarget, inFriendlyPilla
 import { flasherSprite } from './flasherArt'
 import { gorillaSprite } from './gorillaArt'
 import { hoverCameraPoint, hoverSprite, paintHoverRotors } from './hoverArt'
+import { frogSprite } from './frogArt'
 import { facingBasis, facingDir, stalkerSprite } from './stalkerArt'
 import { drawFactorySprite, factoryDamageStage } from './factoryArt'
 import { drawKeepSprite, keepDamageStage, keepWindowCount } from './siloArt'
@@ -173,6 +174,24 @@ export function renderWorld(
     ctx.beginPath()
     ctx.arc(shot.x, shot.y, shot.radius, 0, Math.PI * 2)
     ctx.fill()
+  }
+
+  for (const ring of state.rings) {
+    if (!viewTileVisible(state, Math.floor(ring.x / TILE), Math.floor(ring.y / TILE))) continue
+    const grown = 1 - Math.max(0, ring.life / ring.max)
+    const radius = 8 + (ring.reach - 8) * grown
+    ctx.save()
+    ctx.strokeStyle = `rgba(210, 244, 255, ${0.15 + (1 - grown) * 0.7})`
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 + (1 - grown) * 0.45})`
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.arc(ring.x, ring.y, Math.max(4, radius - 6), 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
   }
 
   for (const particle of state.particles) {
@@ -677,6 +696,52 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
       ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
       ctx.fill()
     }
+    ctx.restore()
+  } else if (unit.kind === 'frog') {
+    ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
+    ctx.beginPath()
+    ctx.ellipse(2, 9, 16, 5, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.drawImage(frogSprite(unit), -36, -40)
+    if (unit.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, unit.hitFlash * 3)})`
+      ctx.beginPath()
+      ctx.arc(0, 0, stats.radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
+  } else {
+    ctx.restore()
+  }
+
+  if (unit.ice > 0) {
+    ctx.save()
+    ctx.translate(unit.x, unit.y)
+    ctx.fillStyle = 'rgba(186, 228, 244, 0.42)'
+    ctx.strokeStyle = 'rgba(244, 252, 255, 0.9)'
+    ctx.lineWidth = 1.4
+    ctx.beginPath()
+    ctx.ellipse(0, 2, stats.radius + 6, stats.radius * 0.78 + 4, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)'
+    ctx.beginPath()
+    ctx.moveTo(-stats.radius, -2)
+    ctx.lineTo(stats.radius * 0.2, stats.radius * 0.45)
+    ctx.moveTo(stats.radius * 0.35, -stats.radius * 0.4)
+    ctx.lineTo(-2, stats.radius * 0.55)
+    ctx.stroke()
+    ctx.restore()
+    const label = `${Math.ceil(unit.ice)}s`
+    ctx.save()
+    ctx.font = 'bold 11px "Segoe UI", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.lineWidth = 3
+    ctx.strokeStyle = '#16323c'
+    ctx.fillStyle = '#e7f8ff'
+    ctx.strokeText(label, unit.x, unit.y - stats.radius - 16)
+    ctx.fillText(label, unit.x, unit.y - stats.radius - 16)
     ctx.restore()
   }
 

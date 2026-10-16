@@ -29,10 +29,17 @@ export const SUPPLY_MAX = 65
 /** One Storage holds this many dumps. A Silo does not. */
 export const STORAGE_CAP = 500
 export const INTERACT = 42
-/** Flasher, Gorilla, and Hover run this long from a full Power bar. */
+/** Flasher, Gorilla, Hover, and Frog run this long from a full Power bar. */
 export const FLASHER_POWER_SECONDS = 3 * 60
 export const GORILLA_POWER_SECONDS = 10 * 60
 export const HOVER_POWER_SECONDS = 8 * 60
+export const FROG_POWER_SECONDS = 6 * 60
+/** Frog Freeze holds every other unit in its sight this long. */
+export const FROG_FREEZE_SECONDS = 60
+/** Seconds before that Frog can Freeze again. */
+export const FROG_FREEZE_COOLDOWN = 90
+/** Fraction of a full Power bar removed from each frozen unit that has Power. */
+export const FROG_POWER_HIT = 0.5
 /** SiloAI sends a combat unit to a battery or a friendly Pillar below this fraction of Power. */
 export const POWER_LOW = 0.3
 /** A friendly Pillar refills Power from empty to full in this many seconds, and drain stops while that lasts. */
@@ -54,11 +61,11 @@ export const STUCK_REDIRECT_SECONDS = 4
 export const STALKER_LIFESPAN = 5 * 60
 
 export type PlayerId = number
-export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone'
+export type UnitKind = 'porter' | 'pike' | 'howler' | 'drone' | 'frog'
 
-export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'drone']
+export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'drone', 'frog']
 
-/** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
+/** Flashers, Gorillas, Hovers, Frogs, and any later fighting unit. A Stalker is not one. */
 export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
 }
@@ -68,10 +75,11 @@ export function powerSeconds(kind: UnitKind): number {
   if (kind === 'pike') return FLASHER_POWER_SECONDS
   if (kind === 'howler') return GORILLA_POWER_SECONDS
   if (kind === 'drone') return HOVER_POWER_SECONDS
+  if (kind === 'frog') return FROG_POWER_SECONDS
   return 0
 }
 
-/** A Flasher, Gorilla, or Hover with an empty Power bar. It is still alive. */
+/** A Flasher, Gorilla, Hover, or Frog with an empty Power bar. It is still alive. */
 export function isShutdown(unit: { kind: UnitKind; power: number }): boolean {
   return powerSeconds(unit.kind) > 0 && unit.power <= 0
 }
@@ -175,6 +183,23 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     projectileRadius: 0,
     flying: true,
   },
+  frog: {
+    label: 'Frog',
+    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 1 minute and takes half a Power bar. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
+    hp: 64,
+    speed: 104,
+    radius: 11,
+    damage: 0,
+    range: 0,
+    cooldown: 1,
+    sight: 176,
+    supply: 2,
+    cost: 75,
+    trainTime: 12,
+    projectileSpeed: 0,
+    projectileRadius: 0,
+    flying: false,
+  },
 }
 
 export interface BuildingStats {
@@ -205,7 +230,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains flashers, gorillas, and hovers. Destruction leaves 6 piles of 15 dumps.',
+    blurb: 'Trains flashers, gorillas, hovers, and frogs. Destruction leaves 6 piles of 15 dumps.',
     w: 3,
     h: 2,
     hp: 720,
@@ -227,7 +252,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, or Hover inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
+    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, Hover, or Frog inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
     w: 1,
     h: 1,
     hp: 160,
@@ -319,12 +344,25 @@ export interface Unit {
   age: number
   /** Cryo this Stalker is frozen inside. Null while the Stalker is on the map. */
   frozen: number | null
+  /** Seconds left in a Frog Freeze. The unit stays on the map and cannot move or act. */
+  ice: number
+  /** Seconds until this Frog can Freeze again. */
+  frostCd: number
   /**
-   * Fraction of Power left, from 1 down to 0. Only a Flasher, Gorilla, or Hover drains it.
+   * Fraction of Power left, from 1 down to 0. A Flasher, Gorilla, Hover, or Frog drains it.
    * At 0 the unit shuts down: it stays on the map, but it does not move, fire, or take orders until Power is above 0.
    * A battery refills it. A finished friendly Pillar refills it while the unit is inside that Pillar's sight.
    */
   power: number
+}
+
+/** Expanding frost left by Frog Freeze. Rendering only, spawned by the order. */
+export interface FrostRing {
+  x: number
+  y: number
+  life: number
+  max: number
+  reach: number
 }
 
 export interface TrainJob {
@@ -543,7 +581,7 @@ export interface MatchState {
   ore: OreNode[]
   rocks: Rock[]
   graves: Grave[]
-  /** Batteries left by destroyed Flashers, Gorillas, and Hovers. */
+  /** Batteries left by destroyed Flashers, Gorillas, Hovers, and Frogs. */
   batteries: Battery[]
   /** Crows. Ambient only. */
   animals: Animal[]
@@ -551,6 +589,7 @@ export interface MatchState {
   buildings: Building[]
   projectiles: Projectile[]
   particles: Particle[]
+  rings: FrostRing[]
   pings: Ping[]
   toasts: Toast[]
   nextId: number
