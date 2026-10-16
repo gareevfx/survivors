@@ -22,6 +22,8 @@ import {
   PLAYER_COLOR,
   CRYO_RECOVER,
   ROCK_HP,
+  isShutdown,
+  powerSeconds,
   TILE,
   TREE_HP,
   UNIT_STATS,
@@ -124,6 +126,14 @@ export function renderWorld(
     const y = (node.ty + 0.5) * TILE
     if (x < view.l || y < view.t || x > view.r || y > view.b) continue
     drawOreSprite(ctx, node.tx, node.ty, state.seed, state.selectedOre === node.id, node.amount, ORE_NODE_AMOUNT)
+  }
+
+  for (const battery of state.batteries) {
+    if (!viewGroundShown(state, battery.tx, battery.ty)) continue
+    const x = (battery.tx + 0.5) * TILE
+    const y = (battery.ty + 0.5) * TILE
+    if (x < view.l || y < view.t || x > view.r || y > view.b) continue
+    drawBattery(ctx, x, y)
   }
 
   for (const grave of state.graves) {
@@ -594,7 +604,8 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
 
   ctx.save()
   ctx.translate(unit.x, unit.y + bob)
-  if (unit.cloak > 0) ctx.globalAlpha = 0.45
+  if (isShutdown(unit)) ctx.globalAlpha = 0.35
+  else if (unit.cloak > 0) ctx.globalAlpha = 0.45
   if (unit.kind === 'porter') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
     ctx.beginPath()
@@ -669,8 +680,13 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.restore()
   }
 
-  const showHp = selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
+  const powered = powerSeconds(unit.kind) > 0
+  const showHp = powered || selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
   if (showHp) bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
+  if (powered) {
+    const powerColor = unit.power <= 0 ? '#6d7c84' : '#3ec6ff'
+    bar(ctx, unit.x - 12, unit.y - stats.radius - 4, 24, unit.power, powerColor)
+  }
 
   if (unit.cloak > 0) {
     const label = `${Math.ceil(unit.cloak)}s`
@@ -720,6 +736,25 @@ function drawPing(ctx: CanvasRenderingContext2D, x: number, y: number, k: number
   ctx.beginPath()
   ctx.arc(x, y, 6 + (1 - k) * 16, 0, Math.PI * 2)
   ctx.stroke()
+  ctx.restore()
+}
+
+function drawBattery(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.fillStyle = 'rgba(16, 12, 8, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(1, 8, 7, 2.4, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#10262c'
+  ctx.strokeStyle = '#d7fff6'
+  ctx.lineWidth = 1.2
+  ctx.fillRect(-6, -4, 12, 10)
+  ctx.strokeRect(-6.5, -4.5, 13, 11)
+  ctx.fillStyle = '#3ec6ff'
+  ctx.fillRect(-4, -2, 8, 6)
+  ctx.fillStyle = '#e9fbff'
+  ctx.fillRect(-2, -7, 4, 3)
   ctx.restore()
 }
 
@@ -788,6 +823,13 @@ export function renderMinimap(
     if (!viewGroundShown(state, node.tx, node.ty)) continue
     ctx.globalAlpha = viewTileVisible(state, node.tx, node.ty) ? 1 : 0.45
     ctx.fillRect(ox + node.tx * sx, oy + node.ty * sy, sx, sy)
+  }
+  ctx.globalAlpha = 1
+  ctx.fillStyle = '#3ec6ff'
+  for (const battery of state.batteries) {
+    if (!viewGroundShown(state, battery.tx, battery.ty)) continue
+    ctx.globalAlpha = viewTileVisible(state, battery.tx, battery.ty) ? 1 : 0.45
+    ctx.fillRect(ox + battery.tx * sx, oy + battery.ty * sy, sx, sy)
   }
   ctx.globalAlpha = 1
   for (const building of state.buildings) {

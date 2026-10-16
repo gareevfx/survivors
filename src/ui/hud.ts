@@ -17,6 +17,7 @@ import {
   CRYO_SLOTS,
   PLAYER_COLOR,
   PLAYER_NAME,
+  powerSeconds,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
@@ -770,6 +771,11 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
+      ${
+        powerSeconds(unit.kind) > 0
+          ? `<div class="meter power"><span style="width:${Math.max(0, Math.min(1, unit.power)) * 100}%"></span></div><p class="meta">Power ${Math.round(Math.max(0, unit.power) * 100)}%${unit.power <= 0 ? ' · Shut down' : ''}</p>`
+          : ''
+      }
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}

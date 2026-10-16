@@ -29,6 +29,19 @@ export const SUPPLY_MAX = 65
 /** One Storage holds this many dumps. A Silo does not. */
 export const STORAGE_CAP = 500
 export const INTERACT = 42
+/** Flasher, Gorilla, and Hover run this long from a full Power bar. */
+export const FLASHER_POWER_SECONDS = 3 * 60
+export const GORILLA_POWER_SECONDS = 10 * 60
+export const HOVER_POWER_SECONDS = 8 * 60
+/** SiloAI sends a combat unit to a battery below this fraction of Power. */
+export const POWER_LOW = 0.3
+/** Dumps left on the ground when a building is destroyed. */
+export const FACTORY_DEBRIS_PILES = 6
+export const FACTORY_DEBRIS_AMOUNT = 15
+export const STORAGE_DEBRIS_PILES = 4
+export const STORAGE_DEBRIS_AMOUNT = 10
+export const PILLAR_DEBRIS_PILES = 1
+export const PILLAR_DEBRIS_AMOUNT = 50
 export const AGGRO_RANGE = 176
 export const CHASE_BREAK = 300
 /** A worker that has not moved on an order for this long is sent to the next job. */
@@ -44,6 +57,19 @@ export const UNIT_KINDS: readonly UnitKind[] = ['porter', 'pike', 'howler', 'dro
 /** Flashers, Gorillas, Hovers, and any later fighting unit. A Stalker is not one. */
 export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
+}
+
+/** Seconds of Power from full. Stalkers have none. */
+export function powerSeconds(kind: UnitKind): number {
+  if (kind === 'pike') return FLASHER_POWER_SECONDS
+  if (kind === 'howler') return GORILLA_POWER_SECONDS
+  if (kind === 'drone') return HOVER_POWER_SECONDS
+  return 0
+}
+
+/** A Flasher, Gorilla, or Hover with an empty Power bar. It is still alive. */
+export function isShutdown(unit: { kind: UnitKind; power: number }): boolean {
+  return powerSeconds(unit.kind) > 0 && unit.power <= 0
 }
 export type BuildingKind = 'keep' | 'yard' | 'silo' | 'tower'
 
@@ -96,7 +122,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   pike: {
     label: 'Flasher',
-    blurb: 'Quick rider with a short reach.',
+    blurb: 'Quick rider with a short reach. Power lasts 3 minutes, then the Flasher shuts down until a battery recharges it.',
     hp: 58,
     speed: 104,
     radius: 10,
@@ -113,7 +139,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   howler: {
     label: 'Gorilla',
-    blurb: 'Slow gunner with a long reach.',
+    blurb: 'Slow gunner with a long reach. Power lasts 10 minutes, then the Gorilla shuts down until a battery recharges it.',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -130,7 +156,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   drone: {
     label: 'Hover',
-    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight.`,
+    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight. Power lasts 8 minutes, then the Hover shuts down until a battery recharges it.`,
     hp: 80,
     speed: 118,
     radius: 8,
@@ -175,7 +201,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains flashers, gorillas, and hovers.',
+    blurb: 'Trains flashers, gorillas, and hovers. Destruction leaves 6 piles of 15 dumps.',
     w: 3,
     h: 2,
     hp: 720,
@@ -186,7 +212,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8. Holds at most 500 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile.',
+    blurb: 'Raises the cells cap by 8. Holds at most 500 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile. Destruction also leaves 4 piles of 10 dumps.',
     w: 2,
     h: 2,
     hp: 400,
@@ -197,7 +223,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars.',
+    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. Destruction leaves one pile of 50 dumps.',
     w: 1,
     h: 1,
     hp: 160,
@@ -289,6 +315,11 @@ export interface Unit {
   age: number
   /** Cryo this Stalker is frozen inside. Null while the Stalker is on the map. */
   frozen: number | null
+  /**
+   * Fraction of Power left, from 1 down to 0. Only a Flasher, Gorilla, or Hover drains it.
+   * At 0 the unit shuts down: it stays on the map, but it does not move, fire, or take orders until a battery refills it.
+   */
+  power: number
 }
 
 export interface TrainJob {
@@ -362,6 +393,13 @@ export interface Rock {
   hitFlash: number
   /** Trees block, hide behind fog, and break the same way as stone. */
   kind?: 'rock' | 'tree'
+}
+
+/** One charge left where a Flasher, Gorilla, or Hover was destroyed. It does not block movement. */
+export interface Battery {
+  id: number
+  tx: number
+  ty: number
 }
 
 /** A Stalker who died of age. It marks the tile and does not block movement. */
@@ -500,6 +538,8 @@ export interface MatchState {
   ore: OreNode[]
   rocks: Rock[]
   graves: Grave[]
+  /** Batteries left by destroyed Flashers, Gorillas, and Hovers. */
+  batteries: Battery[]
   /** Crows. Ambient only. */
   animals: Animal[]
   units: Unit[]

@@ -304,6 +304,7 @@ export function makeUnit(
     cloak: 0,
     age: 0,
     frozen: null,
+    power: 1,
   }
   state.units.push(unit)
   noteUnitCreated(state, owner, kind)
@@ -463,6 +464,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     ore: [],
     rocks: [],
     graves: [],
+    batteries: [],
     animals: [],
     units: [],
     buildings: [],

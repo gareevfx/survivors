@@ -435,6 +435,12 @@ button, canvas { font: inherit; }
   background: linear-gradient(90deg, #8ed15a, #d7e38a);
 }
 
+.meter.power { margin-top: 4px; }
+
+.meter.power span {
+  background: linear-gradient(90deg, #1a8cff, #7af0ff);
+}
+
 #commands {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

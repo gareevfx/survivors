@@ -2,7 +2,7 @@ import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandCo
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, isWalkable, rockAt, rockById } from './state'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, sideTileExplored } from './vision'
 
@@ -1064,6 +1064,29 @@ function runSide(state: MatchState, owner: PlayerId): void {
   finish(state, side)
 }
 
+/** Combat units under 30% Power walk to the nearest battery this side has seen. */
+function rechargeLowPower(state: MatchState, side: Brain): void {
+  if (!state.batteries.length) return
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.hp <= 0 || unit.frozen != null) continue
+    if (powerSeconds(unit.kind) <= 0 || unit.power <= 0 || unit.power >= POWER_LOW) continue
+    let best: { x: number; y: number; d: number } | null = null
+    for (const battery of state.batteries) {
+      const seen =
+        tileBit(state, side.explored, battery.tx, battery.ty) || tileBit(state, side.visible, battery.tx, battery.ty)
+      if (!seen) continue
+      const x = (battery.tx + 0.5) * TILE
+      const y = (battery.ty + 0.5) * TILE
+      const distance = Math.hypot(unit.x - x, unit.y - y)
+      if (!best || distance < best.d) best = { x, y, d: distance }
+    }
+    if (!best) continue
+    const order = unit.order
+    if (order?.type === 'move' && Math.hypot(order.x - best.x, order.y - best.y) <= 8) continue
+    commandMove(state, [unit.id], best.x, best.y, false)
+  }
+}
+
 function finish(state: MatchState, side: Brain): void {
   repairRuins(state, side)
   abortThreatenedExpansion(state, side)
@@ -1073,6 +1096,7 @@ function finish(state: MatchState, side: Brain): void {
   widenNarrowPassages(state, side)
   employIdleStalkers(state, side)
   scoutUnchartedSite(state, side)
+  rechargeLowPower(state, side)
   store(state, side)
 }
 

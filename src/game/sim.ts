@@ -33,14 +33,22 @@ import {
   AGGRO_RANGE,
   BUILDING_STATS,
   CHASE_BREAK,
+  FACTORY_DEBRIS_AMOUNT,
+  FACTORY_DEBRIS_PILES,
   GATHER_AMOUNT,
   GATHER_TIME,
   CRYO_FREEZE_COST,
   CRYO_SLOTS,
   INTERACT,
+  isShutdown,
+  PILLAR_DEBRIS_AMOUNT,
+  PILLAR_DEBRIS_PILES,
+  powerSeconds,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
+  STORAGE_DEBRIS_AMOUNT,
+  STORAGE_DEBRIS_PILES,
   PLAYER_COLOR,
   PLAYER_NAME,
   STALKER_LIFESPAN,
@@ -58,6 +66,7 @@ import {
 export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
   state.time += dt
+  drainPower(state, dt)
   updateSiloAi(state, dt)
   revealCloakedByScanners(state)
 
@@ -70,6 +79,7 @@ export function step(state: MatchState, dt: number): void {
   }
   separate(state)
   releaseFromTerrain(state)
+  collectBatteries(state)
   revealCloakedByScanners(state)
   advanceGather(state, dt)
   advanceConstruct(state, dt)
@@ -123,6 +133,15 @@ export function step(state: MatchState, dt: number): void {
 
 function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.repathIn = Math.max(0, unit.repathIn - dt)
+  if (isShutdown(unit)) {
+    if (unit.order || unit.goalX != null || unit.scanning) {
+      unit.order = null
+      unit.idleAcquire = false
+      unit.scanning = false
+      stopMoving(unit)
+    }
+    return
+  }
   const order = unit.order
   if (!order) {
     if (unit.kind === 'porter' && unit.cargo > 0) {
@@ -1072,6 +1091,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     cloak: 0,
     age: 0,
     frozen: null,
+    power: 1,
   }
   state.units.push(unit)
   noteUnitCreated(state, building.owner, kind)
@@ -1082,7 +1102,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
 }
 
 function tryFire(state: MatchState, unit: Unit): void {
-  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone') return
+  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || isShutdown(unit)) return
   const target = pickFireTarget(state, unit)
   if (!target || !inWeaponRange(unit, target)) return
   if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
@@ -1467,6 +1487,7 @@ function cleanup(state: MatchState): void {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
       noteUnitLost(state, unit.owner, unit.kind)
+      if (powerSeconds(unit.kind) > 0) dropBattery(state, unit)
       burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
       state.events.push({ type: 'death' })
     }
@@ -1485,6 +1506,7 @@ function cleanup(state: MatchState): void {
       state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
     }
     if (building.kind === 'silo' && building.dropDumps) dropStoragePile(state, building)
+    dropBuildingDebris(state, building)
     for (const unit of state.units) {
       if (unit.order?.type === 'construct' && unit.order.buildingId === building.id) {
         unit.order = null
@@ -1695,6 +1717,92 @@ function captureSide(state: MatchState, victim: number, captor: number): void {
   pushToast(state, `${PLAYER_NAME[victim] ?? 'A side'} is eliminated.`)
 }
 
+function drainPower(state: MatchState, dt: number): void {
+  for (const unit of state.units) {
+    const life = powerSeconds(unit.kind)
+    if (life <= 0 || unit.hp <= 0 || unit.frozen != null) continue
+    if (unit.power <= 0) {
+      unit.power = 0
+      continue
+    }
+    unit.power = Math.max(0, unit.power - dt / life)
+    if (unit.power > 0) continue
+    unit.power = 0
+    unit.order = null
+    unit.idleAcquire = false
+    unit.scanning = false
+    unit.cloak = 0
+    stopMoving(unit)
+  }
+}
+
+/** The first combat unit whose body reaches the cell takes the charge. */
+function collectBatteries(state: MatchState): void {
+  if (!state.batteries.length) return
+  const taken = new Set<number>()
+  for (const unit of state.units) {
+    if (unit.hp <= 0 || unit.frozen != null || powerSeconds(unit.kind) <= 0) continue
+    for (const battery of state.batteries) {
+      if (taken.has(battery.id)) continue
+      const cx = (battery.tx + 0.5) * TILE
+      const cy = (battery.ty + 0.5) * TILE
+      if (Math.hypot(unit.x - cx, unit.y - cy) > TILE * 0.72) continue
+      unit.power = 1
+      taken.add(battery.id)
+      break
+    }
+  }
+  if (taken.size) state.batteries = state.batteries.filter((battery) => !taken.has(battery.id))
+}
+
+function dropBattery(state: MatchState, unit: Unit): void {
+  const tx = Math.min(state.mapW - 1, Math.max(0, Math.floor(unit.x / TILE)))
+  const ty = Math.min(state.mapH - 1, Math.max(0, Math.floor(unit.y / TILE)))
+  if (state.batteries.some((battery) => battery.tx === tx && battery.ty === ty)) return
+  state.batteries.push({ id: state.nextId++, tx, ty })
+}
+
+function debrisSpec(kind: Building['kind']): { piles: number; amount: number } | null {
+  if (kind === 'yard') return { piles: FACTORY_DEBRIS_PILES, amount: FACTORY_DEBRIS_AMOUNT }
+  if (kind === 'silo') return { piles: STORAGE_DEBRIS_PILES, amount: STORAGE_DEBRIS_AMOUNT }
+  if (kind === 'tower') return { piles: PILLAR_DEBRIS_PILES, amount: PILLAR_DEBRIS_AMOUNT }
+  return null
+}
+
+/** Piles on the footprint, then the ring around it, skipping cells that already hold dumps. */
+function dropBuildingDebris(state: MatchState, building: Building): void {
+  const spec = debrisSpec(building.kind)
+  if (!spec) return
+  const stats = BUILDING_STATS[building.kind]
+  const spots: Array<{ tx: number; ty: number }> = []
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) spots.push({ tx: building.tx + x, ty: building.ty + y })
+  }
+  for (let y = -1; y <= stats.h; y++) {
+    for (let x = -1; x <= stats.w; x++) {
+      if (x >= 0 && x < stats.w && y >= 0 && y < stats.h) continue
+      const tx = building.tx + x
+      const ty = building.ty + y
+      if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) continue
+      spots.push({ tx, ty })
+    }
+  }
+  let placed = 0
+  for (const spot of spots) {
+    if (placed >= spec.piles) break
+    if (state.ore.some((node) => node.tx === spot.tx && node.ty === spot.ty && node.amount > 0)) continue
+    layDumpPile(state, spot.tx, spot.ty, spec.amount)
+    placed += 1
+  }
+}
+
+function layDumpPile(state: MatchState, tx: number, ty: number, amount: number): void {
+  state.tiles[ty * state.mapW + tx] = 0
+  const rock = state.rocks.find((entry) => entry.tx === tx && entry.ty === ty)
+  if (rock) rock.hp = 0
+  state.ore.push({ id: state.nextId++, tx, ty, amount })
+}
+
 function dropStoragePile(state: MatchState, building: Building): void {
   const amount = building.stock
   if (amount <= 0) return
@@ -1712,10 +1820,7 @@ function dropStoragePile(state: MatchState, building: Building): void {
     }
   }
   const cell = spot ?? { tx: building.tx, ty: building.ty }
-  state.tiles[cell.ty * state.mapW + cell.tx] = 0
-  const rock = state.rocks.find((entry) => entry.tx === cell.tx && entry.ty === cell.ty)
-  if (rock) rock.hp = 0
-  state.ore.push({ id: state.nextId++, tx: cell.tx, ty: cell.ty, amount })
+  layDumpPile(state, cell.tx, cell.ty, amount)
 }
 
 function eliminateSide(state: MatchState, owner: number): void {

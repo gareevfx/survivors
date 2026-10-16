@@ -13,7 +13,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, GATHER_AMOUNT, GRID_CLOAK_SECONDS, INTERACT, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
@@ -2435,6 +2435,7 @@ endOfMatchStats()
 replayRepeatsTheMatch()
 replayCarriesSpeed()
 replayShowsRecordedStats()
+powerDebrisAndBatteries()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6454,4 +6455,147 @@ function replayShowsRecordedStats(): void {
   const still = statsPanelHtml(recorded.time, recorded.playerCount, recorded.stats)
   assert(still === frozen, 'playback changed the recorded statistics')
   assert(currentTape()?.actions.length === 0, 'sealing the statistics wrote an order')
+}
+
+function countAmount(state: MatchState, amount: number, seen: Set<number>): number {
+  return state.ore.filter((node) => node.amount === amount && !seen.has(node.id)).length
+}
+
+function powerDebrisAndBatteries(): void {
+  const debris = createMatch(11)
+  debris.aiAcc = -30
+  debris.sideAcc.fill(-30)
+  const seen = new Set(debris.ore.map((node) => node.id))
+  const yard = makeBuilding(debris, 0, 'yard', 8, 8, true)
+  yard.hp = 0
+  step(debris, 1 / 60)
+  const factoryPiles = debris.ore.filter((node) => node.amount === 15 && !seen.has(node.id))
+  assert(factoryPiles.length === 6, `a Factory left ${factoryPiles.length} piles of 15`)
+  for (const pile of factoryPiles) seen.add(pile.id)
+  const vault = makeBuilding(debris, 1, 'silo', 14, 8, true)
+  vault.stock = 30
+  vault.dropDumps = true
+  debris.oreHeld[1] = 80
+  vault.hp = 0
+  step(debris, 1 / 60)
+  assert(countAmount(debris, 10, seen) === 4, 'a Storage did not leave 4 piles of 10')
+  assert(countAmount(debris, 30, seen) === 1, 'a combat kill did not leave the stored dumps')
+  assert(debris.oreHeld[1] === 50, `the stored pile did not leave the bank (${debris.oreHeld[1]})`)
+  for (const node of debris.ore) if (node.amount === 10 || node.amount === 30) seen.add(node.id)
+  const pillar = makeBuilding(debris, 0, 'tower', 20, 8, true)
+  pillar.hp = 0
+  step(debris, 1 / 60)
+  assert(countAmount(debris, 50, seen) === 1, 'a Pillar did not leave one pile of 50')
+  const quiet = makeBuilding(debris, 1, 'silo', 24, 8, true)
+  quiet.stock = 15
+  quiet.hp = 0
+  const bank = debris.oreHeld[1]
+  step(debris, 1 / 60)
+  assert(!debris.ore.some((node) => node.amount === 15 && !seen.has(node.id)), 'a Storage dropped its stock without a combat kill')
+  assert(debris.oreHeld[1] === bank, 'debris changed the bank')
+  const pile = factoryPiles[0]
+  assert(pile, 'missing a Factory pile to gather')
+  const porter = makeUnit(debris, 0, 'porter', (pile.tx + 1.5) * TILE, (pile.ty + 0.5) * TILE)
+  commandGather(debris, [porter.id], pile.id)
+  let cargo = 0
+  for (let i = 0; i < 8 * 60; i++) {
+    step(debris, 1 / 60)
+    cargo = unitById(debris, porter.id)?.cargo ?? 0
+    if (cargo > 0) break
+  }
+  assert(cargo === GATHER_AMOUNT, `a Stalker gathered ${cargo} from building debris`)
+
+  const rates = createMatch(13)
+  rates.aiAcc = -30
+  rates.sideAcc.fill(-30)
+  const flasher = makeUnit(rates, 0, 'pike', 200, 200)
+  const ape = makeUnit(rates, 0, 'howler', 280, 200)
+  const hover = makeUnit(rates, 0, 'drone', 360, 200)
+  for (let i = 0; i < 60; i++) step(rates, 1 / 60)
+  const flasherPower = () => flasher.power
+  const apePower = () => ape.power
+  const hoverPower = () => hover.power
+  assert(Math.abs(flasherPower() - (1 - 1 / FLASHER_POWER_SECONDS)) < 0.001, `Flasher Power is ${flasher.power}`)
+  assert(Math.abs(apePower() - (1 - 1 / GORILLA_POWER_SECONDS)) < 0.001, `Gorilla Power is ${ape.power}`)
+  assert(Math.abs(hoverPower() - (1 - 1 / HOVER_POWER_SECONDS)) < 0.001, `Hover Power is ${hover.power}`)
+  ape.power = 0.00001
+  ape.order = { type: 'move', x: 800, y: 200 }
+  const held = ape.x
+  step(rates, 1 / 60)
+  assert(ape.power === 0 && isShutdown(ape), 'empty Power did not shut the Gorilla down')
+  assert(ape.hp > 0 && ape.order == null && ape.x === held, 'a shut-down Gorilla died or kept moving')
+  commandMove(rates, [ape.id], 900, 200, false)
+  assert(ape.order == null, 'a shut-down Gorilla accepted an order')
+
+  flasher.hp = 0
+  step(rates, 1 / 60)
+  const cellX = Math.floor(flasher.x / TILE)
+  const cellY = Math.floor(flasher.y / TILE)
+  const battery = rates.batteries.find((entry) => entry.tx === cellX && entry.ty === cellY)
+  assert(battery, 'a destroyed Flasher left no battery')
+  assert(!rates.units.some((unit) => unit.id === flasher.id), 'the destroyed Flasher stayed on the field')
+  hover.x = (cellX + 0.5) * TILE
+  hover.y = (cellY + 0.5) * TILE
+  hover.power = 0.2
+  step(rates, 1 / 60)
+  assert(hover.power === 1, 'standing on a battery did not refill Power')
+  assert(!rates.batteries.some((entry) => entry.id === battery.id), 'the battery stayed after it was picked up')
+
+  const brain = createMatch(14)
+  brain.aiAcc = 0
+  const home = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the battery run')
+  const spot = buildingCenter(home)
+  const tired = makeUnit(brain, 1, 'pike', spot.x + 48, spot.y)
+  tired.power = POWER_LOW - 0.05
+  const bx = Math.floor(tired.x / TILE) + 3
+  const by = Math.floor(tired.y / TILE)
+  brain.batteries.push({ id: brain.nextId++, tx: bx, ty: by })
+  brain.aiExplored[by * brain.mapW + bx] = 1
+  brain.aiVisible[by * brain.mapW + bx] = 1
+  updateSiloAi(brain, 0.5)
+  const sent = tired.order
+  const chargeX = (bx + 0.5) * TILE
+  const chargeY = (by + 0.5) * TILE
+  assert(sent?.type === 'move', 'SiloAI left a low-Power Flasher in place')
+  assert(Math.hypot(sent.x - chargeX, sent.y - chargeY) <= 8, 'SiloAI did not send the Flasher to the battery')
+  const fresh = makeUnit(brain, 1, 'howler', spot.x - 36, spot.y)
+  fresh.power = POWER_LOW
+  updateSiloAi(brain, 0.5)
+  const stayed = fresh.order
+  assert(stayed?.type !== 'move' || Math.hypot(stayed.x - chargeX, stayed.y - chargeY) > 8, 'SiloAI sent a Flasher that still had 30% Power')
+
+  const seed = 46
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  live.aiAcc = -30
+  live.sideAcc.fill(-30)
+  const victim = makeUnit(live, 1, 'pike', 320, 280)
+  victim.hp = 1
+  const hunter = makeUnit(live, 0, 'pike', victim.x + 30, victim.y)
+  rememberLive(live, { op: 'attack', ids: [hunter.id], targetId: victim.id, kind: 'unit' })
+  commandAttack(live, [hunter.id], victim.id, 'unit')
+  for (let i = 0; i < 90 && live.units.some((unit) => unit.id === victim.id); i++) step(live, 1 / 60)
+  assert(!live.units.some((unit) => unit.id === victim.id), 'the recorded shot left the Flasher alive')
+  assert(live.batteries.length === 1, 'the recorded kill left no battery')
+  const tape = finishRecording()
+  assert(tape && tape.actions.length === 1 && tape.actions[0]?.action.op === 'attack', 'the kill was not the only recorded order')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  played.aiAcc = -30
+  played.sideAcc.fill(-30)
+  const playedVictim = makeUnit(played, 1, 'pike', 320, 280)
+  playedVictim.hp = 1
+  makeUnit(played, 0, 'pike', playedVictim.x + 30, playedVictim.y)
+  armPlayback(tape)
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(played.batteries.length === live.batteries.length, 'replay dropped the battery')
+  assert(played.batteries[0]?.tx === live.batteries[0]?.tx && played.batteries[0]?.ty === live.batteries[0]?.ty, 'replay moved the battery')
+  const liveHunter = live.units.find((unit) => unit.kind === 'pike' && unit.owner === 0)
+  const playedHunter = played.units.find((unit) => unit.kind === 'pike' && unit.owner === 0)
+  assert(liveHunter && playedHunter, 'replay lost the hunter')
+  assert(Math.abs(playedHunter.power - liveHunter.power) < 1e-6, 'replay Power diverged from the match')
 }
