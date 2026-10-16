@@ -28,7 +28,7 @@ import {
   type MatchState,
   type UnitKind,
 } from '../game/types'
-import { rememberAlways, rememberLive } from '../game/replay'
+import { currentTape, rememberAlways, rememberLive } from '../game/replay'
 import { loreBody } from './lore'
 
 export interface HudActions {
@@ -54,14 +54,24 @@ interface Cmd {
 let commandKey = ''
 let sideKey = ''
 let endKey = ''
+let replayStatsKey = ''
+let replayStatsShown = false
+
+/** Open or close the recorded match's statistics over the replay. */
+export function toggleReplayStats(): void {
+  replayStatsShown = !replayStatsShown
+}
 
 export function syncHud(state: MatchState, actions: HudActions): void {
   const ore = document.querySelector('#ore')
   const supply = document.querySelector('#supply')
   const clock = document.querySelector('#clock')
   const idle = document.querySelector('#idle')
+  const statistic = document.querySelector<HTMLButtonElement>('#statistic')
   const cams = document.querySelector<HTMLButtonElement>('#cams')
   const speed = document.querySelector<HTMLButtonElement>('#speed')
+  const replayStats = document.querySelector('#replay-stats')
+  const replayStatsBody = document.querySelector('#replay-stats-body')
   const hint = document.querySelector('#hint')
   const mode = document.querySelector('#modeflag')
   const pause = document.querySelector<HTMLButtonElement>('#pause')
@@ -96,6 +106,24 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
   const replayLive = state.replay && state.outcome == null
+  const recorded = currentTape()?.final
+  if (statistic) {
+    statistic.classList.toggle('hidden', !replayLive)
+    statistic.setAttribute('aria-pressed', replayStatsShown && replayLive ? 'true' : 'false')
+  }
+  if (replayStats && replayStatsBody) {
+    const show = replayStatsShown && replayLive && recorded != null
+    replayStats.classList.toggle('hidden', !show)
+    if (!show) {
+      replayStatsKey = ''
+    } else {
+      const html = statsPanelHtml(recorded.time, recorded.playerCount, recorded.stats)
+      if (html !== replayStatsKey) {
+        replayStatsKey = html
+        replayStatsBody.innerHTML = html
+      }
+    }
+  }
   if (cams) {
     cams.classList.toggle('hidden', !replayLive)
     cams.setAttribute('aria-pressed', state.bothCam ? 'true' : 'false')
@@ -215,19 +243,26 @@ export function resetHudCache(): void {
   commandKey = '\0'
   sideKey = '\0'
   endKey = ''
+  replayStatsKey = ''
+  replayStatsShown = false
 }
 
 export function endStatsHtml(state: MatchState): string {
+  return statsPanelHtml(state.time, state.playerCount, state.stats)
+}
+
+/** The end-of-match statistics table. `time` is the duration, not the replay clock. */
+export function statsPanelHtml(time: number, playerCount: number, stats: MatchState['stats']): string {
   const kindHeads = UNIT_KINDS.map((kind) => `<th scope="col">${escapeHtml(UNIT_STATS[kind].label)}</th>`).join('')
-  const rows = Array.from({ length: state.playerCount }, (_, owner) => {
-    const row = state.stats[owner]
+  const rows = Array.from({ length: playerCount }, (_, owner) => {
+    const row = stats[owner]
     const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
     const color = swatchColor(PLAYER_COLOR[owner] ?? '#ffffff')
     const created = UNIT_KINDS.map((kind) => row?.created[kind] ?? 0)
     const lost = UNIT_KINDS.map((kind) => row?.lost[kind] ?? 0)
     return `<tr class="${owner === 0 ? 'you' : ''}"><th scope="row"><span class="end-side"><i style="background:${color}"></i>${escapeHtml(name)}</span></th>${statCells(created, true)}${statCells(lost, true)}<td class="group">${row?.dumps ?? 0}</td><td class="group">${row?.silos ?? 0}</td></tr>`
   }).join('')
-  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(state.time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="4" scope="colgroup">Created</th><th class="group" colspan="4" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
+  return `<p class="end-duration"><span>Duration</span><b>${formatDuration(time)}</b></p><div class="end-table-wrap"><table aria-label="Match statistics"><thead><tr><th rowspan="2" scope="col">Side</th><th class="group" colspan="4" scope="colgroup">Created</th><th class="group" colspan="4" scope="colgroup">Lost</th><th class="group" rowspan="2" scope="col">Dumps collected</th><th class="group" rowspan="2" scope="col">Silos captured</th></tr><tr>${kindHeads}${kindHeads}</tr></thead><tbody>${rows}</tbody></table></div>`
 }
 
 function statCells(values: number[], grouped: boolean): string {

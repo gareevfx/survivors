@@ -5,17 +5,18 @@ import { runCommand } from './game/console'
 import { controlledSide, cycleSide, handsOff, takeSide } from './game/control'
 import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
-import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways } from './game/replay'
+import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, sealReplayStats } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
 import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
-import { resetHudCache, syncHud } from './ui/hud'
+import { resetHudCache, syncHud, toggleReplayStats } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
 const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
 const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
 const again = document.querySelector<HTMLButtonElement>('#again')
 const replayButton = document.querySelector<HTMLButtonElement>('#replay')
+const statisticButton = document.querySelector<HTMLButtonElement>('#statistic')
 const camsButton = document.querySelector<HTMLButtonElement>('#cams')
 const speedButton = document.querySelector<HTMLButtonElement>('#speed')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
@@ -123,7 +124,8 @@ function startMatch(mode: MatchMode, seed?: number): void {
 
 function startReplay(): void {
   const tape = currentTape()
-  if (!tape) return
+  if (!tape || !match) return
+  sealReplayStats(match)
   finishRecording()
   match = createMatch(tape.seed, tape.mode)
   match.replay = true
@@ -251,6 +253,11 @@ again?.addEventListener('click', () => boot())
 replayButton?.addEventListener('click', () => {
   sfx.unlock()
   startReplay()
+})
+statisticButton?.addEventListener('click', () => {
+  if (!match?.replay || match.outcome) return
+  sfx.unlock()
+  toggleReplayStats()
 })
 camsButton?.addEventListener('click', () => {
   if (!match?.replay) return

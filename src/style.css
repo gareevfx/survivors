@@ -35,6 +35,8 @@ button, canvas { font: inherit; }
 }
 
 #topbar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -506,6 +508,7 @@ button, canvas { font: inherit; }
 #overlay {
   position: absolute;
   inset: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -537,11 +540,25 @@ button, canvas { font: inherit; }
 }
 #replay, #again, #to-menu { margin: 0; }
 
+#statistic[aria-pressed='true'],
 #cams[aria-pressed='true'],
 #speed[aria-pressed='true'] {
   color: var(--paper);
   border-color: var(--gold);
 }
+
+#replay-stats {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 7, 0.72);
+  padding: 20px;
+}
+
+#replay-stats .end-stats { margin-top: 0; }
 
 .end-card {
   width: min(880px, 100%);
@@ -560,7 +577,8 @@ button, canvas { font: inherit; }
   flex-shrink: 0;
 }
 
-#end-stats {
+#end-stats,
+.end-stats {
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
@@ -594,7 +612,8 @@ button, canvas { font: inherit; }
 
 .end-table-wrap { overflow: auto; }
 
-#end-stats table {
+#end-stats table,
+.end-stats table {
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
@@ -603,14 +622,17 @@ button, canvas { font: inherit; }
 }
 
 #end-stats th,
-#end-stats td {
+#end-stats td,
+.end-stats th,
+.end-stats td {
   padding: 6px 8px;
   text-align: right;
   border-bottom: 1px solid #2c3826;
   white-space: nowrap;
 }
 
-#end-stats thead th {
+#end-stats thead th,
+.end-stats thead th {
   color: var(--gold);
   font-size: 11px;
   font-weight: 500;
@@ -621,21 +643,27 @@ button, canvas { font: inherit; }
 }
 
 #end-stats thead th.group,
-#end-stats td.group {
+#end-stats td.group,
+.end-stats thead th.group,
+.end-stats td.group {
   border-left: 1px solid var(--line);
 }
 
-#end-stats tbody th {
+#end-stats tbody th,
+.end-stats tbody th {
   text-align: left;
   color: var(--text);
   font-weight: 500;
 }
 
-#end-stats td { color: var(--paper); }
+#end-stats td,
+.end-stats td { color: var(--paper); }
 
-#end-stats tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+#end-stats tbody tr:nth-child(even),
+.end-stats tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
 
-#end-stats tr.you { background: rgba(230, 193, 90, 0.08); }
+#end-stats tr.you,
+.end-stats tr.you { background: rgba(230, 193, 90, 0.08); }
 
 .end-side {
   display: inline-flex;

@@ -16,6 +16,7 @@
           <strong>Survivors</strong>
         </div>
         <div class="top-actions">
+          <button id="statistic" type="button" class="hidden" aria-pressed="false" title="Show the recorded match statistics">Statistic</button>
           <button id="cams" type="button" class="hidden" aria-pressed="false" title="Show every side">Cams</button>
           <button id="speed" type="button" class="hidden" aria-pressed="false" title="Triple the simulation speed">Speed x3</button>
           <button id="idle" type="button" title="Select idle stalkers (F)">Idle</button>
@@ -62,6 +63,12 @@
         <section id="inspect"></section>
         <section id="commands"></section>
       </footer>
+
+      <div id="replay-stats" class="hidden" role="dialog" aria-modal="true" aria-label="Match statistics">
+        <div class="card end-card">
+          <div id="replay-stats-body" class="end-stats"></div>
+        </div>
+      </div>
 
       <div id="overlay" class="hidden">
         <div class="card end-card">
