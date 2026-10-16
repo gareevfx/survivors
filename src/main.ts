@@ -5,6 +5,7 @@ import { runCommand } from './game/console'
 import { controlledSide, cycleSide, handsOff, takeSide } from './game/control'
 import { attachInput } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
+import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
 import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
@@ -14,6 +15,8 @@ const view = document.querySelector<HTMLCanvasElement>('#view')
 const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
 const hintClose = document.querySelector<HTMLButtonElement>('#hint-x')
 const again = document.querySelector<HTMLButtonElement>('#again')
+const replayButton = document.querySelector<HTMLButtonElement>('#replay')
+const camsButton = document.querySelector<HTMLButtonElement>('#cams')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
 
 if (!view || !minimap) {
@@ -90,11 +93,13 @@ function showMenu(): void {
   if (match && !match.outcome) match.paused = true
 }
 
-function startMatch(mode: MatchMode, seed?: number): void {
+function presentMatch(mode: MatchMode): void {
+  last = performance.now()
+  acc = 0
   closeCommand()
   menuOpen = false
   menu?.classList.add('hidden')
-  match = createMatch(seed ?? ((Math.random() * 1_000_000_000) | 0), mode)
+  if (!match) return
   terrain = buildTerrain(match.seed, match.mapW, match.mapH, mode)
   camera.zoom = mode === 'ffa8' ? 0.75 : mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
@@ -106,6 +111,25 @@ function startMatch(mode: MatchMode, seed?: number): void {
   input.clearGroups()
   resetHudCache()
   lookAtHome()
+}
+
+function startMatch(mode: MatchMode, seed?: number): void {
+  const chosen = seed ?? ((Math.random() * 1_000_000_000) | 0)
+  match = createMatch(chosen, mode)
+  beginRecording(chosen, mode)
+  presentMatch(mode)
+}
+
+function startReplay(): void {
+  const tape = currentTape()
+  if (!tape) return
+  finishRecording()
+  match = createMatch(tape.seed, tape.mode)
+  match.replay = true
+  match.tutorial = false
+  match.paused = false
+  armPlayback(tape)
+  presentMatch(tape.mode)
 }
 
 function boot(seed?: number): void {
@@ -121,7 +145,17 @@ commandForm.addEventListener('submit', (event) => {
     return
   }
   if (!match) return
+  if (match.replay) {
+    const line = text.trim().toLowerCase().replace(/\s+/g, ' ')
+    const allowed = line === 'all cams' || line === 'all cams off' || line === 'speed x3' || line === 'speed x3 off'
+    if (!allowed) {
+      pushToast(match, 'The replay is still playing.')
+      closeCommand()
+      return
+    }
+  }
   const known = runCommand(match, text)
+  if (known && !match.replay) rememberAlways(match, { op: 'console', text })
   if (known) closeCommand()
   else commandField.select()
 })
@@ -213,18 +247,28 @@ menuResume?.addEventListener('click', () => {
 })
 document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
 again?.addEventListener('click', () => boot())
+replayButton?.addEventListener('click', () => {
+  sfx.unlock()
+  startReplay()
+})
+camsButton?.addEventListener('click', () => {
+  if (!match?.replay) return
+  sfx.unlock()
+  runCommand(match, match.bothCam ? 'all cams off' : 'all cams')
+})
 idle?.addEventListener('click', () => {
   sfx.unlock()
   selectIdlePorters()
 })
 document.querySelector('#side-switch')?.addEventListener('click', (event) => {
-  if (!match?.doubleGame || match.outcome) return
+  if (!match?.doubleGame || match.outcome || match.replay) return
   const button = event.target instanceof Element ? event.target.closest('button') : null
   if (!(button instanceof HTMLButtonElement)) return
   const owner = Number(button.dataset.side)
   if (!Number.isInteger(owner)) return
   if (owner === match.control) cycleSide(match)
   else takeSide(match, owner)
+  rememberAlways(match, { op: 'side', owner: match.control })
   lookAtSide(match.control)
 })
 
@@ -266,9 +310,12 @@ function loop(now: number): void {
       acc += dt * rate
       let guard = 0
       while (acc >= STEP && guard++ < 6 * rate) {
+        if (live.replay && !live.outcome) applyDue(live)
         step(live, STEP)
         acc -= STEP
+        if (live.outcome) break
       }
+      if (live.outcome) finishRecording()
     }
     input.pan(dt)
     const drawn = renderWorld(stage, live, ground, camera, {

@@ -526,6 +526,10 @@ export interface MatchState {
   paused: boolean
   /** Simulation rate. 3 while the `speed x3` command is on, otherwise 1. */
   speed: number
+  /** Steps already taken. Human orders are stamped with this so a replay can apply them again. */
+  simTick: number
+  /** Watch-only playback of the tape for this seed. Orders from the player are ignored. */
+  replay: boolean
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
   selectedBuilding: number | null

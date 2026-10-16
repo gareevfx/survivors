@@ -28,6 +28,7 @@ import {
   type MatchState,
   type UnitKind,
 } from '../game/types'
+import { rememberAlways, rememberLive } from '../game/replay'
 import { loreBody } from './lore'
 
 export interface HudActions {
@@ -59,6 +60,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const supply = document.querySelector('#supply')
   const clock = document.querySelector('#clock')
   const idle = document.querySelector('#idle')
+  const cams = document.querySelector<HTMLButtonElement>('#cams')
   const hint = document.querySelector('#hint')
   const mode = document.querySelector('#modeflag')
   const pause = document.querySelector<HTMLButtonElement>('#pause')
@@ -92,6 +94,10 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     (unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order,
   ).length
   if (idle) idle.textContent = idleCount ? `Idle ${idleCount}` : 'Idle'
+  if (cams) {
+    cams.classList.toggle('hidden', !state.replay || state.outcome != null)
+    cams.setAttribute('aria-pressed', state.bothCam ? 'true' : 'false')
+  }
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
   if (pause) {
     pause.textContent = state.paused ? 'Resume' : 'Pause'
@@ -170,10 +176,10 @@ export function syncHud(state: MatchState, actions: HudActions): void {
 
   const commands = buildCommands(state, actions)
   const locked = handsOff(state)
-  const key = `${locked ? 'ai' : 'player'}|${state.doubleGame ? side : 'home'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
+  const key = `${state.replay ? 'replay' : locked ? 'ai' : 'player'}|${state.doubleGame ? side : 'home'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
   if (key !== commandKey) {
     commandKey = key
-    paintCommands(commands, locked)
+    paintCommands(commands, locked, state.replay ? 'Replay' : 'Select stalkers, the Silo, or a Factory.')
   }
 }
 
@@ -227,7 +233,7 @@ function swatchColor(color: string): string {
 }
 
 function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
-  if (state.outcome) return []
+  if (state.outcome || state.replay) return []
   if (state.placement) {
     return [
       {
@@ -261,6 +267,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
             state.toasts.push({ text: 'You need a stalker to repair', life: 3 })
             return
           }
+          rememberLive(state, { op: 'repair', ids: [worker.id], buildingId: building.id })
           const error = commandRepair(state, [worker.id], building.id)
           if (error) state.toasts.push({ text: error, life: 3 })
         },
@@ -276,7 +283,10 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           detail: '75% back',
           title: 'Cancel construction and refund most of the dumps',
           disabled: false,
-          run: () => cancelBuilding(state, building.id),
+          run: () => {
+            rememberLive(state, { op: 'cancelBuilding', buildingId: building.id })
+            cancelBuilding(state, building.id)
+          },
         },
       ]
     }
@@ -331,6 +341,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         title: 'Cancel orders',
         disabled: false,
         run: () => {
+          rememberLive(state, { op: 'stop', ids: state.selectedUnits })
           commandStop(state, state.selectedUnits)
           state.moveArmed = false
           state.attackMoveArmed = false
@@ -346,7 +357,11 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         title: 'Fly to the nearest black fog, then the tiles seen longest ago. Reveals an invisible enemy Hover inside sight.',
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
-        run: () => toggleScanner(state, hovers.map((unit) => unit.id)),
+        run: () => {
+          const ids = hovers.map((unit) => unit.id)
+          rememberLive(state, { op: 'scan', ids })
+          toggleScanner(state, ids)
+        },
       })
       const gridReady = hovers.length >= 10
       cmds.push({
@@ -357,6 +372,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           : 'Needs 10 Hovers selected',
         disabled: !gridReady,
         run: () => {
+          rememberLive(state, { op: 'grid', ids: state.selectedUnits })
           commandHoverGrid(state, state.selectedUnits)
           state.moveArmed = false
           state.attackMoveArmed = false
@@ -401,7 +417,10 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
     detail: 'last order',
     title: 'Refund the latest training order',
     disabled: false,
-    run: () => cancelTrain(state, buildingId),
+    run: () => {
+      rememberLive(state, { op: 'cancelTrain', buildingId })
+      cancelTrain(state, buildingId)
+    },
   }
 }
 
@@ -423,6 +442,7 @@ function cryoButton(state: MatchState, building: Building): Cmd {
         : `Need ${CRYO_COST} dumps`,
       disabled: !afford,
       run: () => {
+        rememberLive(state, { op: 'cryo', buildingId: building.id })
         const error = installCryo(state, building.id)
         if (error) state.toasts.push({ text: error, life: 3.5 })
       },
@@ -443,6 +463,7 @@ function cryoButton(state: MatchState, building: Building): Cmd {
         : send,
     disabled: use.recovering || use.occupied,
     run: () => {
+      rememberLive(state, { op: 'freezeAuto', buildingId: building.id })
       commandFreezeAuto(state, building.id)
     },
   }
@@ -456,7 +477,10 @@ function defrostButton(state: MatchState, building: Building): Cmd {
     detail: use.held ? `${use.held} inside` : 'empty',
     title: `Defrost releases the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
     disabled: use.recovering || !use.occupied,
-    run: () => thawCryo(state, building.id),
+    run: () => {
+      rememberAlways(state, { op: 'thaw', buildingId: building.id })
+      thawCryo(state, building.id)
+    },
   }
 }
 
@@ -497,6 +521,7 @@ function repairButton(state: MatchState): Cmd {
     title,
     disabled: !porters.length || !ruin || !afford,
     run: () => {
+      rememberLive(state, { op: 'repairNearest', ids: state.selectedUnits })
       const error = commandRepairNearest(state, state.selectedUnits)
       if (error) state.toasts.push({ text: error, life: 3 })
     },
@@ -521,13 +546,14 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
     title,
     disabled: !afford || !room,
     run: () => {
+      rememberLive(state, { op: 'train', buildingId, kind })
       const error = tryTrain(state, buildingId, kind)
       if (error) state.toasts.push({ text: error, life: 3 })
     },
   }
 }
 
-function paintCommands(commands: Cmd[], handsOff: boolean): void {
+function paintCommands(commands: Cmd[], handsOff: boolean, emptyText: string): void {
   const root = document.querySelector('#commands')
   if (!root) return
   root.innerHTML = ''
@@ -540,7 +566,7 @@ function paintCommands(commands: Cmd[], handsOff: boolean): void {
   if (!commands.length) {
     const empty = document.createElement('p')
     empty.className = 'cmd-empty'
-    empty.textContent = 'Select stalkers, the Silo, or a Factory.'
+    empty.textContent = emptyText
     root.append(empty)
     return
   }

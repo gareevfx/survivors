@@ -118,6 +118,7 @@ export function step(state: MatchState, dt: number): void {
   updateScanners(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
+  state.simTick += 1
 }
 
 function refreshUnit(state: MatchState, unit: Unit, dt: number): void {

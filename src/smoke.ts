@@ -9,6 +9,7 @@ import { yardEntrance } from './game/factoryArt'
 import { minimapFrame } from './game/render'
 import { keepEntrance } from './game/siloArt'
 import { animalCounts, BEAR_COUNT, CROW_COUNT, EAGLE_COUNT, MOOSE_COUNT } from './game/animals'
+import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberLive } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
@@ -2446,6 +2447,7 @@ attacksBuildings()
 combatResolves()
 keepDecidesTheField()
 endOfMatchStats()
+replayRepeatsTheMatch()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6218,4 +6220,55 @@ function siloCryoButtonsFollowTheVessels(): void {
   dock.selectedBuilding = plant.id
   const factoryPanel = describeSelection(dock)
   assert(factoryPanel.includes('Facility for manufacturing'), 'the Factory panel lost its description')
+}
+
+function matchFingerprint(state: MatchState): string {
+  const units = state.units
+    .map((unit) => `${unit.id}:${unit.owner}:${unit.kind}:${unit.hp}:${unit.x}:${unit.y}:${unit.order?.type ?? ''}:${unit.frozen ?? ''}`)
+    .join('|')
+  const buildings = state.buildings
+    .map((building) => `${building.id}:${building.owner}:${building.kind}:${building.hp}:${building.tx}:${building.ty}:${building.complete}:${building.progress}:${building.cryo}:${building.stock}`)
+    .join('|')
+  const ore = state.ore.map((node) => `${node.id}:${node.amount}`).join('|')
+  return `${state.simTick}|${state.time}|${state.outcome}|${state.oreHeld.join(',')}|${units}|${buildings}|${ore}`
+}
+
+function replayRepeatsTheMatch(): void {
+  const seed = 41
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  for (let i = 0; i < 40; i++) step(live, 1 / 60)
+  assert(currentTape()?.actions.length === 0, 'SiloAI orders were written onto the replay tape')
+  live.paused = true
+  rememberLive(live, { op: 'stop', ids: [1] })
+  assert(currentTape()?.actions.length === 0, 'a paused order was recorded')
+  live.paused = false
+  const ids = live.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0).map((unit) => unit.id)
+  assert(ids.length >= 4, 'replay needs the starting Stalkers')
+  const keep = live.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep, 'replay needs the enemy Silo')
+  const goal = buildingCenter(keep)
+  rememberLive(live, { op: 'move', ids, x: goal.x, y: goal.y, attack: true })
+  commandMove(live, ids, goal.x, goal.y, true)
+  assert(currentTape()?.actions.length === 1, 'the attack-move was not recorded')
+  assert(currentTape()?.actions[0]?.tick === live.simTick, 'the attack-move was stamped on the wrong step')
+  for (let i = 0; i < 180; i++) step(live, 1 / 60)
+  const tape = finishRecording()
+  assert(tape && !live.replay, 'recording did not keep the live match')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  armPlayback(tape)
+  while (played.simTick < live.simTick) {
+    applyDue(played)
+    step(played, 1 / 60)
+  }
+  assert(matchFingerprint(played) === matchFingerprint(live), 'replay diverged from the match')
+  assert(played.replay, 'playback cleared the replay flag')
+  const plainA = createMatch(seed, 'duel')
+  const plainB = createMatch(seed, 'duel')
+  for (let i = 0; i < 120; i++) {
+    step(plainA, 1 / 60)
+    step(plainB, 1 / 60)
+  }
+  assert(matchFingerprint(plainA) === matchFingerprint(plainB), 'the same seed diverged with no orders')
 }
