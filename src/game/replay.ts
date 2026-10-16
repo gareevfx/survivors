@@ -21,7 +21,7 @@ import {
 } from './commands'
 import { takeSide } from './control'
 import { toggleScanner } from './scanner'
-import type { BuildingKind, MatchMode, MatchState, TargetKind, UnitKind } from './types'
+import type { BuildingKind, MatchMode, MatchState, SideStats, TargetKind, UnitKind } from './types'
 
 export type ReplayAction =
   | { op: 'move'; ids: number[]; x: number; y: number; attack: boolean }
@@ -51,10 +51,19 @@ interface Stamped {
   action: ReplayAction
 }
 
+/** Totals from the match that was recorded, kept for the replay statistics panel. */
+export interface ReplayFinal {
+  time: number
+  playerCount: number
+  stats: SideStats[]
+}
+
 export interface ReplayTape {
   seed: number
   mode: MatchMode
   actions: Stamped[]
+  /** Filled when playback starts, from the finished match rather than the replay. */
+  final: ReplayFinal | null
 }
 
 let recording = false
@@ -65,7 +74,7 @@ let cursor = 0
 
 export function beginRecording(seed: number, mode: MatchMode): void {
   recording = true
-  tape = { seed, mode, actions: [] }
+  tape = { seed, mode, actions: [], final: null }
   playAt = []
   play = []
   cursor = 0
@@ -78,6 +87,21 @@ export function finishRecording(): ReplayTape | null {
 
 export function currentTape(): ReplayTape | null {
   return tape
+}
+
+/** Copy the finished match's statistics onto the tape. Later replay steps do not change this. */
+export function sealReplayStats(state: MatchState): void {
+  if (!tape) return
+  tape.final = {
+    time: state.time,
+    playerCount: state.playerCount,
+    stats: state.stats.map((row) => ({
+      created: { ...row.created },
+      lost: { ...row.lost },
+      dumps: row.dumps,
+      silos: row.silos,
+    })),
+  }
 }
 
 function stamp(action: ReplayAction): ReplayAction {

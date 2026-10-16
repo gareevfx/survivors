@@ -9,7 +9,7 @@ import { yardEntrance } from './game/factoryArt'
 import { minimapFrame } from './game/render'
 import { keepEntrance } from './game/siloArt'
 import { animalCounts, CROW_COUNT } from './game/animals'
-import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, rememberLive } from './game/replay'
+import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, rememberLive, sealReplayStats } from './game/replay'
 import { step } from './game/sim'
 import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
 import { storageFill } from './game/storageArt'
@@ -31,7 +31,7 @@ import {
   viewUnitSeen,
 } from './game/vision'
 import { toggleScanner, updateScanners } from './game/scanner'
-import { commandSnapshot, describeSelection, endStatsHtml } from './ui/hud'
+import { commandSnapshot, describeSelection, endStatsHtml, statsPanelHtml } from './ui/hud'
 import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -2434,6 +2434,7 @@ keepDecidesTheField()
 endOfMatchStats()
 replayRepeatsTheMatch()
 replayCarriesSpeed()
+replayShowsRecordedStats()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -6417,4 +6418,40 @@ function replayCarriesSpeed(): void {
   assert(runCommand(played, 'speed x3') && playedSpeed() === 3, 'a replay could not turn speed x3 on')
   assert(tape.actions.length === 2, 'a replay speed toggle was written onto the tape')
   assert(runCommand(played, 'speed x3 off') && playedSpeed() === 1, 'a replay could not turn speed x3 off')
+}
+
+function replayShowsRecordedStats(): void {
+  const seed = 45
+  beginRecording(seed, 'duel')
+  const live = createMatch(seed, 'duel')
+  live.time = 125.9
+  live.outcome = 'win'
+  live.stats[0]!.dumps = 4321
+  live.stats[0]!.silos = 2
+  live.stats[1]!.created.pike = 9
+  sealReplayStats(live)
+  live.time = 3
+  live.stats[0]!.dumps = 1
+  const tape = currentTape()
+  assert(tape?.final?.time === 125.9, 'the tape lost the recorded duration')
+  assert(tape?.final?.stats[0]?.dumps === 4321, 'the tape followed a later edit of the dumps')
+  assert(tape?.final?.stats[1]?.created.pike === 9, 'the tape lost the recorded Flasher total')
+  const played = createMatch(seed, 'duel')
+  played.replay = true
+  played.time = 4
+  played.stats[0]!.dumps = 7
+  played.stats[1]!.created.pike = 1
+  const recorded = tape?.final
+  assert(recorded, 'playback has no recorded statistics')
+  const frozen = statsPanelHtml(recorded.time, recorded.playerCount, recorded.stats)
+  const partial = endStatsHtml(played)
+  assert(frozen.includes('>02:05<'), 'the recorded duration was not 02:05')
+  assert(frozen.includes('>4321<') && frozen.includes('>9<'), 'the recorded totals were dropped')
+  assert(partial.includes('>00:04<') && partial.includes('>7<'), 'the replay panel was not the partial match')
+  assert(!partial.includes('>4321<'), 'the unfinished replay already showed the final dumps')
+  assert(frozen !== partial, 'the recorded panel matched the unfinished replay')
+  for (let i = 0; i < 30; i++) step(played, 1 / 60)
+  const still = statsPanelHtml(recorded.time, recorded.playerCount, recorded.stats)
+  assert(still === frozen, 'playback changed the recorded statistics')
+  assert(currentTape()?.actions.length === 0, 'sealing the statistics wrote an order')
 }
