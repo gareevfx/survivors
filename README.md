@@ -44,7 +44,7 @@ Each match is a race between scavenging and fighting. The SiloAI plays by the sa
 - Hover: a flying scout.
 
 **Map**
-- Narrow passages must be at least 2 tiles wide.
+- Narrow passages must be at least 4 tiles wide.
 - Tree and rock life is halved.
 - Stalkers can't build in uncharted territory.
 - Modes: 1v1 on 80x40, and 4 players on 90x50.

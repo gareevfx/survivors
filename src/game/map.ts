@@ -279,10 +279,16 @@ export function generateBattlefield(
 }
 
 /**
- * A walkable cell with both sides blocked, and a walkable step along the corridor,
- * is a one-tile passage. Open one blocking rock, tree, or dumps cell until every
- * corridor is at least two tiles wide. Map edges count as walls. Rim dumps are
- * opened only when nothing else will break the pinch.
+ * Every walkable cell has to sit inside an open square of this size.
+ * Rocks, trees, dumps, and the map edge all count as walls. A 3-cell gap fails.
+ */
+export const MIN_PASSAGE = 4
+
+/**
+ * Opens chokepoints until every walkable cell lies in a 4×4 walkable square.
+ * Only blocking cells are cleared, so regions that were connected stay connected.
+ * A square that clears rocks is preferred over one that removes dumps, and rim
+ * dumps are last.
  */
 function widenPassages(
   tiles: Uint8Array,
@@ -292,43 +298,162 @@ function widenPassages(
   keepOre: (tx: number, ty: number) => boolean,
 ): void {
   const oreAt = new Set<number>()
-  const syncOre = () => {
+  const open = new Uint8Array(mapW * mapH)
+  const refresh = () => {
     oreAt.clear()
     for (const node of ore) oreAt.add(node.ty * mapW + node.tx)
+    for (let index = 0; index < open.length; index++) {
+      const tile = tiles[index] ?? 0
+      open[index] = tile !== 1 && tile !== 3 && !oreAt.has(index) ? 1 : 0
+    }
   }
-  syncOre()
-  const blocked = (tx: number, ty: number) => cellBlocked(tiles, oreAt, mapW, mapH, tx, ty)
+  refresh()
   let guard = 0
-  let changed = true
-  while (changed && guard++ < mapW * mapH) {
-    changed = false
+  while (guard++ < 8) {
+    const sums = passageSums(open, mapW, mapH)
+    const clear = new Set<number>()
     for (let ty = 0; ty < mapH; ty++) {
       for (let tx = 0; tx < mapW; tx++) {
-        if (blocked(tx, ty) || !isNarrowPassage(tx, ty, blocked)) continue
-        const left = blocked(tx - 1, ty)
-        const right = blocked(tx + 1, ty)
-        const up = blocked(tx, ty - 1)
-        const down = blocked(tx, ty + 1)
-        const options: Array<[number, number]> = []
-        if (left && right && (!up || !down)) options.push([tx - 1, ty], [tx + 1, ty])
-        if (up && down && (!left || !right)) options.push([tx, ty - 1], [tx, ty + 1])
-        const interior = options.filter(([x, y]) => x >= 0 && y >= 0 && x < mapW && y < mapH && blocked(x, y))
-        const preferred = interior.filter(([x, y]) => !keepOre(x, y))
-        const pick = (preferred[0] ?? interior[0])
-        if (!pick) continue
-        const [x, y] = pick
-        const index = y * mapW + x
-        tiles[index] = 0
-        if (oreAt.has(index)) {
-          const next = ore.filter((node) => node.tx !== x || node.ty !== y)
-          ore.length = 0
-          for (const node of next) ore.push(node)
-          syncOre()
+        if (!open[ty * mapW + tx]) continue
+        if (squareCovers(sums, mapW, tx, ty, MIN_PASSAGE)) continue
+        const window = cheapestOpening(open, oreAt, keepOre, mapW, mapH, tx, ty, MIN_PASSAGE)
+        if (!window) continue
+        for (let y = window.y0; y < window.y0 + MIN_PASSAGE; y++) {
+          for (let x = window.x0; x < window.x0 + MIN_PASSAGE; x++) {
+            const index = y * mapW + x
+            if (!open[index]) clear.add(index)
+          }
         }
-        changed = true
+      }
+    }
+    if (clear.size === 0) break
+    let droppedOre = false
+    for (const index of clear) {
+      tiles[index] = 0
+      if (oreAt.has(index)) droppedOre = true
+    }
+    if (droppedOre) {
+      const next = ore.filter((node) => !clear.has(node.ty * mapW + node.tx))
+      ore.length = 0
+      for (const node of next) ore.push(node)
+    }
+    refresh()
+  }
+}
+
+function passageSums(open: Uint8Array, mapW: number, mapH: number): Int32Array {
+  const stride = mapW + 1
+  const sums = new Int32Array(stride * (mapH + 1))
+  for (let y = 0; y < mapH; y++) {
+    let row = 0
+    for (let x = 0; x < mapW; x++) {
+      row += open[y * mapW + x] ?? 0
+      sums[(y + 1) * stride + (x + 1)] = (sums[y * stride + (x + 1)] ?? 0) + row
+    }
+  }
+  return sums
+}
+
+function squareArea(sums: Int32Array, mapW: number, x0: number, y0: number, x1: number, y1: number): number {
+  const stride = mapW + 1
+  return (
+    (sums[y1 * stride + x1] ?? 0) -
+    (sums[y0 * stride + x1] ?? 0) -
+    (sums[y1 * stride + x0] ?? 0) +
+    (sums[y0 * stride + x0] ?? 0)
+  )
+}
+
+function squareCovers(sums: Int32Array, mapW: number, tx: number, ty: number, width: number): boolean {
+  const mapH = sums.length / (mapW + 1) - 1
+  const need = width * width
+  for (let dy = 0; dy < width; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      const x0 = tx - dx
+      const y0 = ty - dy
+      if (x0 < 0 || y0 < 0 || x0 + width > mapW || y0 + width > mapH) continue
+      if (squareArea(sums, mapW, x0, y0, x0 + width, y0 + width) === need) return true
+    }
+  }
+  return false
+}
+
+function cheapestOpening(
+  open: Uint8Array,
+  oreAt: Set<number>,
+  keepOre: (tx: number, ty: number) => boolean,
+  mapW: number,
+  mapH: number,
+  tx: number,
+  ty: number,
+  width: number,
+): { x0: number; y0: number } | null {
+  let best: { x0: number; y0: number; cost: number } | null = null
+  for (let dy = 0; dy < width; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      const x0 = tx - dx
+      const y0 = ty - dy
+      if (x0 < 0 || y0 < 0 || x0 + width > mapW || y0 + width > mapH) continue
+      let cost = 0
+      for (let y = y0; y < y0 + width; y++) {
+        for (let x = x0; x < x0 + width; x++) {
+          const index = y * mapW + x
+          if (open[index]) continue
+          if (!oreAt.has(index)) cost += 1
+          else cost += keepOre(x, y) ? 80 : 12
+        }
+      }
+      if (!best || cost < best.cost || (cost === best.cost && (y0 < best.y0 || (y0 === best.y0 && x0 < best.x0)))) {
+        best = { x0, y0, cost }
       }
     }
   }
+  return best ? { x0: best.x0, y0: best.y0 } : null
+}
+
+/**
+ * Largest width, up to MIN_PASSAGE, such that every walkable cell lies in an
+ * open square of that size. MIN_PASSAGE means the map is at least that wide.
+ */
+export function minimumPassageWidth(
+  tiles: Uint8Array,
+  ore: ReadonlyArray<{ tx: number; ty: number }>,
+  mapW: number,
+  mapH: number,
+): number {
+  for (let width = MIN_PASSAGE; width >= 1; width--) {
+    if (unsupportedPassageCells(tiles, ore, mapW, mapH, width) === 0) return width
+  }
+  return 0
+}
+
+/** Walkable cells that do not lie in any open square of the given width. */
+export function unsupportedPassageCells(
+  tiles: Uint8Array,
+  ore: ReadonlyArray<{ tx: number; ty: number }>,
+  mapW: number,
+  mapH: number,
+  width: number,
+): number {
+  const oreAt = new Set(ore.map((node) => node.ty * mapW + node.tx))
+  const open = new Uint8Array(mapW * mapH)
+  let walkable = 0
+  for (let index = 0; index < open.length; index++) {
+    const tile = tiles[index] ?? 0
+    const free = tile !== 1 && tile !== 3 && !oreAt.has(index)
+    open[index] = free ? 1 : 0
+    if (free) walkable += 1
+  }
+  if (walkable === 0) return 0
+  const sums = passageSums(open, mapW, mapH)
+  let count = 0
+  for (let ty = 0; ty < mapH; ty++) {
+    for (let tx = 0; tx < mapW; tx++) {
+      if (!open[ty * mapW + tx]) continue
+      if (!squareCovers(sums, mapW, tx, ty, width)) count += 1
+    }
+  }
+  return count
 }
 
 function cellBlocked(

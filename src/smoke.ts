@@ -2,7 +2,7 @@ import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, s
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandFrost, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
-import { CASTLE_YARD, narrowPassageCount } from './game/map'
+import { CASTLE_YARD, MIN_PASSAGE, minimumPassageWidth, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
@@ -2469,6 +2469,7 @@ scannerEndsHoverCloak()
 towerFiresOutToItsSight()
 workersMineCastleMineralsThenTheNearestPatch()
 captureHarvestAndPassages()
+passagesStayFourWide()
 siloAiRaisesStorageAtRemoteDumps()
 siloAiWidensNarrowPassages()
 siloAiStoresAtNewDumpsWhileHomeRemains()
@@ -2487,6 +2488,45 @@ siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
 console.log('smoke ok')
+
+function passagesStayFourWide(): void {
+  const modes = ['duel', 'ffa', 'ffa8'] as const
+  for (const mode of modes) {
+    for (let seed = 1; seed <= 12; seed++) {
+      const field = createMatch(seed, mode)
+      const width = minimumPassageWidth(field.tiles, field.ore, field.mapW, field.mapH)
+      assert(width >= MIN_PASSAGE, `${mode} seed ${seed} passage width is ${width}`)
+      const keeps = field.buildings.filter((building) => building.kind === 'keep' && building.hp > 0)
+      const blocked = new Uint8Array(field.tiles)
+      for (const node of field.ore) blocked[node.ty * field.mapW + node.tx] = 1
+      for (const keep of keeps) {
+        for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
+          for (let x = 0; x < BUILDING_STATS.keep.w; x++) blocked[(keep.ty + y) * field.mapW + keep.tx + x] = 1
+        }
+      }
+      const yard = (keep: (typeof keeps)[number]) => {
+        for (let y = keep.ty - 1; y <= keep.ty + BUILDING_STATS.keep.h; y++) {
+          for (let x = keep.tx - 1; x <= keep.tx + BUILDING_STATS.keep.w; x++) {
+            if (x < 0 || y < 0 || x >= field.mapW || y >= field.mapH) continue
+            if (!blocked[y * field.mapW + x]) return { tx: x, ty: y }
+          }
+        }
+        return null
+      }
+      const home = keeps[0]
+      const origin = home ? yard(home) : null
+      assert(origin, `${mode} seed ${seed} has no walkable cell beside the first Silo`)
+      for (let i = 1; i < keeps.length; i++) {
+        const keep = keeps[i]
+        if (!keep) continue
+        const goal = yard(keep)
+        assert(goal, `${mode} seed ${seed} Silo ${keep.owner} yard is sealed`)
+        const path = findPath(blocked, field.mapW, field.mapH, origin.tx, origin.ty, goal.tx, goal.ty)
+        assert(path, `${mode} seed ${seed} cannot reach Silo ${keep.owner} from the start`)
+      }
+    }
+  }
+}
 
 function captureHarvestAndPassages(): void {
   assert(TREE_HP === 6 && ROCK_HP === 28, `tree life is ${TREE_HP}, rock life is ${ROCK_HP}`)
