@@ -614,6 +614,19 @@ button, canvas { font: inherit; }
   outline-offset: -2px;
 }
 
+.cmd.danger {
+  background: #7a221c;
+  border-color: #ff5a45;
+  color: #ffe8e4;
+  outline: 2px solid #ff5a45;
+  outline-offset: -2px;
+}
+
+.cmd.danger kbd,
+.cmd.danger .cmd-detail {
+  color: #ffe8e4;
+}
+
 .cmd-empty {
   grid-column: 1 / -1;
   margin: 8px 0 0;

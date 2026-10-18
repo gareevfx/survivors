@@ -1,5 +1,16 @@
 import type { GameEvent } from './types'
 
+/**
+ * World sounds carry a position and play only where the hearer can currently see.
+ * Selection clicks and the win or lose fanfare have no place on the map.
+ */
+export function audibleEvents(events: GameEvent[], hears: (x: number, y: number) => boolean): GameEvent[] {
+  return events.filter((event) => {
+    if (event.type === 'select' || event.type === 'win' || event.type === 'lose') return true
+    return hears(event.x, event.y)
+  })
+}
+
 export class Sfx {
   muted = false
   private ctx: AudioContext | null = null

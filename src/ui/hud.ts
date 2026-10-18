@@ -1,4 +1,4 @@
-import { cancelBuilding, cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
+import { cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, demolishArmed, demolishRefund, installCryo, playerHovers, requestDemolish, storageLostOnDemolish, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleGuard, toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -55,6 +55,8 @@ interface Cmd {
   title: string
   disabled: boolean
   armed?: boolean
+  /** Red Confirm state for a second press. */
+  danger?: boolean
   /** Portrait data URL. When set, the button shows the picture instead of the label. */
   icon?: string
   /** Unit type drawn on a train button. Empty for every other command. */
@@ -255,7 +257,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
 
   const commands = buildCommands(state, actions)
   const locked = handsOff(state)
-  const key = `${state.replay ? 'replay' : locked ? 'ai' : 'player'}|${state.doubleGame ? side : 'home'}|${commands.map((cmd) => `${cmd.id}:${cmd.disabled}:${cmd.armed}:${cmd.detail ?? ''}`).join('|')}`
+  const key = `${state.replay ? 'replay' : locked ? 'ai' : 'player'}|${state.doubleGame ? side : 'home'}|${commands.map((cmd) => `${cmd.id}:${cmd.label}:${cmd.disabled}:${cmd.armed}:${cmd.danger ? 1 : 0}:${cmd.detail ?? ''}`).join('|')}`
   if (key !== commandKey) {
     commandKey = key
     paintCommands(commands, locked, state.replay ? 'Replay' : 'Select stalkers, the Silo, or a Factory.')
@@ -370,19 +372,8 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
   }
   if (building && building.owner === controlledSide(state) && state.selectedUnits.length === 0) {
     if (!building.complete) {
-      return [
-        {
-          id: 'cancel-build',
-          label: 'Cancel',
-          detail: '75% back',
-          title: 'Cancel construction and refund most of the dumps',
-          disabled: false,
-          run: () => {
-            rememberLive(state, { op: 'cancelBuilding', buildingId: building.id })
-            cancelBuilding(state, building.id)
-          },
-        },
-      ]
+      if (building.kind === 'keep') return []
+      return [demolishButton(state, building)]
     }
     if (building.kind === 'keep') {
       const cmds = [
@@ -404,9 +395,10 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         trainButton(state, building.id, 'frog'),
       ]
       if (building.queue.length) cmds.push(cancelTrainButton(state, building.id))
+      cmds.push(demolishButton(state, building))
       return cmds
     }
-    return []
+    return [demolishButton(state, building)]
   }
 
   if (state.selectedUnits.length) {
@@ -681,6 +673,31 @@ function repairButton(state: MatchState): Cmd {
   }
 }
 
+function demolishButton(state: MatchState, building: Building): Cmd {
+  const armed = demolishArmed(building.id)
+  const refund = demolishRefund(building)
+  const lost = storageLostOnDemolish(state, building)
+  const name = BUILDING_STATS[building.kind].label
+  const spent = building.complete ? `a quarter of its ${BUILDING_STATS[building.kind].cost} dump cost` : 'a quarter of the dumps already spent'
+  let title = armed
+    ? `Confirm. Tear down this ${name} and return ${refund} dumps, ${spent}.`
+    : `Demolish this ${name}. Returns ${refund} dumps, ${spent}. Press again within 3 seconds. Press B.`
+  if (lost > 0) title += ` ${lost} dumps stored here will not fit elsewhere and will be lost.`
+  return {
+    id: 'demolish',
+    label: armed ? 'Confirm' : 'Demolish',
+    hotkey: 'B',
+    detail: lost > 0 ? `${refund} back · ${lost} lost` : `${refund} back`,
+    title,
+    disabled: false,
+    armed,
+    danger: armed,
+    run: () => {
+      if (requestDemolish(state, building.id)) rememberLive(state, { op: 'demolish', buildingId: building.id })
+    },
+  }
+}
+
 function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd {
   const stats = UNIT_STATS[kind]
   const side = controlledSide(state)
@@ -729,7 +746,8 @@ function paintCommands(commands: Cmd[], handsOff: boolean, emptyText: string): v
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'cmd'
-    if (cmd.armed) button.classList.add('armed')
+    if (cmd.danger) button.classList.add('danger')
+    else if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'SiloAI is giving the orders' : cmd.title
     button.setAttribute('aria-label', cmd.label)

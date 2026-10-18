@@ -931,7 +931,8 @@ function advanceConstruct(state: MatchState, dt: number): void {
     }
     recomputeSupply(state)
     if (building.owner === 0) {
-      state.events.push({ type: 'ready' })
+      const center = buildingCenter(building)
+      state.events.push({ type: 'ready', x: center.x, y: center.y })
       pushToast(state, `${BUILDING_STATS[building.kind].label} finished.`)
     }
   }
@@ -1005,7 +1006,10 @@ function advanceProduction(state: MatchState, dt: number): void {
     if (job.remaining > 0) continue
     building.queue.shift()
     spawnTrained(state, building, job.kind)
-    if (building.owner === 0) state.events.push({ type: 'ready' })
+    if (building.owner === 0) {
+      const center = buildingCenter(building)
+      state.events.push({ type: 'ready', x: center.x, y: center.y })
+    }
   }
 }
 
@@ -1155,7 +1159,7 @@ function tryFire(state: MatchState, unit: Unit): void {
     r: 3,
     color: sideTone(unit.owner),
   })
-  state.events.push({ type: 'attack' })
+  state.events.push({ type: 'attack', x: unit.x, y: unit.y })
 }
 
 /**
@@ -1211,7 +1215,7 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     r: 3,
     color: sideTone(building.owner),
   })
-  state.events.push({ type: 'attack' })
+  state.events.push({ type: 'attack', x: origin.x, y: origin.y })
 }
 
 function lockedTowerTarget(state: MatchState, building: Building, origin: { x: number; y: number }): Target | null {
@@ -1512,7 +1516,7 @@ function cleanup(state: MatchState): void {
       noteUnitLost(state, unit.owner, unit.kind)
       if (powerSeconds(unit.kind) > 0) dropBattery(state, unit)
       burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
-      state.events.push({ type: 'death' })
+      state.events.push({ type: 'death', x: unit.x, y: unit.y })
     }
     state.units = state.units.filter((unit) => unit.hp > 0)
     state.selectedUnits = state.selectedUnits.filter((id) => !deadIds.has(id))
@@ -1543,7 +1547,7 @@ function cleanup(state: MatchState): void {
       }
     }
     if (state.selectedBuilding === building.id) state.selectedBuilding = null
-    state.events.push({ type: 'death' })
+    state.events.push({ type: 'death', x: center.x, y: center.y })
     if (building.kind === 'keep') {
       releaseCryo(state, building)
       building.cryo = false

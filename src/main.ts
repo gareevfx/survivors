@@ -1,5 +1,5 @@
 import './style.css'
-import { Sfx } from './game/audio'
+import { audibleEvents, Sfx } from './game/audio'
 import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { controlledSide, cycleSide, handsOff, takeSide } from './game/control'
@@ -9,6 +9,7 @@ import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, re
 import { step } from './game/sim'
 import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
 import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
+import { playerHearsAt } from './game/vision'
 import { resetHudCache, syncHud, toggleReplayStats } from './ui/hud'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
@@ -383,7 +384,7 @@ function loop(now: number): void {
       restart: () => boot(),
     })
     const events = live.events.splice(0, live.events.length)
-    sfx.consume(events)
+    sfx.consume(audibleEvents(events, (x, y) => playerHearsAt(live, x, y)))
     const cursor = live.placement ? 'cell' : live.attackMoveArmed ? 'crosshair' : live.moveArmed ? 'copy' : 'crosshair'
     if (stage.style.cursor !== cursor) stage.style.cursor = cursor
   }

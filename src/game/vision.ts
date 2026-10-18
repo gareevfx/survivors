@@ -145,6 +145,16 @@ export function viewTileVisible(state: MatchState, tx: number, ty: number): bool
   return sideTileVisible(state, controlledSide(state), tx, ty)
 }
 
+/**
+ * A world sound is heard only on a tile the human can see right now.
+ * Black fog and the gray shroud are silent. Fog of War off and all cams open the whole map.
+ * Enemy cam does not: it changes the picture, not this side's ears.
+ */
+export function playerHearsAt(state: MatchState, x: number, y: number): boolean {
+  if (state.fogCleared || state.bothCam) return true
+  return sideTileVisible(state, controlledSide(state), Math.floor(x / TILE), Math.floor(y / TILE))
+}
+
 export function viewTileExplored(state: MatchState, tx: number, ty: number): boolean {
   if (state.bothCam) return anySideBit(state, tx, ty, false, false)
   if (state.enemyCam) return anySideBit(state, tx, ty, true, false)

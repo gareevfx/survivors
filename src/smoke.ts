@@ -1,7 +1,8 @@
+import { audibleEvents } from './game/audio'
 import { DRONE_BIKE_AVOID, scoutArea, sideKnowsEnemyKeep, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
-import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandFrost, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
+import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandFrost, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, demolishArmed, demolishBuilding, demolishRefund, hoverGridSpots, installCryo, playerHovers, requestDemolish, storageLostOnDemolish, thawCryo, tryPlace, tryTrain } from './game/commands'
 import { CASTLE_YARD, MIN_PASSAGE, minimumPassageWidth, narrowPassageCount } from './game/map'
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
@@ -28,6 +29,7 @@ import {
   viewBuildingSeen,
   viewRuinShown,
   viewGroundShown,
+  playerHearsAt,
   viewTileVisible,
   sideTileVisible,
   viewUnitSeen,
@@ -1804,6 +1806,186 @@ function godModeSavesNorthmark(): void {
   assert(fresh.godMode, 'the alias did not turn God Mode on')
 }
 
+function worldSoundsUseCurrentSight(): void {
+  const state = createMatch(3)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(keep && enemy, 'missing castles for the sound check')
+  const home = buildingCenter(keep)
+  const far = buildingCenter(enemy)
+  assert(playerHearsAt(state, home.x, home.y), 'a shot at the Silo was silent')
+  assert(!playerHearsAt(state, far.x, far.y), 'a shot in black fog was heard')
+  const homeTx = Math.floor(home.x / TILE)
+  const homeTy = Math.floor(home.y / TILE)
+  let shroud: { tx: number; ty: number } | null = null
+  for (let ty = 0; ty < state.mapH && !shroud; ty++) {
+    for (let tx = 0; tx < state.mapW; tx++) {
+      if (state.visible[ty * state.mapW + tx] !== 1) continue
+      if (tx === homeTx && ty === homeTy) continue
+      shroud = { tx, ty }
+      break
+    }
+  }
+  assert(shroud, 'no second visible tile to cover with the shroud')
+  state.visible[shroud.ty * state.mapW + shroud.tx] = 0
+  state.explored[shroud.ty * state.mapW + shroud.tx] = 1
+  const shroudX = (shroud.tx + 0.5) * TILE
+  const shroudY = (shroud.ty + 0.5) * TILE
+  assert(!playerHearsAt(state, shroudX, shroudY), 'a shot under the shroud was heard')
+  state.fogCleared = true
+  assert(playerHearsAt(state, far.x, far.y), 'fog of war off left a distant shot silent')
+  state.fogCleared = false
+  state.bothCam = true
+  assert(playerHearsAt(state, far.x, far.y), 'all cams left a distant shot silent')
+  state.bothCam = false
+  state.enemyCam = true
+  assert(!playerHearsAt(state, far.x, far.y), 'enemy cam opened sound in black fog')
+  state.enemyCam = false
+  const heard = audibleEvents(
+    [
+      { type: 'attack', x: far.x, y: far.y },
+      { type: 'death', x: shroudX, y: shroudY },
+      { type: 'attack', x: home.x, y: home.y },
+      { type: 'select' },
+      { type: 'order', x: far.x, y: far.y },
+      { type: 'order', x: home.x, y: home.y },
+      { type: 'build', x: shroudX, y: shroudY },
+      { type: 'build', x: home.x, y: home.y },
+      { type: 'ready', x: far.x, y: far.y },
+      { type: 'ready', x: home.x, y: home.y },
+      { type: 'win' },
+      { type: 'lose' },
+    ],
+    (x, y) => playerHearsAt(state, x, y),
+  )
+  assert(heard.some((event) => event.type === 'attack' && event.x === home.x), 'a visible shot was dropped')
+  assert(!heard.some((event) => event.type === 'attack' && event.x === far.x), 'a hidden shot was kept')
+  assert(!heard.some((event) => event.type === 'death'), 'a shrouded death was kept')
+  assert(heard.some((event) => event.type === 'order' && event.x === home.x), 'an order in sight was dropped')
+  assert(!heard.some((event) => event.type === 'order' && event.x === far.x), 'an order in black fog was kept')
+  assert(heard.some((event) => event.type === 'build' && event.x === home.x), 'a building cue in sight was dropped')
+  assert(!heard.some((event) => event.type === 'build' && event.x === shroudX), 'a building cue under the shroud was kept')
+  assert(heard.some((event) => event.type === 'ready' && event.x === home.x), 'a production cue in sight was dropped')
+  assert(!heard.some((event) => event.type === 'ready' && event.x === far.x), 'a production cue in black fog was kept')
+  for (const type of ['select', 'win', 'lose'] as const) {
+    assert(heard.some((event) => event.type === type), `${type} was treated as a world sound`)
+  }
+  state.events = []
+  const seen = makeUnit(state, 0, 'pike', home.x, home.y)
+  const hidden = makeUnit(state, 0, 'pike', shroudX, shroudY)
+  commandMove(state, [seen.id, hidden.id], home.x + 24, home.y, false)
+  const orders = state.events.filter((event) => event.type === 'order')
+  assert(orders.length === 2, 'an order acknowledgement was missing a unit')
+  const voiced = audibleEvents(orders, (x, y) => playerHearsAt(state, x, y))
+  const voicedOrder = voiced[0]
+  assert(voiced.length === 1 && voicedOrder?.type === 'order' && voicedOrder.x === home.x, 'an order played from outside current sight')
+}
+
+function demolishReturnsAQuarter(): void {
+  const state = createMatch(21)
+  state.oreHeld[0] = 4000
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'demolish had no Silo')
+  state.selectedBuilding = keep.id
+  state.selectedUnits = []
+  assert(
+    !commandSnapshot(state).some((cmd) => cmd.label === 'Demolish' || cmd.label === 'Confirm'),
+    'the Silo offered Demolish',
+  )
+  assert(requestDemolish(state, keep.id) === false, 'the Silo was demolished from the panel')
+  assert(demolishBuilding(state, keep.id) === false, 'demolishBuilding removed the Silo')
+
+  const spot = yardNearHome(state)
+  assert(spot, 'no factory pad for demolish')
+  const yard = makeBuilding(state, 0, 'yard', spot.tx, spot.ty, true)
+  yard.queue = [{ kind: 'pike', remaining: 4, total: 12 }]
+  rebuildBlocked(state)
+  recomputeSupply(state)
+  state.selectedBuilding = yard.id
+  const queued = UNIT_STATS.pike.cost
+  const card = commandSnapshot(state)
+  assert(card[card.length - 1]?.label === 'Demolish', 'Demolish is not the last Factory command')
+  assert(card[card.length - 1]?.hotkey === 'B' && card[card.length - 1]?.detail === '40 back', 'the Factory button lost B or the 40 dump refund')
+  assert(card[card.length - 1]?.title.includes('Press B'), 'the Factory tooltip omitted B')
+  const before = state.oreHeld[0] ?? 0
+  const specks = state.particles.length
+  state.events = []
+  assert(requestDemolish(state, yard.id) === false, 'the first press demolished the Factory')
+  assert(state.oreHeld[0] === before, 'the first press changed the dumps')
+  const confirm = commandSnapshot(state).find((cmd) => cmd.hotkey === 'B')
+  assert(confirm?.label === 'Confirm' && confirm.detail === '40 back', 'Confirm did not replace Demolish')
+  assert(requestDemolish(state, yard.id) === true, 'the second press did not demolish')
+  assert(!state.buildings.some((building) => building.id === yard.id), 'the Factory stayed')
+  assert(state.oreHeld[0] === before + 40 + queued, `Factory refund was ${(state.oreHeld[0] ?? 0) - before}, not ${40 + queued}`)
+  assert(state.particles.length >= specks + 16, 'demolish skipped the destruction burst')
+  const death = state.events.find((event) => event.type === 'death')
+  assert(death?.type === 'death', 'demolish skipped the death sound')
+  assert(canPlace(state, 'yard', spot.tx, spot.ty), 'the Factory footprint stayed blocked')
+
+  const rising = makeBuilding(state, 0, 'yard', spot.tx, spot.ty, false)
+  rising.progress = 0.35
+  rebuildBlocked(state)
+  state.selectedBuilding = rising.id
+  const only = commandSnapshot(state)
+  assert(only.length === 1 && only[0]?.label === 'Demolish' && only[0].detail === '40 back', 'an unfinished Factory did not offer only Demolish')
+  assert(demolishRefund(rising) === 40, 'an unfinished Factory refunded less than a quarter of the cost already paid')
+  const risingOre = state.oreHeld[0] ?? 0
+  assert(demolishBuilding(state, rising.id), 'the unfinished Factory stayed')
+  assert(state.oreHeld[0] === risingOre + 40, 'the unfinished Factory refunded the wrong amount')
+
+  const pillar = makeBuilding(state, 0, 'tower', spot.tx + 4, spot.ty, false)
+  pillar.progress = 0.4
+  rebuildBlocked(state)
+  state.selectedBuilding = pillar.id
+  assert(commandSnapshot(state).some((cmd) => cmd.label === 'Demolish' && cmd.detail === '25 back' && cmd.hotkey === 'B'), 'the Pillar button lost its 25 dump refund')
+  assert(requestDemolish(state, pillar.id, 10_000) === false, 'the first Pillar press demolished it')
+  assert(demolishArmed(pillar.id, 12_999), 'Confirm expired before 3 seconds')
+  assert(!demolishArmed(pillar.id, 13_000), 'Confirm stayed armed for more than 3 seconds')
+  assert(requestDemolish(state, pillar.id, 13_000) === false, 'a late press demolished the Pillar')
+  assert(state.buildings.some((building) => building.id === pillar.id), 'the late press removed the Pillar')
+  const pillarOre = state.oreHeld[0] ?? 0
+  assert(demolishBuilding(state, pillar.id), 'the unfinished Pillar stayed')
+  assert(state.oreHeld[0] === pillarOre + 25, 'the unfinished Pillar refunded the wrong amount')
+
+  const bin = makeBuilding(state, 0, 'silo', spot.tx, spot.ty, true)
+  rebuildBlocked(state)
+  recomputeSupply(state)
+  const wantRoom = 30
+  const fill = Math.max(0, SILO_DUMP_CAP - keep.stock - wantRoom)
+  keep.stock += fill
+  state.oreHeld[0] = (state.oreHeld[0] ?? 0) + fill
+  bin.stock = 80
+  state.oreHeld[0] = (state.oreHeld[0] ?? 0) + 80
+  const loss = storageLostOnDemolish(state, bin)
+  assert(loss === 70, `storage loss was ${loss}, not 70`)
+  state.selectedBuilding = bin.id
+  const storageCard = commandSnapshot(state).find((cmd) => cmd.hotkey === 'B')
+  assert(storageCard?.label === 'Demolish' && storageCard.detail === '20 back · 70 lost', 'the Storage tooltip hid the lost dumps')
+  assert(storageCard.title.includes('70'), 'the Storage tooltip omitted the lost count')
+  const held = state.oreHeld[0] ?? 0
+  const cap = state.supplyCap[0] ?? 0
+  assert(demolishBuilding(state, bin.id), 'the Storage stayed')
+  assert(state.oreHeld[0] === held - 70 + 20, 'the Storage refund or the lost dumps were wrong')
+  assert((state.supplyCap[0] ?? 0) === cap - BUILDING_STATS.silo.supply, 'demolish left the Storage cells in the cap')
+  assert(canPlace(state, 'silo', spot.tx, spot.ty), 'the Storage footprint stayed blocked')
+
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemy, 'demolish had no enemy Silo')
+  const far = makeBuilding(state, 0, 'tower', enemy.tx + 4, enemy.ty, true)
+  const where = buildingCenter(far)
+  assert(!playerHearsAt(state, where.x, where.y), 'the distant Pillar was inside current sight')
+  const burst = state.particles.length
+  state.events = []
+  assert(demolishBuilding(state, far.id), 'the distant Pillar stayed')
+  const quiet = state.events.find((event) => event.type === 'death')
+  assert(quiet?.type === 'death' && quiet.x === where.x, 'a distant demolish skipped the death event')
+  assert(
+    audibleEvents(state.events, (x, y) => playerHearsAt(state, x, y)).every((event) => event.type !== 'death'),
+    'a demolish outside sight made a sound',
+  )
+  assert(state.particles.length >= burst + 16, 'a distant demolish skipped the burst')
+}
+
 function fogAndGodModeTurnOff(): void {
   const state = createMatch(14)
   const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
@@ -2427,6 +2609,8 @@ workersBreakRockToReachMinerals()
 aiHaulsTheShortestOpenPath()
 aiBreaksRockClosestToMinerals()
 fogHidesUnexploredGround()
+worldSoundsUseCurrentSight()
+demolishReturnsAQuarter()
 clearFogCommandRevealsTheMap()
 enemyCamShowsDunmarchSight()
 bothCamMergesSight()

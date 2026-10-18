@@ -2,6 +2,7 @@ import { runCommand } from './console'
 import {
   cancelBuilding,
   cancelTrain,
+  demolishBuilding,
   commandAttack,
   commandConstruct,
   commandFreeze,
@@ -41,6 +42,7 @@ export type ReplayAction =
   | { op: 'cancelTrain'; buildingId: number }
   | { op: 'place'; owner: number; kind: BuildingKind; tx: number; ty: number; porters: number[] }
   | { op: 'cancelBuilding'; buildingId: number }
+  | { op: 'demolish'; buildingId: number }
   | { op: 'cryo'; buildingId: number }
   | { op: 'grid'; ids: number[] }
   | { op: 'scan'; ids: number[] }
@@ -194,6 +196,9 @@ function dispatch(state: MatchState, action: ReplayAction): void {
       return
     case 'cancelBuilding':
       cancelBuilding(state, action.buildingId)
+      return
+    case 'demolish':
+      demolishBuilding(state, action.buildingId)
       return
     case 'cryo':
       installCryo(state, action.buildingId)

@@ -526,12 +526,12 @@ export interface SideStats {
 }
 
 export type GameEvent =
-  | { type: 'order' }
+  | { type: 'order'; x: number; y: number }
   | { type: 'select' }
-  | { type: 'attack' }
-  | { type: 'death' }
-  | { type: 'ready' }
-  | { type: 'build' }
+  | { type: 'attack'; x: number; y: number }
+  | { type: 'death'; x: number; y: number }
+  | { type: 'ready'; x: number; y: number }
+  | { type: 'build'; x: number; y: number }
   | { type: 'win' }
   | { type: 'lose' }
 

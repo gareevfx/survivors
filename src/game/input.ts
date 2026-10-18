@@ -3,6 +3,7 @@ import { controlledSide, cycleSide, handsOff } from './control'
 import {
   commandAttack,
   commandConstruct,
+  requestDemolish,
   commandFreeze,
   commandFrost,
   commandGather,
@@ -753,7 +754,8 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
         event.code === 'KeyC' ||
-        event.code === 'KeyR')
+        event.code === 'KeyR' ||
+        event.code === 'KeyB')
     ) {
       return
     }
@@ -769,7 +771,8 @@ function clearSelection(state: MatchState): void {
         event.code === 'KeyH' ||
         event.code === 'KeyT' ||
         event.code === 'KeyC' ||
-        event.code === 'KeyR')
+        event.code === 'KeyR' ||
+        event.code === 'KeyB')
     ) {
       return
     }
@@ -797,6 +800,13 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyT') {
       armPlace('tower')
+      return
+    }
+    if (event.code === 'KeyB') {
+      if (state.paused || state.placement || state.selectedUnits.length) return
+      const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
+      if (!building) return
+      if (requestDemolish(state, building.id)) rememberLive(state, { op: 'demolish', buildingId: building.id })
       return
     }
     if (event.code === 'KeyP') {

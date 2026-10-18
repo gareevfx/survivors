@@ -33,6 +33,7 @@ import {
   STORAGE_CAP,
   GRID_CLOAK_SECONDS,
   isShutdown,
+  PLAYER_COLOR,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -56,7 +57,10 @@ function living(state: MatchState, ids: number[]): Unit[] {
 
 function noteOrder(state: MatchState, units: Unit[]): void {
   const side = controlledSide(state)
-  if (units.some((unit) => unit.owner === side)) state.events.push({ type: 'order' })
+  for (const unit of units) {
+    if (unit.owner !== side) continue
+    state.events.push({ type: 'order', x: unit.x, y: unit.y })
+  }
 }
 
 function depositOf(unit: Unit): number | null {
@@ -962,7 +966,7 @@ export function commandRally(state: MatchState, buildingId: number, x: number, y
   building.rallyX = x
   building.rallyY = y
   state.pings.push({ x, y, life: 0.5, max: 0.5, color: '#9fd8ff' })
-  state.events.push({ type: 'order' })
+  state.events.push({ type: 'order', x, y })
 }
 
 export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind): string | null {
@@ -983,7 +987,10 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   debitDumps(state, building.owner, stats.cost)
   building.queue.push({ kind, remaining: stats.trainTime, total: stats.trainTime })
   recomputeSupply(state)
-  if (building.owner === controlledSide(state)) state.events.push({ type: 'build' })
+  if (building.owner === controlledSide(state)) {
+    const center = buildingCenter(building)
+    state.events.push({ type: 'build', x: center.x, y: center.y })
+  }
   return null
 }
 
@@ -1079,7 +1086,7 @@ export function tryPlace(
     state.selectedOre = null
     state.selectedGrave = null
     state.selectedGhost = null
-    state.events.push({ type: 'build' })
+    state.events.push({ type: 'build', x: center.x, y: center.y })
     pushToast(state, `Raising a ${stats.label}.`)
   }
   return null
@@ -1103,6 +1110,128 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   rebuildBlocked(state)
   recomputeSupply(state)
   if (building.owner === controlledSide(state)) pushToast(state, `Cancelled. Returned ${refund} dumps.`)
+}
+
+const DEMOLISH_CONFIRM_MS = 3000
+
+let demolishArm: { id: number; until: number } | null = null
+
+/** Quarter of the dumps already paid for this building. The full cost is paid when the site is placed. */
+export function demolishRefund(building: Building): number {
+  return Math.floor(BUILDING_STATS[building.kind].cost * 0.25)
+}
+
+function trainingRefund(building: Building): number {
+  let total = 0
+  for (const job of building.queue) total += UNIT_STATS[job.kind].cost
+  return total
+}
+
+function otherDropoffRoom(state: MatchState, building: Building): number {
+  let room = 0
+  for (const other of sideDropoffs(state, building.owner)) {
+    if (other.id === building.id) continue
+    room += Math.max(0, buildingDumpCap(other.kind) - other.stock)
+  }
+  return room
+}
+
+/**
+ * Dumps stored in this building that will not fit once it is gone.
+ * Room is held back first for the quarter refund and any training already paid.
+ */
+export function storageLostOnDemolish(state: MatchState, building: Building): number {
+  if (building.stock <= 0) return 0
+  const stockRoom = Math.max(0, otherDropoffRoom(state, building) - demolishRefund(building) - trainingRefund(building))
+  return Math.max(0, building.stock - stockRoom)
+}
+
+export function demolishArmed(buildingId: number, now = performance.now()): boolean {
+  return demolishArm != null && demolishArm.id === buildingId && now < demolishArm.until
+}
+
+function canDemolish(state: MatchState, building: Building | undefined): building is Building {
+  return (
+    !!building &&
+    building.hp > 0 &&
+    !building.ruined &&
+    building.kind !== 'keep' &&
+    building.owner === controlledSide(state)
+  )
+}
+
+/** First call arms Confirm for 3 seconds. The second call inside that window removes the building. */
+export function requestDemolish(state: MatchState, buildingId: number, now = performance.now()): boolean {
+  if (state.outcome || state.paused || state.replay) return false
+  const building = buildingById(state, buildingId)
+  if (!canDemolish(state, building)) return false
+  if (demolishArm?.id === buildingId && now < demolishArm.until) {
+    demolishArm = null
+    return demolishBuilding(state, buildingId)
+  }
+  demolishArm = { id: buildingId, until: now + DEMOLISH_CONFIRM_MS }
+  return false
+}
+
+/** Remove a Factory, Storage, or Pillar at once. A Silo stays. Returns a quarter of the dumps spent. */
+export function demolishBuilding(state: MatchState, buildingId: number): boolean {
+  if (state.outcome || state.paused) return false
+  const building = buildingById(state, buildingId)
+  if (!building || building.hp <= 0 || building.ruined || building.kind === 'keep') return false
+  const owner = building.owner
+  const lost = storageLostOnDemolish(state, building)
+  const kept = building.stock - lost
+  const refund = demolishRefund(building)
+  const queued = trainingRefund(building)
+  const label = BUILDING_STATS[building.kind].label
+  const center = buildingCenter(building)
+  building.stock = 0
+  building.complete = false
+  state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) - (kept + lost)
+  if (kept > 0) creditDumps(state, owner, kept)
+  const paidBack = creditDumps(state, owner, refund + queued)
+  wreckBurst(state, center.x, center.y, PLAYER_COLOR[owner] ?? '#d7d3c8')
+  state.events.push({ type: 'death', x: center.x, y: center.y })
+  for (const unit of state.units) {
+    const order = unit.order
+    if (!order) continue
+    const hit =
+      ((order.type === 'construct' || order.type === 'repair' || order.type === 'freeze') &&
+        order.buildingId === building.id) ||
+      (order.type === 'attack' && order.kind === 'building' && order.targetId === building.id) ||
+      (order.type === 'gather' && order.binId === building.id)
+    if (!hit) continue
+    unit.order = null
+    stopMoving(unit)
+  }
+  state.buildings = state.buildings.filter((entry) => entry.id !== building.id)
+  if (state.selectedBuilding === building.id) state.selectedBuilding = null
+  if (demolishArm?.id === building.id) demolishArm = null
+  rebuildBlocked(state)
+  recomputeSupply(state)
+  if (owner === controlledSide(state)) {
+    const loss = lost > 0 ? ` ${lost} dumps stored here were lost.` : ''
+    pushToast(state, `Demolished the ${label}. Returned ${paidBack} dumps.${loss}`)
+  }
+  return true
+}
+
+function wreckBurst(state: MatchState, x: number, y: number, color: string): void {
+  const count = 16
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4
+    const speed = 18 + Math.random() * 40
+    state.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.35 + Math.random() * 0.35,
+      max: 0.7,
+      r: 1.5 + Math.random() * 2.2,
+      color,
+    })
+  }
 }
 
 /**
