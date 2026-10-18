@@ -46,6 +46,41 @@ export function hoverFrame(owner: number, dir: number, sway: number): HTMLCanvas
   return canvas
 }
 
+/** Radians per second. Matches an idle Silo roof dish. */
+export const FLY_RADAR_SPIN = 0.42
+
+/**
+ * Small roof-style dish drawn live while Guard is on.
+ * The body sprite stays cached; only this part turns.
+ */
+export function paintHoverDish(ctx: CanvasRenderingContext2D, angle: number, accent: string): void {
+  ctx.save()
+  ctx.rotate(angle)
+  ctx.fillStyle = '#4e4a44'
+  ctx.beginPath()
+  ctx.arc(0, 0, 1.35, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#3a3632'
+  ctx.lineWidth = 1.15
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(5.4, 0)
+  ctx.stroke()
+  const bowl = ctx.createLinearGradient(2, -3, 12, 3)
+  bowl.addColorStop(0, '#f7f4ee')
+  bowl.addColorStop(0.45, '#d5d8de')
+  bowl.addColorStop(1, '#5a6068')
+  ctx.fillStyle = bowl
+  ctx.beginPath()
+  ctx.ellipse(7.4, 0, 3.6, 1.55, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = accent
+  ctx.lineWidth = 0.75
+  ctx.stroke()
+  ctx.restore()
+}
+
 /** Cheap spinning discs. Not cached, so the blades can turn every frame. */
 export function paintHoverRotors(ctx: CanvasRenderingContext2D, dir: number, spin: number, accent: string): void {
   const { fx, fy, sx, sy } = facingBasis(dir)

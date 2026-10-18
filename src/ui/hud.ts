@@ -1,6 +1,6 @@
 import { cancelBuilding, cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, installCryo, playerHovers, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
-import { toggleScanner } from '../game/scanner'
+import { toggleGuard, toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
 import { gorillaPortraitUrl } from '../game/gorillaArt'
 import { hoverPortraitUrl } from '../game/hoverArt'
@@ -10,7 +10,7 @@ import { ruinedSiloPortraitUrl, siloPortraitUrl } from '../game/siloArt'
 import { pillarPortraitUrl } from '../game/pillarArt'
 import { storagePortraitUrl } from '../game/storageArt'
 import { stalkerPortraitUrl } from '../game/stalkerArt'
-import { buildingById, buildingCenter, cryoOccupants, cryoParty, inFriendlyPillarSight, unitById } from '../game/state'
+import { buildingById, buildingCenter, cryoOccupants, cryoParty, inFriendlyPillarSight, insideSiloFreezeBan, unitById } from '../game/state'
 import {
   BUILDING_STATS,
   CRYO_COST,
@@ -21,6 +21,7 @@ import {
   PLAYER_COLOR,
   PLAYER_NAME,
   powerSeconds,
+  SILO_DUMP_CAP,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
@@ -32,7 +33,9 @@ import {
   type MatchState,
   type UnitKind,
 } from '../game/types'
+import { activeKind } from '../game/input'
 import { currentTape, rememberAlways, rememberLive } from '../game/replay'
+import { viewMemories } from '../game/vision'
 import { loreBody } from './lore'
 
 export interface HudActions {
@@ -52,12 +55,39 @@ interface Cmd {
   title: string
   disabled: boolean
   armed?: boolean
+  /** Portrait data URL. When set, the button shows the picture instead of the label. */
+  icon?: string
+  /** Unit type drawn on a train button. Empty for every other command. */
+  iconKind?: UnitKind
+  /** Building drawn on a construction or Repair button. */
+  iconBuilding?: string
   run: () => void
+}
+
+function unitPortrait(owner: number, kind: UnitKind): string {
+  if (kind === 'porter') return stalkerPortraitUrl(owner)
+  if (kind === 'pike') return flasherPortraitUrl(owner)
+  if (kind === 'howler') return gorillaPortraitUrl(owner)
+  if (kind === 'drone') return hoverPortraitUrl(owner)
+  return frogPortraitUrl(owner)
+}
+
+function buildingPortrait(owner: number, kind: BuildingKind): string {
+  if (kind === 'keep') return siloPortraitUrl(owner)
+  if (kind === 'yard') return factoryPortraitUrl(owner)
+  if (kind === 'silo') return storagePortraitUrl(owner)
+  return pillarPortraitUrl(owner)
+}
+
+function kindPlural(kind: UnitKind): string {
+  if (kind === 'drone') return 'Flies'
+  return `${UNIT_STATS[kind].label}s`
 }
 
 let commandKey = ''
 let sideKey = ''
 let endKey = ''
+let inspectKey = ''
 let replayStatsKey = ''
 let replayStatsShown = false
 
@@ -96,7 +126,12 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   const used = state.supplyUsed[side] ?? 0
   const cap = state.supplyCap[side] ?? 0
 
-  if (ore) ore.textContent = String(held)
+  if (ore) {
+    ore.textContent = String(held)
+    ore.classList.remove('tight')
+    const dumps = ore.closest('.readout')
+    if (dumps instanceof HTMLElement) dumps.title = 'Dumps stored in your Silo and Storages'
+  }
   const supplyText = `${used} / ${cap}`
   if (supply) {
     supply.textContent = supplyText
@@ -162,7 +197,13 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     }
   }
 
-  if (inspect) inspect.innerHTML = describeSelection(state)
+  if (inspect) {
+    const html = describeSelection(state)
+    if (html !== inspectKey) {
+      inspectKey = html
+      inspect.innerHTML = html
+    }
+  }
   if (toasts) {
     toasts.innerHTML = state.toasts.map((toast) => `<div class="toast">${escapeHtml(toast.text)}</div>`).join('')
   }
@@ -247,6 +288,7 @@ export function resetHudCache(): void {
   commandKey = '\0'
   sideKey = '\0'
   endKey = ''
+  inspectKey = ''
   replayStatsKey = ''
   replayStatsShown = false
 }
@@ -303,9 +345,15 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       {
         id: 'repair-silo',
         label: 'Repair',
+        icon: ruinedSiloPortraitUrl(),
+        iconBuilding: 'repair',
         hotkey: 'R',
         detail: `${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s`,
-        title: !porter ? 'You need a stalker to repair' : afford ? 'Send the nearest Stalker to repair this Silo' : `Need ${SILO_REPAIR_COST} dumps`,
+        title: !porter
+          ? 'Repair — You need a stalker to repair'
+          : afford
+            ? 'Repair. Send the nearest Stalker to repair this Silo'
+            : `Repair — Need ${SILO_REPAIR_COST} dumps`,
         disabled: !porter || !afford,
         run: () => {
           const worker = nearestPlayerPorter(state, building)
@@ -362,7 +410,8 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
   }
 
   if (state.selectedUnits.length) {
-    const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
+    const focus = activeKind(state)
+    const porters = focus === 'porter' && state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
     const cmds: Cmd[] = [
       {
         id: 'move',
@@ -395,13 +444,13 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         },
       },
     ]
-    const hovers = playerHovers(state, state.selectedUnits)
+    const hovers = focus === 'drone' ? playerHovers(state, state.selectedUnits) : []
     if (hovers.length) {
       cmds.push({
         id: 'scan',
         label: 'Scanner',
         hotkey: 'C',
-        title: 'Fly to the nearest black fog, then the tiles seen longest ago. Reveals an invisible enemy Hover inside sight.',
+        title: 'Patrol the whole map: far unexplored ground first, then the tiles seen longest ago. Steers away from enemy combat units and Pillars. Reveals an invisible enemy Fly inside sight.',
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
         run: () => {
@@ -410,13 +459,27 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           toggleScanner(state, ids)
         },
       })
+      cmds.push({
+        id: 'guard',
+        label: 'Guard',
+        title: 'Hold this spot. When an enemy combat unit enters sight, call half of the nearby combat units to attack-move there.',
+        disabled: false,
+        armed: hovers.every((unit) => unit.guarding),
+        run: () => {
+          const ids = hovers.map((unit) => unit.id)
+          rememberLive(state, { op: 'guard', ids })
+          toggleGuard(state, ids)
+          state.moveArmed = false
+          state.attackMoveArmed = false
+        },
+      })
       const gridReady = hovers.length >= 10
       cmds.push({
         id: 'grid',
         label: 'Grid',
         title: gridReady
-          ? `Fly to an even grid covering the map, stay there, and turn invisible for ${GRID_CLOAK_SECONDS} seconds`
-          : 'Needs 10 Hovers selected',
+          ? `Select 10 Flies to activate the Grid. They fly to an even grid covering the map, stay there, and turn invisible for ${GRID_CLOAK_SECONDS} seconds.`
+          : 'Select 10 Flies to activate the Grid',
         disabled: !gridReady,
         run: () => {
           rememberLive(state, { op: 'grid', ids: state.selectedUnits })
@@ -434,18 +497,29 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'tower', actions),
       )
     }
-    const frogs = state.selectedUnits
-      .map((id) => unitById(state, id))
-      .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.kind === 'frog' && unit.hp > 0 && unit.owner === controlledSide(state))
+    const frogs =
+      focus === 'frog'
+        ? state.selectedUnits
+            .map((id) => unitById(state, id))
+            .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.kind === 'frog' && unit.hp > 0 && unit.owner === controlledSide(state))
+        : []
     if (frogs.length) {
-      const ready = frogs.filter((unit) => unit.frostCd <= 0 && unit.ice <= 0 && unit.power > 0)
+      const ready = frogs.filter(
+        (unit) => unit.frostCd <= 0 && unit.ice <= 0 && unit.power > 0 && !insideSiloFreezeBan(state, unit.x, unit.y),
+      )
+      const banned = frogs.some(
+        (unit) => unit.frostCd <= 0 && unit.ice <= 0 && unit.power > 0 && insideSiloFreezeBan(state, unit.x, unit.y),
+      )
       const wait = Math.min(...frogs.map((unit) => unit.frostCd))
       cmds.push({
         id: 'frost',
         label: 'Freeze',
-        hotkey: 'F',
-        detail: ready.length ? `${FROG_FREEZE_COOLDOWN}s` : `${Math.ceil(wait)}s`,
-        title: `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS} seconds. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown ${FROG_FREEZE_COOLDOWN} seconds.`,
+        hotkey: 'R',
+        detail: ready.length ? `${FROG_FREEZE_COOLDOWN}s` : wait > 0 ? `${Math.ceil(wait)}s` : `${FROG_FREEZE_COOLDOWN}s`,
+        title:
+          ready.length === 0 && banned
+            ? "Can't Freeze near a Silo"
+            : `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS} seconds. Trees in that circle shatter, and each rock loses half its current hit points. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown ${FROG_FREEZE_COOLDOWN} seconds. Cannot Freeze inside a Silo's sight. Press R.`,
         disabled: ready.length === 0,
         run: () => {
           const ids = ready.map((unit) => unit.id)
@@ -462,7 +536,9 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
 }
 
 /** Labels on the command bar for the current selection. Smoke reads the Cryo and Defrost states from here. */
-export function commandSnapshot(state: MatchState): Array<{ label: string; detail: string; disabled: boolean; title: string }> {
+export function commandSnapshot(
+  state: MatchState,
+): Array<{ label: string; detail: string; disabled: boolean; title: string; hotkey: string; iconKind: string; iconBuilding: string }> {
   const actions: HudActions = {
     armPlace() {},
     armMove() {},
@@ -476,6 +552,9 @@ export function commandSnapshot(state: MatchState): Array<{ label: string; detai
     detail: cmd.detail ?? '',
     disabled: cmd.disabled,
     title: cmd.title,
+    hotkey: cmd.hotkey ?? '',
+    iconKind: cmd.iconKind ?? '',
+    iconBuilding: cmd.iconBuilding ?? '',
   }))
 }
 
@@ -559,9 +638,11 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
   return {
     id: `place-${kind}`,
     label: stats.label,
+    icon: buildingPortrait(controlledSide(state), kind),
+    iconBuilding: kind,
     hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : kind === 'tower' ? 'T' : 'O',
     detail: `${stats.cost} dumps`,
-    title: afford ? stats.blurb : `Need ${stats.cost} dumps`,
+    title: afford ? `${stats.label}. ${stats.blurb}` : `${stats.label} — Need ${stats.cost} dumps`,
     disabled: !afford,
     armed: state.placement === kind,
     run: () => actions.armPlace(kind),
@@ -579,12 +660,15 @@ function repairButton(state: MatchState): Cmd {
     (building) => building.ruined && (building.repairPaid || bank >= SILO_REPAIR_COST),
   )
   let title = 'Repair the nearest ruined Silo'
-  if (!porters.length) title = 'You need a stalker to repair'
-  else if (!ruin) title = 'No ruined Silo'
-  else if (!afford) title = `Need ${SILO_REPAIR_COST} dumps`
+  if (!porters.length) title = 'Repair — You need a stalker to repair'
+  else if (!ruin) title = 'Repair — No ruined Silo'
+  else if (!afford) title = `Repair — Need ${SILO_REPAIR_COST} dumps`
+  else title = 'Repair. Send the nearest Stalker to the nearest ruined Silo'
   return {
     id: 'repair',
     label: 'Repair',
+    icon: ruinedSiloPortraitUrl(),
+    iconBuilding: 'repair',
     hotkey: 'R',
     detail: `${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s`,
     title,
@@ -602,14 +686,16 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   const side = controlledSide(state)
   const afford = (state.oreHeld[side] ?? 0) >= stats.cost
   const room = stats.supply === 0 || (state.supplyUsed[side] ?? 0) + stats.supply <= (state.supplyCap[side] ?? 0)
-  let title = stats.blurb
-  if (!afford) title = `Need ${stats.cost} dumps`
-  else if (!room) title = 'Cells cap reached — raise a Storage'
+  let title = `${stats.label}. ${stats.blurb}`
+  if (!afford) title = `${stats.label} — Need ${stats.cost} dumps`
+  else if (!room) title = `${stats.label} — Cells cap reached — raise a Storage`
   const cells = stats.supply === 1 ? '1 cell' : `${stats.supply} cells`
   const detail = stats.supply === 0 ? `${stats.cost} dumps` : `${stats.cost} dumps · ${cells}`
   return {
     id: `train-${kind}`,
     label: stats.label,
+    icon: unitPortrait(side, kind),
+    iconKind: kind,
     hotkey: kind === 'porter' ? 'P' : kind === 'pike' ? 'K' : kind === 'howler' ? 'J' : kind === 'drone' ? 'H' : 'G',
     detail,
     title,
@@ -646,10 +732,21 @@ function paintCommands(commands: Cmd[], handsOff: boolean, emptyText: string): v
     if (cmd.armed) button.classList.add('armed')
     button.disabled = cmd.disabled || handsOff
     button.title = handsOff ? 'SiloAI is giving the orders' : cmd.title
-    const label = document.createElement('span')
-    label.className = 'cmd-label'
-    label.textContent = cmd.label
-    button.append(label)
+    button.setAttribute('aria-label', cmd.label)
+    if (cmd.icon) {
+      const icon = document.createElement('img')
+      icon.className = 'cmd-icon'
+      icon.alt = ''
+      icon.draggable = false
+      icon.src = cmd.icon
+      button.append(icon)
+      button.classList.add('has-icon')
+    } else {
+      const label = document.createElement('span')
+      label.className = 'cmd-label'
+      label.textContent = cmd.label
+      button.append(label)
+    }
     if (cmd.hotkey) {
       const key = document.createElement('kbd')
       key.textContent = cmd.hotkey
@@ -700,6 +797,13 @@ function powerReadout(state: MatchState, unit: { kind: UnitKind; owner: number; 
   return `<div class="meter power${charging ? ' charging' : ''}"><span style="width:${width}%"></span></div><p class="meta">Power ${pct}%${shut ? ' · Shut down' : ''}${charging ? ' · Recharging' : ''}</p>`
 }
 
+function dumpsStatus(building: Building): string {
+  if (building.kind !== 'keep' && building.kind !== 'silo') return ''
+  const cap = building.kind === 'keep' ? SILO_DUMP_CAP : STORAGE_CAP
+  const full = building.stock >= cap
+  return `<p class="meta${full ? ' full' : ''}">Dumps: ${building.stock} / ${cap}</p>`
+}
+
 export function describeSelection(state: MatchState): string {
   const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
   if (building?.ruined && state.selectedUnits.length === 0) {
@@ -719,15 +823,18 @@ export function describeSelection(state: MatchState): string {
     const pct = Math.max(0, Math.min(1, building.hp / stats.hp))
     const queue = building.queue
       .map((job, index) => {
-        const label = UNIT_STATS[job.kind].label
-        return index === 0 ? `${label} ${Math.ceil(job.remaining)}s` : label
+        const stats = UNIT_STATS[job.kind]
+        const url = unitPortrait(building.owner, job.kind)
+        const picture = url ? `<img class="unit-icon" alt="" src="${url}" />` : ''
+        const time = index === 0 ? `<span class="queue-time">${Math.ceil(job.remaining)}s</span>` : ''
+        return `<span class="queue-slot" data-kind="${job.kind}" title="${escapeHtml(stats.label)}">${picture}${time}</span>`
       })
-      .join(', ')
+      .join('')
     const raising = state.units.some(
       (unit) => unit.hp > 0 && unit.order?.type === 'construct' && unit.order.buildingId === building.id,
     )
     const status = !building.complete
-      ? ` · Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
+      ? `Construction ${Math.floor(building.progress * 100)}%${raising ? '' : ' · paused'}`
       : ''
     const portraitUrl =
       building.kind === 'keep'
@@ -744,14 +851,14 @@ export function describeSelection(state: MatchState): string {
       <p class="eyebrow">${PLAYER_NAME[building.owner]}</p>
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
-      <p class="meta">${Math.max(0, Math.ceil(building.hp))} / ${stats.hp}${status}</p>
+      ${status ? `<p class="meta">${status}</p>` : ''}
       ${building.kind === 'keep' ? '' : `<p class="lore">${escapeHtml(loreBody(stats.label))}</p>`}
-      ${building.kind === 'silo' ? `<p class="meta">${building.stock} / ${STORAGE_CAP}${building.stock >= STORAGE_CAP ? ' · Full' : ''}</p>` : ''}
+      ${dumpsStatus(building)}
       ${building.kind === 'keep' && building.cryo ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
       ${building.kind === 'keep' && building.cryo && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
-      ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Hovers take half.</p>` : ''}
+      ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Flies take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
-      ${queue ? `<p class="meta">Queue: ${escapeHtml(queue)}</p>` : ''}
+      ${queue ? `<div class="queue">${queue}</div>` : ''}
       ${building.complete ? '<p class="meta">Right-click the map to set the rally point.</p>' : ''}
     `
   }
@@ -775,6 +882,38 @@ export function describeSelection(state: MatchState): string {
     `
   }
 
+  const memory = state.selectedGhost != null ? viewMemories(state).find((spot) => spot.id === state.selectedGhost) : undefined
+  if (memory?.kind && state.selectedUnits.length === 0 && state.selectedBuilding == null) {
+    const stats = BUILDING_STATS[memory.kind]
+    const hp = memory.hp ?? stats.hp
+    const pct = Math.max(0, Math.min(1, hp / stats.hp))
+    const owner = memory.owner ?? 0
+    const portraitUrl =
+      memory.kind === 'keep'
+        ? siloPortraitUrl(owner)
+        : memory.kind === 'yard'
+          ? factoryPortraitUrl(owner)
+          : memory.kind === 'silo'
+            ? storagePortraitUrl(owner)
+            : memory.kind === 'tower'
+              ? pillarPortraitUrl(owner)
+              : ''
+    const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
+    const cap = memory.kind === 'keep' ? SILO_DUMP_CAP : memory.kind === 'silo' ? STORAGE_CAP : 0
+    const stock = memory.stock ?? 0
+    const full = cap > 0 && stock >= cap
+    const eyebrow = memory.owner != null && memory.owner >= 0 ? (PLAYER_NAME[memory.owner] ?? 'Silo') : 'Neutral'
+    return `
+      <p class="eyebrow">${eyebrow}</p>
+      <h2>${portrait}${stats.label}</h2>
+      <div class="meter"><span style="width:${pct * 100}%"></span></div>
+      <p class="meta">Last seen</p>
+      ${cap > 0 ? `<p class="meta${full ? ' full' : ''}">Dumps: ${stock} / ${cap}</p>` : ''}
+      ${memory.kind === 'keep' && memory.cryo ? `<p class="meta">${memory.held ?? 0} / ${CRYO_SLOTS} frozen</p>` : ''}
+      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
+    `
+  }
+
   const units = state.selectedUnits
     .map((id) => unitById(state, id))
     .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.hp > 0)
@@ -791,54 +930,47 @@ export function describeSelection(state: MatchState): string {
     const stats = UNIT_STATS[unit.kind]
     const pct = Math.max(0, unit.hp / stats.hp)
     const cargo = unit.cargo > 0 ? `Carrying ${unit.cargo} dumps.` : ''
-    const portraitUrl =
-      unit.kind === 'porter'
-        ? stalkerPortraitUrl(unit.owner)
-        : unit.kind === 'pike'
-          ? flasherPortraitUrl(unit.owner)
-          : unit.kind === 'howler'
-            ? gorillaPortraitUrl(unit.owner)
-            : unit.kind === 'drone'
-              ? hoverPortraitUrl(unit.owner)
-              : unit.kind === 'frog'
-                ? frogPortraitUrl(unit.owner)
-                : ''
+    const portraitUrl = unitPortrait(unit.owner, unit.kind)
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     return `
       <p class="eyebrow">${PLAYER_NAME[unit.owner]}</p>
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
-      <p class="meta">${Math.ceil(unit.hp)} / ${stats.hp}</p>
       ${powerReadout(state, unit)}
       <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
+      ${unit.guarding ? '<p class="meta">Guarding</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
       ${unit.ice > 0 ? `<p class="meta">Frozen ${Math.ceil(unit.ice)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }
-  const counts = new Map<string, number>()
-  for (const unit of units) counts.set(UNIT_STATS[unit.kind].label, (counts.get(UNIT_STATS[unit.kind].label) ?? 0) + 1)
-  const summary = [...counts.entries()].map(([label, count]) => `${count} ${label}${count > 1 ? 's' : ''}`).join(', ')
+  const counts = new Map<UnitKind, number>()
+  const ownerOf = new Map<UnitKind, number>()
+  for (const unit of units) {
+    counts.set(unit.kind, (counts.get(unit.kind) ?? 0) + 1)
+    if (!ownerOf.has(unit.kind)) ownerOf.set(unit.kind, unit.owner)
+  }
+  const focus = activeKind(state)
+  const chips = UNIT_KINDS.filter((kind) => counts.has(kind))
+    .map((kind) => {
+      const count = counts.get(kind) ?? 0
+      const url = unitPortrait(ownerOf.get(kind) ?? controlledSide(state), kind)
+      const picture = url ? `<img class="unit-icon" alt="" src="${url}" />` : ''
+      const hint = `Click: select only ${kindPlural(kind)} · Shift-click: remove · Ctrl-click: active group`
+      const pressed = kind === focus ? ' active' : ''
+      return `<button type="button" class="select-chip${pressed}" data-kind="${kind}" title="${escapeHtml(hint)}" aria-pressed="${kind === focus ? 'true' : 'false'}">${picture}<span class="qty">×${count}</span></button>`
+    })
+    .join('')
   const scanning = units.some((unit) => unit.scanning)
+  const guarding = units.some((unit) => unit.guarding)
   const portraitOwner = units[0]?.owner ?? controlledSide(state)
-  const groupPortrait = units.some((unit) => unit.kind === 'porter')
-    ? stalkerPortraitUrl(portraitOwner)
-    : units.some((unit) => unit.kind === 'pike')
-      ? flasherPortraitUrl(portraitOwner)
-      : units.some((unit) => unit.kind === 'howler')
-        ? gorillaPortraitUrl(portraitOwner)
-        : units.some((unit) => unit.kind === 'drone')
-          ? hoverPortraitUrl(portraitOwner)
-          : units.some((unit) => unit.kind === 'frog')
-            ? frogPortraitUrl(portraitOwner)
-            : ''
-  const portrait = groupPortrait ? `<img class="unit-icon" alt="" src="${groupPortrait}" />` : ''
   return `
     <p class="eyebrow">${PLAYER_NAME[portraitOwner] ?? 'Silo'}</p>
-    <h2>${portrait}${units.length} selected</h2>
-    <p class="meta">${escapeHtml(summary)}</p>
+    <h2>${units.length} selected</h2>
+    <div class="select-grid">${chips}</div>
     ${scanning ? '<p class="meta">Scanning</p>' : ''}
+    ${guarding ? '<p class="meta">Guarding</p>' : ''}
   `
 }
 

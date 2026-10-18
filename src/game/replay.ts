@@ -21,7 +21,7 @@ import {
   tryTrain,
 } from './commands'
 import { takeSide } from './control'
-import { toggleScanner } from './scanner'
+import { toggleGuard, toggleScanner } from './scanner'
 import type { BuildingKind, MatchMode, MatchState, SideStats, TargetKind, UnitKind } from './types'
 
 export type ReplayAction =
@@ -44,6 +44,7 @@ export type ReplayAction =
   | { op: 'cryo'; buildingId: number }
   | { op: 'grid'; ids: number[] }
   | { op: 'scan'; ids: number[] }
+  | { op: 'guard'; ids: number[] }
   | { op: 'frost'; ids: number[] }
   | { op: 'console'; text: string }
   | { op: 'side'; owner: number }
@@ -202,6 +203,9 @@ function dispatch(state: MatchState, action: ReplayAction): void {
       return
     case 'scan':
       toggleScanner(state, action.ids)
+      return
+    case 'guard':
+      toggleGuard(state, action.ids)
       return
     case 'frost':
       commandFrost(state, action.ids)

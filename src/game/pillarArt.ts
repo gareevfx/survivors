@@ -1,22 +1,27 @@
 import { PLAYER_COLOR } from './types'
 
 /**
- * The Pillar is a one-cell mast with a wind turbine and an observation cab.
- * The mast and cab are cached. The blades and the cannon are drawn live.
+ * The Pillar is a compact concrete pylon on a 1×1 pad.
+ * Player color is the shaft hoop and the emitter ring on top.
+ * The ring pulses on its own. While the Pillar is refilling a friendly unit, a second ring breathes outward.
  */
 
 const W = 32
 const H = 32
-const PAD_X = 18
-const PAD_Y = 20
 
-const HUB_X = 16
-const HUB_Y = 14
-const CAB_X = 16
-const CAB_Y = 2
+export interface PillarLook {
+  color: string
+  /** 0 clean through 3 ruined. */
+  stage: number
+  time: number
+  /** This Pillar is refilling a friendly unit's Power. */
+  charging: boolean
+  /** Cannon aim, canvas atan2. The emitter tick points this way. */
+  aim: number
+  flash: boolean
+}
 
-const masts = new Map<string, HTMLCanvasElement>()
-const cabs = new Map<string, HTMLCanvasElement>()
+const bodies = new Map<string, HTMLCanvasElement>()
 const portraits = new Map<number, string>()
 
 export function pillarDamageStage(hp: number, full: number): number {
@@ -27,231 +32,178 @@ export function pillarDamageStage(hp: number, full: number): number {
   return 3
 }
 
-function paintMast(ctx: CanvasRenderingContext2D, color: string, stage: number): void {
-  ctx.fillStyle = 'rgba(16, 12, 8, 0.32)'
-  ctx.beginPath()
-  ctx.ellipse(17, 30, 14, 4.2, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  const pad = ctx.createLinearGradient(2, 22, 30, 32)
-  pad.addColorStop(0, '#ddd6c8')
-  pad.addColorStop(1, '#8d887c')
-  ctx.fillStyle = pad
-  ctx.beginPath()
-  ctx.ellipse(16, 27, 13, 5, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.strokeStyle = 'rgba(90, 84, 74, 0.45)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(6, 26)
-  ctx.lineTo(2, 18)
-  ctx.moveTo(26, 26)
-  ctx.lineTo(30, 18)
-  ctx.stroke()
-
-  const steel = ctx.createLinearGradient(8, 8, 24, 26)
-  steel.addColorStop(0, '#d7dbe0')
-  steel.addColorStop(0.5, '#8e959c')
-  steel.addColorStop(1, '#4c535a')
-  ctx.strokeStyle = steel
-  ctx.lineWidth = 2.4
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(9, 25)
-  ctx.lineTo(14, 6)
-  ctx.moveTo(23, 25)
-  ctx.lineTo(18, 6)
-  ctx.stroke()
-
-  ctx.strokeStyle = '#5c646c'
-  ctx.lineWidth = 1
-  for (const y of [11, 16, 21]) {
-    const t = (y - 6) / 20
-    const left = 14 + (9 - 14) * t
-    const right = 18 + (23 - 18) * t
-    ctx.beginPath()
-    ctx.moveTo(left, y)
-    ctx.lineTo(right, y)
-    ctx.stroke()
-  }
-
-  ctx.strokeStyle = color
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(13, 6)
-  ctx.lineTo(19, 6)
-  ctx.stroke()
-
-  if (stage >= 1) {
-    ctx.strokeStyle = 'rgba(36, 30, 26, 0.7)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(12, 10)
-    ctx.lineTo(17, 18)
-    ctx.lineTo(14, 24)
-    ctx.stroke()
-  }
-  if (stage >= 2) {
-    ctx.fillStyle = 'rgba(28, 24, 20, 0.4)'
-    ctx.beginPath()
-    ctx.ellipse(18, 20, 4, 2.2, 0.4, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  if (stage >= 3) {
-    ctx.fillStyle = 'rgba(20, 18, 16, 0.45)'
-    ctx.beginPath()
-    ctx.ellipse(13, 14, 3.5, 2, -0.3, 0, Math.PI * 2)
-    ctx.fill()
-  }
+function rgba(hex: string, alpha: number): string {
+  const value = Number.parseInt(hex.slice(1), 16)
+  if (!Number.isFinite(value)) return `rgba(94, 200, 255, ${alpha})`
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-function paintCab(ctx: CanvasRenderingContext2D, color: string, stage: number): void {
-  const shell = ctx.createLinearGradient(8, -2, 24, 8)
-  shell.addColorStop(0, '#f2f4f6')
-  shell.addColorStop(0.55, '#b7bdc4')
-  shell.addColorStop(1, '#5e666e')
-  ctx.fillStyle = shell
+function roundPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const radius = Math.min(r, w / 2, h / 2)
   ctx.beginPath()
-  ctx.ellipse(CAB_X, CAB_Y, 8.2, 5.4, 0, 0, Math.PI * 2)
-  ctx.fill()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
 
-  ctx.fillStyle = '#1a2128'
-  for (const wx of [12.2, 16, 19.8]) {
-    ctx.beginPath()
-    ctx.ellipse(wx, CAB_Y + 0.3, 1.35, 1.05, 0, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.fillStyle = 'rgba(180, 220, 235, 0.35)'
-  ctx.beginPath()
-  ctx.ellipse(12.6, CAB_Y, 0.45, 0.35, 0, 0, Math.PI * 2)
+function paintBody(ctx: CanvasRenderingContext2D, stage: number): void {
+  const pad = ctx.createLinearGradient(3, 20, 29, 31)
+  pad.addColorStop(0, '#f3efe6')
+  pad.addColorStop(1, '#c9c0b2')
+  ctx.fillStyle = pad
+  roundPath(ctx, 3, 21, 26, 9, 4)
   ctx.fill()
-
-  ctx.strokeStyle = color
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  ctx.ellipse(CAB_X, CAB_Y, 8.2, 5.4, 0, 0, Math.PI * 2)
+  ctx.strokeStyle = '#8d8476'
+  ctx.lineWidth = 1.2
   ctx.stroke()
 
-  if (stage >= 2) {
-    ctx.strokeStyle = 'rgba(36, 30, 26, 0.75)'
+  const shaft = ctx.createLinearGradient(9, 4, 23, 24)
+  shaft.addColorStop(0, '#f7f4ee')
+  shaft.addColorStop(0.5, '#e4ddd2')
+  shaft.addColorStop(1, '#cfc6b6')
+  ctx.fillStyle = shaft
+  roundPath(ctx, 9, 4, 14, 20, 6)
+  ctx.fill()
+  ctx.strokeStyle = '#8d8476'
+  ctx.lineWidth = 1.4
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(255, 252, 246, 0.75)'
+  ctx.lineWidth = 1
+  roundPath(ctx, 10.5, 5.5, 11, 17, 5)
+  ctx.stroke()
+
+  const panel = ctx.createLinearGradient(11, 10, 21, 18)
+  panel.addColorStop(0, '#fbf9f4')
+  panel.addColorStop(1, '#ebe4d8')
+  ctx.fillStyle = panel
+  roundPath(ctx, 11.5, 10, 9, 8, 2)
+  ctx.fill()
+  ctx.strokeStyle = '#b7aea0'
+  ctx.lineWidth = 0.8
+  ctx.stroke()
+
+  ctx.fillStyle = '#12161b'
+  roundPath(ctx, 14.2, 12, 3.6, 4.2, 1.2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(214, 232, 240, 0.35)'
+  ctx.fillRect(14.6, 12.4, 1, 1.6)
+
+  if (stage >= 1) {
+    ctx.strokeStyle = 'rgba(36, 28, 20, 0.75)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(12, 0)
-    ctx.lineTo(18, 4)
+    ctx.moveTo(12, 8)
+    ctx.lineTo(16, 14)
+    ctx.lineTo(13, 20)
     ctx.stroke()
+  }
+  if (stage >= 2) {
+    ctx.fillStyle = 'rgba(28, 24, 20, 0.35)'
+    ctx.beginPath()
+    ctx.ellipse(18, 16, 3.2, 1.8, 0.3, 0, Math.PI * 2)
+    ctx.fill()
   }
   if (stage >= 3) {
     ctx.fillStyle = 'rgba(20, 18, 16, 0.4)'
     ctx.beginPath()
-    ctx.ellipse(19, 3, 3, 1.6, 0.2, 0, Math.PI * 2)
+    ctx.ellipse(14, 9, 3, 1.6, -0.2, 0, Math.PI * 2)
     ctx.fill()
   }
 }
 
-function cached(store: Map<string, HTMLCanvasElement>, color: string, stage: number, paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
-  const key = `${color}:${stage}`
-  const found = store.get(key)
-  if (found) return found
+function bodySprite(stage: number): HTMLCanvasElement {
+  const key = String(stage)
+  const cached = bodies.get(key)
+  if (cached) return cached
   const canvas = document.createElement('canvas')
-  canvas.width = W + PAD_X * 2
-  canvas.height = H + PAD_Y * 2
+  canvas.width = W
+  canvas.height = H
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-  ctx.translate(PAD_X, PAD_Y)
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
-  paint(ctx)
-  store.set(key, canvas)
+  paintBody(ctx, stage)
+  bodies.set(key, canvas)
   return canvas
 }
 
-function paintBlades(ctx: CanvasRenderingContext2D, spin: number, color: string): void {
-  ctx.save()
-  ctx.translate(HUB_X, HUB_Y)
-  ctx.scale(1, 0.86)
-  for (let i = 0; i < 3; i++) {
-    ctx.save()
-    ctx.rotate(spin + (i * Math.PI * 2) / 3)
-    const blade = ctx.createLinearGradient(0, 0, 16, 0)
-    blade.addColorStop(0, '#f4f6f8')
-    blade.addColorStop(1, '#8b939b')
-    ctx.fillStyle = blade
-    ctx.beginPath()
-    ctx.moveTo(1.2, 0)
-    ctx.quadraticCurveTo(8, -2.4, 16, -0.7)
-    ctx.quadraticCurveTo(8, 1.6, 1.2, 0)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(40, 46, 52, 0.45)'
-    ctx.lineWidth = 0.6
-    ctx.stroke()
-    ctx.restore()
-  }
-  ctx.fillStyle = '#3a4148'
+function paintHoop(ctx: CanvasRenderingContext2D, color: string): void {
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.6
   ctx.beginPath()
-  ctx.arc(0, 0, 2.6, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.arc(0, 0, 1.3, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
+  ctx.moveTo(10, 18)
+  ctx.quadraticCurveTo(16, 21, 22, 18)
+  ctx.stroke()
 }
 
-function paintCannon(ctx: CanvasRenderingContext2D, aim: number, color: string, flash: boolean): void {
-  ctx.save()
-  ctx.translate(CAB_X, CAB_Y)
-  ctx.rotate(aim)
-  ctx.fillStyle = '#2e343a'
-  ctx.fillRect(4.2, -1.5, 10.5, 3)
-  ctx.fillStyle = '#6a7178'
-  ctx.fillRect(4.2, -1.5, 10.5, 0.8)
-  ctx.fillStyle = color
-  ctx.fillRect(6, -0.45, 3.2, 0.9)
-  if (flash) {
-    const glow = ctx.createRadialGradient(15.2, 0, 0, 15.2, 0, 7)
-    glow.addColorStop(0, 'rgba(255, 246, 214, 0.95)')
-    glow.addColorStop(0.45, 'rgba(255, 176, 64, 0.7)')
-    glow.addColorStop(1, 'rgba(255, 120, 40, 0)')
-    ctx.fillStyle = glow
-    ctx.beginPath()
-    ctx.arc(15.2, 0, 7, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = '#ffe7a8'
-    ctx.lineWidth = 1
-    for (let i = 0; i < 3; i++) {
-      const a = -0.5 + i * 0.5
+function paintEmitter(ctx: CanvasRenderingContext2D, look: PillarLook): void {
+  const cx = 16
+  const cy = 7
+  const pulse = 0.5 + 0.5 * Math.sin(look.time * 2.3)
+  const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, 8)
+  glow.addColorStop(0, rgba(look.color, 0.28 + pulse * 0.28))
+  glow.addColorStop(1, rgba(look.color, 0))
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(cx, cy, 8, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = look.color
+  ctx.globalAlpha = 0.55 + pulse * 0.45
+  ctx.lineWidth = 1.5 + pulse * 0.7
+  ctx.beginPath()
+  ctx.arc(cx, cy, 5.2, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.globalAlpha = 0.22 + pulse * 0.2
+  ctx.fillStyle = look.color
+  ctx.beginPath()
+  ctx.arc(cx, cy, 3.1, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.globalAlpha = 1
+
+  if (look.charging) {
+    for (let i = 0; i < 2; i++) {
+      const t = (look.time * 0.8 + i * 0.5) % 1
+      ctx.strokeStyle = rgba(look.color, (1 - t) * 0.5)
+      ctx.lineWidth = 1.2
       ctx.beginPath()
-      ctx.moveTo(14.5, 0)
-      ctx.lineTo(14.5 + Math.cos(a) * 6, Math.sin(a) * 3.2)
+      ctx.arc(cx, cy, 6 + t * 8, 0, Math.PI * 2)
       ctx.stroke()
     }
   }
-  ctx.restore()
-}
 
-export interface PillarLook {
-  color: string
-  stage: number
-  /** Blade angle in radians. */
-  spin: number
-  /** Cannon aim, canvas atan2. */
-  aim: number
-  flash: boolean
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(look.aim)
+  ctx.fillStyle = look.color
+  ctx.globalAlpha = 0.9
+  ctx.fillRect(4.2, -0.9, look.flash ? 6.5 : 3.2, 1.8)
+  ctx.globalAlpha = 1
+  if (look.flash) {
+    const burst = ctx.createRadialGradient(10, 0, 0, 10, 0, 6)
+    burst.addColorStop(0, 'rgba(255, 250, 230, 0.95)')
+    burst.addColorStop(0.45, rgba(look.color, 0.65))
+    burst.addColorStop(1, rgba(look.color, 0))
+    ctx.fillStyle = burst
+    ctx.beginPath()
+    ctx.arc(10, 0, 6, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
 }
 
 export function drawPillarSprite(ctx: CanvasRenderingContext2D, x: number, y: number, look: PillarLook): void {
-  const mast = cached(masts, look.color, look.stage, (pen) => paintMast(pen, look.color, look.stage))
-  const cab = cached(cabs, look.color, look.stage, (pen) => paintCab(pen, look.color, look.stage))
-  ctx.drawImage(mast, x - PAD_X, y - PAD_Y)
+  ctx.drawImage(bodySprite(look.stage), x, y)
   ctx.save()
   ctx.translate(x, y)
-  paintBlades(ctx, look.spin, look.color)
-  ctx.restore()
-  ctx.drawImage(cab, x - PAD_X, y - PAD_Y)
-  ctx.save()
-  ctx.translate(x, y)
-  paintCannon(ctx, look.aim, look.color, look.flash)
+  paintHoop(ctx, look.color)
+  paintEmitter(ctx, look)
   ctx.restore()
 }
 
@@ -268,13 +220,14 @@ export function pillarPortraitUrl(owner: number): string {
   ctx.fillStyle = '#6d6248'
   ctx.fillRect(0, 0, 72, 72)
   ctx.save()
-  ctx.translate(14, 16)
-  ctx.scale(1.35, 1.35)
+  ctx.translate(16, 16)
+  ctx.scale(1.25, 1.25)
   drawPillarSprite(ctx, 0, 0, {
     color: PLAYER_COLOR[owner] ?? '#5ec8ff',
     stage: 0,
-    spin: 0.5,
-    aim: 0.3,
+    time: 0.8,
+    charging: false,
+    aim: -Math.PI / 2,
     flash: false,
   })
   ctx.restore()

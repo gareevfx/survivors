@@ -1,17 +1,17 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, installCryo, sendHoverGrid, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, dropoffRoom, dropoffsFull, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
-import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, isWalkable, rockAt, rockById } from './state'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, PILLAR_CHARGE_INSET, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, insideSiloFreezeBan, isWalkable, rockAt, rockById } from './state'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, isShutdown, PILLAR_CHARGE_INSET, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
-import { depositKnown, sideTileExplored } from './vision'
+import { depositKnown, rememberedBuilding, sideTileExplored } from './vision'
 
 /**
  * SiloAI plays one side from that side's own sight.
  * Computer opponents in 1 vs 1 and free-for-all use it, and so does `siloai`.
  * Stalkers widen a corridor that pinches below two cells, then go back to the job.
  * A Dumps heap far from this side's Silos and Storages gets its own Storage.
- * A Storage that already holds 500 dumps is not a drop-off, so another is raised beside that heap.
+ * A Storage that already holds 750 dumps is not a drop-off, so another is raised beside that heap.
  * When two or fewer Cells are free, the next building is a Storage beside the Silo.
  * Gorillas are the siege share and shoot buildings; Flashers take units.
  * Combat units leave in a wave, not one by one. Until that wave is full they
@@ -182,6 +182,36 @@ function seenEnemyBikes(state: MatchState, side: Brain): Array<{ x: number; y: n
   return bikes
 }
 
+/** Flashers, Gorillas, and Pillars this side can see. A Fly steers around them instead of through them. */
+function seenFlightHazards(state: MatchState, side: Brain, fromX: number, fromY: number): Array<{ x: number; y: number }> {
+  const hazards = seenEnemyBikes(state, side)
+  for (const unit of state.units) {
+    if (unit.owner === side.owner || unit.kind !== 'howler' || unit.hp <= 0 || unit.cloak > 0) continue
+    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
+    hazards.push({ x: unit.x, y: unit.y })
+  }
+  const sight = UNIT_STATS.drone.sight
+  for (const building of state.buildings) {
+    if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'tower' || !building.complete) continue
+    const center = buildingCenter(building)
+    const seen =
+      seesFootprint(state, side, building.tx, building.ty, 1, 1) ||
+      Math.hypot(center.x - fromX, center.y - fromY) <= sight
+    if (!seen) continue
+    hazards.push(center)
+  }
+  return hazards
+}
+
+function segmentNear(px: number, py: number, x0: number, y0: number, x1: number, y1: number, gap: number): boolean {
+  const dx = x1 - x0
+  const dy = y1 - y0
+  const len2 = dx * dx + dy * dy
+  if (len2 < 1) return Math.hypot(px - x0, py - y0) < gap
+  const t = Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / len2))
+  return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)) < gap
+}
+
 function nearBike(bikes: Array<{ x: number; y: number }>, x: number, y: number): boolean {
   return bikes.some((bike) => Math.hypot(bike.x - x, bike.y - y) < DRONE_BIKE_AVOID)
 }
@@ -198,8 +228,14 @@ function droneGoal(
   fromY: number,
   reserved: Array<{ x: number; y: number }>,
 ): { x: number; y: number } {
-  const bikes = seenEnemyBikes(state, side)
+  const bikes = seenFlightHazards(state, side, fromX, fromY)
   const castle = spottedKeep(state, side.owner)
+  const inside = nearBike(bikes, fromX, fromY)
+  const blocked = (x: number, y: number) => {
+    if (nearBike(bikes, x, y)) return true
+    if (inside) return false
+    return bikes.some((spot) => segmentNear(spot.x, spot.y, fromX, fromY, x, y, DRONE_BIKE_AVOID))
+  }
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
   const home = keep ? buildingCenter(keep) : { x: fromX, y: fromY }
   const far = { x: state.mapW * TILE - home.x, y: state.mapH * TILE - home.y }
@@ -224,7 +260,7 @@ function droneGoal(
       const y = (ty + 0.5) * TILE
       const fromScout = Math.hypot(x - fromX, y - fromY)
       if (fromScout < TILE * 2) continue
-      if (nearBike(bikes, x, y)) continue
+      if (blocked(x, y)) continue
       const share = crowded(x, y) ? 2400 : 0
       const towardEnemy = Math.hypot(x - far.x, y - far.y)
       if (!explored) {
@@ -255,7 +291,7 @@ function droneGoal(
   let best = patrol[0] ?? { x: fromX + TILE * 4, y: fromY }
   let bestD = -1
   for (const spot of patrol) {
-    if (nearBike(bikes, spot.x, spot.y)) continue
+    if (blocked(spot.x, spot.y)) continue
     const distance = Math.hypot(spot.x - fromX, spot.y - fromY) - (crowded(spot.x, spot.y) ? 10000 : 0)
     if (distance > bestD) {
       bestD = distance
@@ -270,17 +306,24 @@ const GRID_REUSE = 90
 
 /** Every living Drone stays on a scout flight. A second Drone takes a different patch. Ten or more may take the Grid instead. */
 function dispatchDrones(state: MatchState, side: Brain): void {
-  const drones = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)
+  const drones = state.units.filter(
+    (unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0,
+  )
   if (!drones.length) return
   if (issueHoverGrid(state, side, drones)) return
-  const bikes = seenEnemyBikes(state, side)
+  const spare = spareGuard(state, side, drones)
   const reserved: Array<{ x: number; y: number }> = []
   for (const drone of drones) {
+    if (spare && drone.id === spare.id) continue
+    const bikes = seenFlightHazards(state, side, drone.x, drone.y)
     if (drone.cloak > 0) continue
     const order = drone.order
     const traveling = order?.type === 'move' && Math.hypot(drone.x - order.x, drone.y - order.y) > 80
     const threatened =
-      nearBike(bikes, drone.x, drone.y) || (order?.type === 'move' && nearBike(bikes, order.x, order.y))
+      nearBike(bikes, drone.x, drone.y) ||
+      (order?.type === 'move' &&
+        (nearBike(bikes, order.x, order.y) ||
+          bikes.some((spot) => segmentNear(spot.x, spot.y, drone.x, drone.y, order.x, order.y, DRONE_BIKE_AVOID))))
     if (traveling && !threatened) {
       reserved.push({ x: order.x, y: order.y })
       side.scout = drone.id
@@ -293,16 +336,44 @@ function dispatchDrones(state: MatchState, side: Brain): void {
     commandMove(state, [drone.id], goal.x, goal.y, false)
     drone.scanning = true
   }
+  if (!spare) return
+  spare.guarding = true
+  spare.scanning = false
+  spare.guardSent = []
+  spare.order = null
+  spare.idleAcquire = false
+  stopMoving(spare)
+}
+
+/** One extra Fly beside the Silo holds and watches. The scout flight keeps the rest. */
+function spareGuard(state: MatchState, side: Brain, drones: Unit[]): Unit | null {
+  if (drones.length < 2) return null
+  const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
+  if (!keep) return null
+  const home = buildingCenter(keep)
+  const reach = BUILDING_STATS.keep.sight
+  let spare: Unit | null = null
+  let best = Infinity
+  for (const drone of drones) {
+    if (drone.hp <= 0 || drone.power <= 0 || drone.cloak > 0 || drone.frozen != null) continue
+    const distance = Math.hypot(drone.x - home.x, drone.y - home.y)
+    if (distance > reach || distance >= best) continue
+    best = distance
+    spare = drone
+  }
+  return spare
 }
 
 /** A Bike, else one spare Worker, while no Drone is flying. Tanks stay with the army. */
 function claimScout(state: MatchState, side: Brain, idle: Unit[]): Unit | null {
-  if (state.units.some((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0)) return null
+  if (state.units.some((unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0)) return null
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const castleKnown = spottedKeep(state, side.owner) != null
   const current = state.units.find((unit) => unit.id === side.scout && unit.owner === side.owner && unit.hp > 0)
   if (
-    current?.kind === 'pike' &&
+    current &&
+    current.kind === 'pike' &&
+    current.power > 0 &&
     !side.attacking &&
     !castleKnown &&
     current.order?.type !== 'construct'
@@ -311,7 +382,7 @@ function claimScout(state: MatchState, side: Brain, idle: Unit[]): Unit | null {
   }
   if (!side.attacking && !castleKnown) {
     const bike = state.units.find(
-      (unit) => unit.owner === side.owner && unit.kind === 'pike' && unit.hp > 0 && !unit.order,
+      (unit) => unit.owner === side.owner && unit.kind === 'pike' && unit.hp > 0 && unit.power > 0 && !unit.order,
     )
     if (bike) return bike
   }
@@ -347,10 +418,10 @@ function spottedKeep(state: MatchState, owner: PlayerId): { id: number; x: numbe
   const home = keep ? buildingCenter(keep) : { x: 0, y: 0 }
   let best: { id: number; x: number; y: number; distance: number } | null = null
   for (const spot of side.spotted) {
-    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner !== owner)
-    if (building?.kind !== 'keep') continue
-    const distance = Math.hypot(spot.x - home.x, spot.y - home.y)
-    if (!best || distance < best.distance) best = { id: building.id, x: spot.x, y: spot.y, distance }
+    const belief = rememberedBuilding(state, owner, spot)
+    if (belief?.kind !== 'keep') continue
+    const distance = Math.hypot(belief.x - home.x, belief.y - home.y)
+    if (!best || distance < best.distance) best = { id: belief.id, x: belief.x, y: belief.y, distance }
   }
   return best ? { id: best.id, x: best.x, y: best.y } : null
 }
@@ -365,9 +436,9 @@ function knownEnemyBuilding(state: MatchState, side: Brain): { x: number; y: num
   if (castle) return { x: castle.x, y: castle.y }
   let fallback: { x: number; y: number } | null = null
   for (const spot of side.spotted) {
-    const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && entry.owner !== side.owner)
-    if (!building) continue
-    fallback = { x: spot.x, y: spot.y }
+    const belief = rememberedBuilding(state, side.owner, spot)
+    if (!belief) continue
+    fallback = { x: belief.x, y: belief.y }
   }
   return fallback
 }
@@ -468,11 +539,14 @@ function siteCovered(state: MatchState, owner: PlayerId, x: number, y: number): 
 /** A finished enemy Pillar this side has seen, close enough that its shot would capture a Stalker here. */
 function knownPillarReaches(state: MatchState, side: Brain, x: number, y: number): boolean {
   const reach = BUILDING_STATS.tower.sight
+  for (const spot of side.spotted) {
+    const belief = rememberedBuilding(state, side.owner, spot)
+    if (belief?.kind !== 'tower' || !belief.complete) continue
+    if (Math.hypot(belief.x - x, belief.y - y) <= reach) return true
+  }
   for (const building of state.buildings) {
     if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'tower' || !building.complete) continue
-    const seen =
-      seesFootprint(state, side, building.tx, building.ty, 1, 1) || side.spotted.some((spot) => spot.id === building.id)
-    if (!seen) continue
+    if (!seesFootprint(state, side, building.tx, building.ty, 1, 1)) continue
     const center = buildingCenter(building)
     if (Math.hypot(center.x - x, center.y - y) <= reach) return true
   }
@@ -504,7 +578,8 @@ function spareEscorts(state: MatchState, side: Brain, x: number, y: number): Uni
   if (!keep) return []
   const keepPoint = buildingCenter(keep)
   const army = state.units.filter(
-    (unit) => unit.owner === side.owner && unit.hp > 0 && (unit.kind === 'pike' || unit.kind === 'howler'),
+    (unit) =>
+      unit.owner === side.owner && unit.hp > 0 && unit.power > 0 && (unit.kind === 'pike' || unit.kind === 'howler'),
   )
   const garrison = garrisonIds(army, keepPoint)
   return army
@@ -708,6 +783,7 @@ function staffExpansionDumps(state: MatchState, side: Brain): void {
 }
 
 function sendStalkerToDump(state: MatchState, side: Brain, nodeId: number): void {
+  if (dropoffsFull(state, side.owner)) return
   const mining = state.units.some(
     (unit) =>
       unit.owner === side.owner &&
@@ -743,6 +819,7 @@ function seesFootprint(state: MatchState, side: Brain, tx: number, ty: number, w
 
 /** One spare Stalker hauls dumps out of an enemy Storage this side can see. */
 function maybeRaidStorage(state: MatchState, side: Brain): void {
+  if (dropoffsFull(state, side.owner)) return
   const waiting = state.units.filter(
     (unit) =>
       unit.owner === side.owner &&
@@ -916,19 +993,28 @@ function wantsGridScout(side: Brain): boolean {
 
 /**
  * Press Cryo for a group of four whenever the vessels are empty, recovery is done,
- * four Stalkers are on the map, and the bank can pay 200. A filled Cryo stays filled.
+ * four Stalkers are on the map, and the bank can pay 200.
+ * If none of those Stalkers are still free and some are stored, Defrost them so they
+ * can mine. One free Stalker is enough to leave the Cryo shut. Recovery then blocks
+ * an immediate refreeze; a later spare group of four uses the usual rule.
  */
 function tendCryo(state: MatchState, side: Brain): void {
   const cryo = state.buildings.find(
     (building) => building.owner === side.owner && building.kind === 'keep' && building.cryo && building.complete && building.hp > 0,
   )
-  if (!cryo || cryo.cryoRecover > 0) return
-  if (cryoOccupants(state, cryo.id) > 0 || cryoParty(state, cryo.id).length > 0) return
-  let active = 0
+  if (!cryo) return
+  let free = 0
   for (const unit of state.units) {
-    if (unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null) active += 1
+    if (unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null) free += 1
   }
-  if (active < CRYO_SLOTS) return
+  const stored = cryoOccupants(state, cryo.id)
+  if (free === 0 && stored > 0) {
+    thawCryo(state, cryo.id)
+    return
+  }
+  if (cryo.cryoRecover > 0) return
+  if (stored > 0 || cryoParty(state, cryo.id).length > 0) return
+  if (free < CRYO_SLOTS) return
   if ((state.oreHeld[side.owner] ?? 0) < CRYO_FREEZE_COST * CRYO_SLOTS) return
   commandFreezeAuto(state, cryo.id)
 }
@@ -945,18 +1031,36 @@ function bankingHovers(state: MatchState, side: Brain, ore: number): boolean {
   return ore >= HOVER_SURPLUS && hoverRoster(state, side.owner) < HOVER_GRID
 }
 
+/** Empty-handed miners stop only when every Silo and Storage is full. */
+function holdHarvest(state: MatchState, side: Brain): void {
+  if (!dropoffsFull(state, side.owner)) return
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0) continue
+    const order = unit.order
+    const mining = order?.type === 'gather' || (order?.type === 'attack' && order.resumeNode != null)
+    if (!mining) continue
+    unit.order = null
+    unit.nodeMemory = 0
+    unit.idleAcquire = false
+    stopMoving(unit)
+  }
+}
+
 function runSide(state: MatchState, owner: PlayerId): void {
   const side = brain(state, owner)
   dispatchDrones(state, side)
   tendCryo(state, side)
+  holdHarvest(state, side)
   const porters = state.units.filter((unit) => unit.owner === side.owner && unit.kind === 'porter' && unit.hp > 0)
   const idle = porters.filter((unit) => idlePorter(unit, side.owner))
   const scout = claimScout(state, side, idle)
-  assignMiners(
-    state,
-    idle.filter((unit) => unit.id !== scout?.id),
-    null,
-  )
+  if (!dropoffsFull(state, side.owner)) {
+    assignMiners(
+      state,
+      idle.filter((unit) => unit.id !== scout?.id),
+      null,
+    )
+  }
   sendScout(state, side, scout)
 
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
@@ -986,6 +1090,8 @@ function runSide(state: MatchState, owner: PlayerId): void {
       (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
     ).length
     if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
+      placeChartedNearKeep(state, side, 'silo')
+    } else if (dropoffRoom(state, side.owner) <= 200 && ore >= BUILDING_STATS.silo.cost) {
       placeChartedNearKeep(state, side, 'silo')
     } else if (placeExpansionStorage(state, side)) {
       // A Storage now stands beside a Dumps heap this side has seen.
@@ -1024,7 +1130,12 @@ function runSide(state: MatchState, owner: PlayerId): void {
   maybeRaidStorage(state, side)
 
   const army = state.units.filter(
-    (unit) => unit.owner === side.owner && unit.kind !== 'porter' && unit.kind !== 'drone' && unit.hp > 0,
+    (unit) =>
+      unit.owner === side.owner &&
+      unit.kind !== 'porter' &&
+      unit.kind !== 'drone' &&
+      unit.hp > 0 &&
+      !isShutdown(unit),
   )
   const keepPoint = buildingCenter(keep)
   const threats = siloAttackers(state, side, keepPoint)
@@ -1097,6 +1208,7 @@ function castFrost(state: MatchState, side: Brain): void {
   for (const frog of state.units) {
     if (frog.owner !== side.owner || frog.kind !== 'frog' || frog.hp <= 0 || frog.frozen != null) continue
     if (frog.ice > 0 || frog.frostCd > 0 || frog.power <= 0) continue
+    if (insideSiloFreezeBan(state, frog.x, frog.y)) continue
     let foes = 0
     let friends = 0
     for (const unit of state.units) {
@@ -1203,7 +1315,7 @@ function employIdleStalkers(state: MatchState, side: Brain): void {
     const sent = new Set(extra.map((unit) => unit.id))
     idle = idle.filter((unit) => !sent.has(unit.id))
   }
-  if (!idle.length) return
+  if (!idle.length || dropoffsFull(state, side.owner)) return
   assignMiners(state, idle, null)
   idle = idle.filter((unit) => !unit.order)
   const sample = idle[0]

@@ -1,8 +1,8 @@
 import { updateAnimals } from './animals'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
-import { revealCloakedByScanners, updateScanners } from './scanner'
-import { assignMiners, coverOpenSites, debitDumps, fillOpenGatherSlots, redirectStuckPorter, releaseCryo } from './commands'
+import { revealCloakedByScanners, updateGuards, updateScanners } from './scanner'
+import { assignMiners, buildingDumpCap, coverOpenSites, creditDumps, debitDumps, dropoffHasRoom, fillOpenGatherSlots, redirectStuckPorter, releaseCryo } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
@@ -49,7 +49,6 @@ import {
   powerSeconds,
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
-  STORAGE_CAP,
   STORAGE_DEBRIS_AMOUNT,
   STORAGE_DEBRIS_PILES,
   PLAYER_COLOR,
@@ -115,7 +114,10 @@ export function step(state: MatchState, dt: number): void {
   for (const building of state.buildings) {
     building.hitFlash = Math.max(0, building.hitFlash - dt)
     building.alert = Math.max(0, building.alert - dt)
-    if (building.hatch > 0) building.hatch = Math.max(0, building.hatch - dt)
+    if (building.hatch > 0) {
+      const rate = building.kind === 'keep' ? 0.35 : 1
+      building.hatch = Math.max(0, building.hatch - dt * rate)
+    }
     if (building.kind === 'keep' && building.hp > 0) {
       const busy = !building.complete || building.queue.length > 0
       building.dish += dt * (busy ? 0.95 : 0.42)
@@ -134,6 +136,7 @@ export function step(state: MatchState, dt: number): void {
   updateAnimals(state, dt)
   updateVision(state)
   updateScanners(state)
+  updateGuards(state)
   fadeEffects(state, dt)
   recomputeSupply(state)
   state.simTick += 1
@@ -143,10 +146,12 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.repathIn = Math.max(0, unit.repathIn - dt)
   if (unit.ice > 0) return
   if (isShutdown(unit)) {
-    if (unit.order || unit.goalX != null || unit.scanning) {
+    if (unit.order || unit.goalX != null || unit.scanning || unit.guarding || unit.cloak > 0) {
       unit.order = null
       unit.idleAcquire = false
       unit.scanning = false
+      unit.guarding = false
+      unit.cloak = 0
       stopMoving(unit)
     }
     return
@@ -309,6 +314,7 @@ function admitCryoGroup(state: MatchState, building: Building, party: Unit[]): v
     member.order = null
     member.idleAcquire = false
     member.scanning = false
+    member.guarding = false
     member.x = center.x
     member.y = center.y
     stopMoving(member)
@@ -552,7 +558,7 @@ function resumeGather(state: MatchState, unit: Unit, nodeId: number): void {
 }
 
 function storageAccepts(building: Building): boolean {
-  return building.kind !== 'silo' || building.stock < STORAGE_CAP
+  return dropoffHasRoom(building)
 }
 
 function nearestDropoff(state: MatchState, owner: number, x: number, y: number): Building | null {
@@ -592,7 +598,7 @@ function approachDropoff(state: MatchState, unit: Unit): void {
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
-  if (unit.ice > 0) return
+  if (unit.ice > 0 || isShutdown(unit)) return
   let left = dt
   let blockedStep = false
   let guard = 0
@@ -693,7 +699,7 @@ function tryMove(state: MatchState, unit: Unit, dx: number, dy: number): void {
 /** A ground unit inside a blocked tile, or clipping one, is moved to the nearest free cell. */
 function releaseFromTerrain(state: MatchState): void {
   for (const unit of state.units) {
-    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null || unit.ice > 0) continue
+    if (unit.hp <= 0 || unit.kind === 'drone' || unit.frozen != null || unit.ice > 0 || isShutdown(unit)) continue
     const radius = UNIT_STATS[unit.kind].radius
     if (!circleHitsSolid(state, unit.x, unit.y, radius)) continue
     const originTx = Math.floor(unit.x / TILE)
@@ -799,6 +805,7 @@ function separate(state: MatchState): void {
 }
 
 function isStationary(unit: Unit): boolean {
+  if (isShutdown(unit)) return true
   if (unit.goalX != null) return false
   const order = unit.order
   if (!order) return false
@@ -859,8 +866,7 @@ function advanceBinGather(
     if (unit.gatherTimer < GATHER_TIME) return
     const take = Math.min(GATHER_AMOUNT, bin.stock)
     bin.stock -= take
-    const bank = state.oreHeld[bin.owner] ?? 0
-    state.oreHeld[bin.owner] = Math.max(0, bank - take)
+    state.oreHeld[bin.owner] = Math.max(0, (state.oreHeld[bin.owner] ?? 0) - take)
     unit.cargo = take
     unit.gatherTimer = 0
     order.phase = 'return'
@@ -874,13 +880,13 @@ function deliverCargo(state: MatchState, unit: Unit, order: Extract<Order, { typ
   const drop = nearestDropoff(state, unit.owner, unit.x, unit.y)
   if (!drop) return
   if (distToRect(unit.x, unit.y, buildingRect(drop)) > INTERACT) return
-  let moved = unit.cargo
-  if (drop.kind === 'silo') {
-    const room = STORAGE_CAP - drop.stock
-    if (room <= 0) return
-    moved = Math.min(unit.cargo, room)
-    drop.stock += moved
+  const room = buildingDumpCap(drop.kind) - drop.stock
+  if (room <= 0) {
+    stopMoving(unit)
+    return
   }
+  const moved = Math.min(unit.cargo, room)
+  drop.stock += moved
   state.oreHeld[unit.owner] = (state.oreHeld[unit.owner] ?? 0) + moved
   noteDumpsCollected(state, unit.owner, moved)
   unit.cargo -= moved
@@ -1025,13 +1031,15 @@ function mouthSpot(state: MatchState, building: Building, mouth: { x: number; y:
       y = (spot.ty + 0.5) * TILE
     }
   }
-  building.hatch = 0.7
+  if (building.kind !== 'keep') building.hatch = 0.7
   return { x, y }
 }
 
 function spawnTrained(state: MatchState, building: Building, kind: Unit['kind']): void {
   if (building.kind === 'keep') {
-    placeTrained(state, building, kind, entranceSpot(state, building))
+    const spot = entranceSpot(state, building)
+    if (kind === 'porter') building.hatch = 0.7
+    placeTrained(state, building, kind, spot)
     return
   }
   if (building.kind === 'yard') {
@@ -1098,6 +1106,9 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    guarding: false,
+    guardCd: 0,
+    guardSent: [],
     cloak: 0,
     age: 0,
     frozen: null,
@@ -1513,10 +1524,8 @@ function cleanup(state: MatchState): void {
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
     burst(state, center.x, center.y, sideTone(building.owner), 16)
-    for (const job of building.queue) state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + UNIT_STATS[job.kind].cost
-    if (!building.complete) {
-      state.oreHeld[building.owner] = (state.oreHeld[building.owner] ?? 0) + Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
-    }
+    for (const job of building.queue) creditDumps(state, building.owner, UNIT_STATS[job.kind].cost)
+    if (!building.complete) creditDumps(state, building.owner, Math.floor(BUILDING_STATS[building.kind].cost * 0.75))
     if (building.kind === 'silo' && building.dropDumps) dropStoragePile(state, building)
     dropBuildingDebris(state, building)
     for (const unit of state.units) {
@@ -1626,6 +1635,7 @@ function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
   unit.order = null
   unit.idleAcquire = false
   unit.scanning = false
+  unit.guarding = false
   unit.leashX = null
   unit.leashY = null
   stopMoving(unit)
@@ -1673,6 +1683,7 @@ function captureSide(state: MatchState, victim: number, captor: number): void {
   noteSiloCaptured(state, captor)
   for (const building of state.buildings) {
     if (building.owner !== victim || building.hp <= 0) continue
+    if (building.kind === 'keep' || building.kind === 'silo') building.stock = 0
     building.owner = captor
     building.focusId = null
     building.focusKind = null
@@ -1685,13 +1696,15 @@ function captureSide(state: MatchState, victim: number, captor: number): void {
     unit.order = null
     unit.idleAcquire = false
     unit.scanning = false
+    unit.guarding = false
     unit.leashX = null
     unit.leashY = null
     stopMoving(unit)
     taken.add(unit.id)
   }
-  state.oreHeld[captor] = (state.oreHeld[captor] ?? 0) + (state.oreHeld[victim] ?? 0)
+  const seized = state.oreHeld[victim] ?? 0
   state.oreHeld[victim] = 0
+  creditDumps(state, captor, seized)
   const seat = controlledSide(state)
   state.selectedUnits = state.selectedUnits.filter((id) => {
     const unit = unitById(state, id)
@@ -1738,6 +1751,7 @@ function applyThawPower(unit: Unit): void {
   unit.order = null
   unit.idleAcquire = false
   unit.scanning = false
+  unit.guarding = false
   unit.cloak = 0
   stopMoving(unit)
 }
@@ -1761,6 +1775,7 @@ function drainPower(state: MatchState, dt: number): void {
     unit.order = null
     unit.idleAcquire = false
     unit.scanning = false
+    unit.guarding = false
     unit.cloak = 0
     stopMoving(unit)
   }
@@ -1883,13 +1898,38 @@ function eliminateSide(state: MatchState, owner: number): void {
   pushToast(state, `${PLAYER_NAME[owner] ?? 'A side'} is eliminated.`)
 }
 
-function clearBrokenRocks(state: MatchState): void {
+/**
+ * Trees inside the circle are removed. Rocks lose half their current hit points, rounded down.
+ * A rock that reaches 0 is cleared with the usual debris. Dead trees get a short frost shatter.
+ */
+export function frostGround(state: MatchState, x: number, y: number, reach: number): void {
+  const shattered = new Set<number>()
+  for (const rock of state.rocks) {
+    if (rock.hp <= 0) continue
+    const cx = (rock.tx + 0.5) * TILE
+    const cy = (rock.ty + 0.5) * TILE
+    if (Math.hypot(cx - x, cy - y) > reach) continue
+    if (rock.kind === 'tree') {
+      rock.hp = 0
+      shattered.add(rock.id)
+    } else {
+      rock.hp = Math.floor(rock.hp * 0.5)
+      rock.hitFlash = 0.22
+    }
+  }
+  clearBrokenRocks(state, shattered)
+}
+
+function clearBrokenRocks(state: MatchState, frostTrees?: ReadonlySet<number>): void {
   const dead = state.rocks.filter((rock) => rock.hp <= 0)
   if (!dead.length) return
   const deadIds = new Set(dead.map((rock) => rock.id))
   for (const rock of dead) {
     state.tiles[rock.ty * state.mapW + rock.tx] = 0
-    burst(state, (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE, rock.kind === 'tree' ? '#6ea84a' : '#b7b1a6', 7)
+    const cx = (rock.tx + 0.5) * TILE
+    const cy = (rock.ty + 0.5) * TILE
+    if (rock.kind === 'tree' && frostTrees?.has(rock.id)) frostShatter(state, cx, cy)
+    else burst(state, cx, cy, rock.kind === 'tree' ? '#6ea84a' : '#b7b1a6', 7)
   }
   state.rocks = state.rocks.filter((rock) => rock.hp > 0)
   rebuildBlocked(state)
@@ -1916,6 +1956,25 @@ function clearBrokenRocks(state: MatchState): void {
   for (const unit of state.units) {
     if (unit.hp <= 0 || unit.goalX == null || unit.goalY == null) continue
     setUnitDestination(state, unit, unit.goalX, unit.goalY)
+  }
+}
+
+/** Short ice shards. Life is under half a second so the tree is gone before they fade. */
+function frostShatter(state: MatchState, x: number, y: number): void {
+  const colors = ['#f4fbff', '#d7f4ff', '#9fd7ea', '#ffffff']
+  for (let i = 0; i < 10; i++) {
+    const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.3
+    const speed = 48 + Math.random() * 64
+    state.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.16 + Math.random() * 0.14,
+      max: 0.3,
+      r: 1.3 + Math.random() * 1.5,
+      color: colors[i % colors.length] ?? '#f4fbff',
+    })
   }
 }
 

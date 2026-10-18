@@ -1,4 +1,4 @@
-import { DRONE_BIKE_AVOID, scoutArea, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
+import { DRONE_BIKE_AVOID, scoutArea, sideKnowsEnemyKeep, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
 import { cycleSide, takeSide } from './game/control'
 import { aiPlaceNearKeep, assignMiners, cancelTrain, commandAttack, commandConstruct, commandFreeze, commandFreezeAuto, commandFrost, commandGather, commandHarvestOrAttack, commandHoverGrid, commandMove, commandRepair, commandStop, hoverGridSpots, installCryo, playerHovers, thawCryo, tryPlace, tryTrain } from './game/commands'
@@ -6,19 +6,21 @@ import { CASTLE_YARD, MIN_PASSAGE, minimumPassageWidth, narrowPassageCount } fro
 import { AI_BUILD_GAP, AI_MINERAL_KEEP, areaCharted, findBuildSpotWithin, mineralLaneTiles } from './game/nav'
 import { findPath, rockShotClear } from './game/pathfind'
 import { yardEntrance } from './game/factoryArt'
+import { FAR_ZOOM, ZOOM_MAX, fitZoom, screenToWorld, zoomToward } from './game/camera'
 import { minimapFrame } from './game/render'
-import { keepEntrance } from './game/siloArt'
+import { keepEntrance, keepFillLevel, keepWindowCount } from './game/siloArt'
 import { animalCounts, CROW_COUNT } from './game/animals'
 import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, rememberLive, sealReplayStats } from './game/replay'
 import { step } from './game/sim'
-import { buildingCenter, buildingRect, canPlace, createMatch, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
-import { storageFill } from './game/storageArt'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_SECONDS, FROG_THAW_POWER, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
+import { buildingCenter, buildingRect, canPlace, createMatch, insideSiloFreezeBan, isWalkable, makeBuilding, makeUnit, PILLAR_GAP, placementAllowed, rebuildBlocked, recomputeSupply, unitById } from './game/state'
+import { storageCylinderCount, storageFill } from './game/storageArt'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_RECOVER, CRYO_SLOTS, FFA8_MAP_H, FFA8_MAP_W, FLASHER_POWER_SECONDS, FROG_FREEZE_COOLDOWN, FROG_FREEZE_SECONDS, FROG_POWER_SECONDS, FROG_THAW_POWER, GATHER_AMOUNT, GORILLA_POWER_SECONDS, GRID_CLOAK_SECONDS, HOVER_POWER_SECONDS, INTERACT, isShutdown, MAP_H, MAP_W, PILLAR_CHARGE_INSET, PILLAR_CHARGE_SECONDS, PLAYER_COLOR, PLAYER_NAME, POWER_LOW, ROCK_HP, SILO_REPAIR_COST, SILO_REPAIR_TIME, STALKER_LIFESPAN, STARTING_ORE, SILO_DUMP_CAP, STORAGE_CAP, SUPPLY_MAX, TILE, TREE_HP, UNIT_KINDS, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit, type UnitKind } from './game/types'
 import {
   aiTileExplored,
   aiTileVisible,
   depositKnown,
   groundShown,
+  footprintExplored,
   tileExplored,
   tileVisible,
   unitSeen,
@@ -30,12 +32,28 @@ import {
   sideTileVisible,
   viewUnitSeen,
 } from './game/vision'
-import { toggleScanner, updateScanners } from './game/scanner'
+import { toggleGuard, toggleScanner, updateGuards, updateScanners } from './game/scanner'
+import { activeKind, controlGroupIndex, cycleActiveKind, frostHotkey, narrowSelection, selectOwnCombatUnits, selectOwnSilo, setActiveKind, SILO_DOUBLE_TAP_MS } from './game/input'
 import { commandSnapshot, describeSelection, endStatsHtml, statsPanelHtml } from './ui/hud'
 import { loreBody } from './ui/lore'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+/** Mark a footprint explored for this side. Tests that build far from home are about something else. */
+function chartFootprint(state: MatchState, owner: PlayerId, kind: Building['kind'], tx: number, ty: number): void {
+  const stats = BUILDING_STATS[kind]
+  const grid = state.sideExplored[owner]
+  if (!grid) return
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      const row = ty + y
+      const col = tx + x
+      if (row < 0 || col < 0 || row >= state.mapH || col >= state.mapW) continue
+      grid[row * state.mapW + col] = 1
+    }
+  }
 }
 
 /** True when a Stalker's hit points match the five-minute drain and nothing else. */
@@ -70,6 +88,7 @@ function castleSendsTheNearestFreeWorker(): void {
   }
   clearPad(16, 18, 40, 24)
   rebuildBlocked(state)
+  chartFootprint(state, 0, 'yard', spot.tx, spot.ty)
   assert(canPlace(state, 'yard', spot.tx, spot.ty), 'factory pad is blocked')
   const centerX = (spot.tx + BUILDING_STATS.yard.w / 2) * TILE
   const centerY = (spot.ty + BUILDING_STATS.yard.h / 2) * TILE
@@ -119,10 +138,9 @@ function castleSendsTheNearestFreeWorker(): void {
   let refusedSpot: { tx: number; ty: number } | null = null
   for (let ty = 2; ty < MAP_H - 4 && !refusedSpot; ty++) {
     for (let tx = 2; tx < MAP_W - 4; tx++) {
-      if (canPlace(state, 'silo', tx, ty)) {
-        refusedSpot = { tx, ty }
-        break
-      }
+      if (!canPlace(state, 'silo', tx, ty) || !footprintExplored(state, 0, 'silo', tx, ty)) continue
+      refusedSpot = { tx, ty }
+      break
     }
   }
   assert(refusedSpot, 'no open silo site')
@@ -140,6 +158,7 @@ function castleSendsTheNearestFreeWorker(): void {
   clearPad(20, 28, 44, 34)
   rebuildBlocked(state)
   assert(canPlace(state, 'silo', aiSpot.tx, aiSpot.ty), 'Dunmarch silo pad is blocked')
+  chartFootprint(state, 1, 'silo', aiSpot.tx, aiSpot.ty)
   const aiX = (aiSpot.tx + 1) * TILE
   const aiY = (aiSpot.ty + 1) * TILE
   aiNear.x = aiX + 70
@@ -495,7 +514,7 @@ function yardNearHome(state: MatchState): { tx: number; ty: number } | null {
       for (let tx = keep.tx - rad; tx <= keep.tx + 3 + rad; tx++) {
         const edge = tx === keep.tx - rad || ty === keep.ty - rad || tx === keep.tx + 3 + rad || ty === keep.ty + 3 + rad
         if (!edge) continue
-        if (canPlace(state, 'yard', tx, ty)) return { tx, ty }
+        if (canPlace(state, 'yard', tx, ty) && footprintExplored(state, 0, 'yard', tx, ty)) return { tx, ty }
       }
     }
   }
@@ -912,7 +931,11 @@ function oreSelectionShowsAmount(): void {
   const workerPanel = describeSelection(state)
   assert(workerPanel.includes(UNIT_STATS.porter.label) && UNIT_STATS.porter.label === 'Stalker', 'selection does not say Stalker')
   assert(workerPanel.includes('Trained shelter residents;'), 'stalker panel omitted its lore')
-  assert(workerPanel.includes(`${Math.ceil(worker.hp)} / ${UNIT_STATS.porter.hp}`), 'stalker panel dropped its health')
+  assert(
+    !workerPanel.includes(`${Math.ceil(worker.hp)} / ${UNIT_STATS.porter.hp}`),
+    'stalker panel still prints the health line',
+  )
+  assert(workerPanel.includes('class="meter"'), 'stalker panel dropped its health meter')
   state.selectedUnits = []
   state.selectedBuilding = null
   state.selectedOre = null
@@ -1453,7 +1476,7 @@ function enemyCamShowsDunmarchSight(): void {
   assert(runCommand(state, 'off enemy cam'), 'off enemy cam was rejected while already off')
   assert(!state.enemyCam, 'the off command turned enemy cam back on')
   const cleared = createMatch(2)
-  assert(runCommand(cleared, 'off fog of war'), 'could not turn fog off')
+  assert(runCommand(cleared, 'fog of war off'), 'could not turn fog off')
   assert(runCommand(cleared, 'show enemy cam'), 'enemy cam was rejected after clear fog')
   const clearedKeep = cleared.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(clearedKeep, 'missing castle')
@@ -1513,7 +1536,7 @@ function bothCamMergesSight(): void {
   assert(!viewTileVisible(state, keep.tx + 1, keep.ty + 1), 'Northmark stayed lit after switching to enemy cam')
   assert(runCommand(state, 'all cams'), 'all cams was rejected after enemy cam')
   assert(state.bothCam && !state.enemyCam, 'both cam did not replace enemy cam')
-  assert(runCommand(state, 'off fow'), 'off fow was rejected while both cam was on')
+  assert(runCommand(state, 'fow off'), 'fow off was rejected while both cam was on')
   assert(state.fogCleared && !state.bothCam && !state.enemyCam, 'off fow did not replace both cam')
   assert(viewTileVisible(state, 0, 0), 'off fow left a corner dark')
   assert(state.toasts[state.toasts.length - 1]?.text === 'FOW is off.', 'off fow used the old notice')
@@ -1732,7 +1755,7 @@ function clearFogCommandRevealsTheMap(): void {
   assert(!state.fogCleared, 'an unknown command cleared the fog')
   assert(!runCommand(state, 'clear fog of war'), 'the old clear fog command was still accepted')
   assert(!state.fogCleared, 'the old command revealed the map')
-  assert(runCommand(state, '  Off Fog of War  '), 'Off Fog of War was rejected')
+  assert(runCommand(state, '  Fog of War Off  '), 'Fog of War Off was rejected')
   assert(state.fogCleared, 'the command did not mark fog cleared')
   assert(tileVisible(state, 0, 0) && tileExplored(state, MAP_W - 1, MAP_H - 1), 'a corner of the map stayed hidden')
   assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'Dunmarch stayed hidden after the command')
@@ -1744,7 +1767,7 @@ function clearFogCommandRevealsTheMap(): void {
   assert(!again.fogCleared, 'a new match kept the cleared fog')
   assert(!runCommand(again, 'clear fog'), 'the old clear fog alias was accepted')
   assert(!again.fogCleared, 'the old alias revealed the map')
-  assert(runCommand(again, 'OFF FOG OF WAR'), 'the off fog command was rejected')
+  assert(runCommand(again, 'FOG OF WAR OFF'), 'the off fog command was rejected')
   assert(again.fogCleared && tileVisible(again, 0, MAP_H - 1), 'off fog of war left part of the map dark')
 }
 
@@ -1788,7 +1811,7 @@ function fogAndGodModeTurnOff(): void {
   assert(keep && enemy, 'missing castles')
   assert(runCommand(state, 'Fog of War'), 'Fog of War was rejected while already on')
   assert(!state.fogCleared && !tileExplored(state, enemy.tx + 1, enemy.ty + 1), 'Fog of War cleared a map that was already hidden')
-  assert(runCommand(state, 'Off Fog of War'), 'could not turn fog off before turning it on')
+  assert(runCommand(state, 'Fog of War Off'), 'could not turn fog off before turning it on')
   assert(tileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the clear did not reveal Dunmarch')
   assert(runCommand(state, 'fog of war'), 'fog of war was rejected')
   assert(!state.fogCleared, 'fog of war left the map revealed')
@@ -1811,7 +1834,7 @@ function fogAndGodModeTurnOff(): void {
   for (let i = 0; i < 2 * 60; i++) step(state, 1 / 60)
   const safe = unitById(state, worker.id)
   assert(safe && safe.hp === worker.hp, 'the worker was hurt before God Mode was turned off')
-  assert(runCommand(state, 'Off God Mode'), 'off god mode was rejected')
+  assert(runCommand(state, 'God Mode Off'), 'god mode off was rejected')
   assert(!state.godMode, 'God Mode stayed on')
   const before = safe.hp
   for (let i = 0; i < 3 * 60; i++) step(state, 1 / 60)
@@ -2342,7 +2365,7 @@ function doubleGameCommand(): void {
   assert(Number(ffa.control) === 3, 'cycle did not walk every seated side')
   cycleSide(ffa)
   assert(Number(ffa.control) === 0, 'cycle did not wrap to Silo 01')
-  assert(runCommand(ffa, 'off fow'), 'off fow was rejected during double game')
+  assert(runCommand(ffa, 'fow off'), 'fow off was rejected during double game')
   cycleSide(ffa)
   cycleSide(ffa)
   assert(Number(ffa.control) === 2 && ffa.doubleGame && ffa.fogCleared, 'off fow cleared double game')
@@ -2437,7 +2460,11 @@ replayCarriesSpeed()
 replayShowsRecordedStats()
 powerDebrisAndBatteries()
 pillarRechargesPower()
+shutdownUnitsStayPutAndStayTargets()
 frogFreeze()
+frogFreezeShattersTreesAndHalvesRocks()
+frogCannotFreezeNearASilo()
+freezeHotkeyIsR()
 cryoPreservesStalkers()
 cryoButtonSendsTheHealthiest()
 siloCryoButtonsFollowTheVessels()
@@ -2451,6 +2478,8 @@ aiDroneNeverIdles()
 droneFliesFromTheFactory()
 hoverCostsDumpsAndNoStoreCells()
 scanningHoverRevealsBlackFog()
+fogRemembersBuildingsUntilSeen()
+flyGuardCallsHalfTheNearbyArmy()
 cancelLastStalkerRefundsTheQueue()
 stalkersLeaveByTheSiloDoor()
 unitsLeaveByTheFactoryDoor()
@@ -2487,6 +2516,12 @@ siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
+buildingDumpCaps()
+key1SelectsTheCommandedSilo()
+unitsButtonSelectsFlashersAndGorillas()
+cameraZoomsOutToTheWholeMap()
+productionIconsReplaceLabels()
+selectionIconsGroupByType()
 console.log('smoke ok')
 
 function passagesStayFourWide(): void {
@@ -2756,11 +2791,12 @@ function captureHarvestAndPassages(): void {
   const fallen = ffa.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
   const playerUnit = ffa.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   assert(fallen && playerUnit, 'missing a free-for-all silo to capture')
-  const victimOre = ffa.oreHeld[2] ?? 0
-  const captorOre = ffa.oreHeld[1] ?? 0
   const ids = ffa.units.filter((unit) => unit.owner === 2 && unit.hp > 0).map((unit) => unit.id)
   const extra = makeBuilding(ffa, 2, 'silo', fallen.tx + 4, fallen.ty, true)
   extra.stock = 11
+  ffa.oreHeld[2] = (ffa.oreHeld[2] ?? 0) + 11
+  const victimOre = ffa.oreHeld[2] ?? 0
+  const captorOre = ffa.oreHeld[1] ?? 0
   fallen.hp = 6
   const fallenCenter = buildingCenter(fallen)
   const killer = makeUnit(ffa, 1, 'pike', fallenCenter.x, fallenCenter.y + 70)
@@ -2778,7 +2814,9 @@ function captureHarvestAndPassages(): void {
   assert(!ffa.buildings.some((building) => building.owner === 2), 'captured buildings kept the loser')
   for (const id of ids) assert(unitById(ffa, id)?.owner === 1, 'a captured unit did not join the killer')
   const moved = ffa.buildings.find((building) => building.id === extra.id)
-  assert(moved?.owner === 1 && moved.stock === 11, 'storage stock did not move with the building')
+  const captorKeep = ffa.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(moved?.owner === 1 && moved.stock === 0, 'captured Storage dumps were left in that building')
+  assert(captorKeep?.stock === captorOre + victimOre, 'captured dumps were not poured into the Silo first')
   assert(ffa.oreHeld[1] === captorOre + victimOre, `dumps moved to ${ffa.oreHeld[1]}, expected ${captorOre + victimOre}`)
   assert(ffa.oreHeld[2] === 0, 'the loser kept dumps')
   assert(ffa.selectedUnits.includes(playerUnit.id), 'the player lost their own selection')
@@ -3356,6 +3394,163 @@ function scanningHoverRevealsBlackFog(): void {
   )
 }
 
+function distToSegment(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
+  const dx = x1 - x0
+  const dy = y1 - y0
+  const len2 = dx * dx + dy * dy
+  if (len2 < 1) return Math.hypot(px - x0, py - y0)
+  const t = Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / len2))
+  return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy))
+}
+
+function fogRemembersBuildingsUntilSeen(): void {
+  const state = createMatch(4)
+  const enemy = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(enemy && home, 'missing a silo for fog memory')
+  const center = buildingCenter(enemy)
+  const homePoint = buildingCenter(home)
+  const fly = makeUnit(state, 0, 'drone', center.x, center.y)
+  enemy.stock = 1500
+  updateVision(state)
+  const seen = state.playerSpotted.find((spot) => spot.id === enemy.id)
+  assert(seen?.kind === 'keep' && seen.stock === 1500 && seen.owner === 1, 'a seen Silo was not remembered')
+  const rememberedHp = seen.hp ?? 0
+  fly.x = homePoint.x
+  fly.y = homePoint.y
+  fly.order = null
+  fly.goalX = null
+  fly.goalY = null
+  updateVision(state)
+  assert(state.playerSpotted.some((spot) => spot.id === enemy.id && spot.stock === 1500), 'leaving sight wiped the Silo')
+  for (const unit of state.units) {
+    if (unit.owner !== 1) continue
+    unit.x = 40 * TILE
+    unit.y = 20 * TILE
+    unit.order = null
+    unit.goalX = null
+    unit.goalY = null
+  }
+  enemy.stock = 0
+  enemy.hp = 0
+  state.aiAcc = 0
+  step(state, 0.05)
+  const ghost = state.playerSpotted.find((spot) => spot.id === enemy.id)
+  assert(ghost?.kind === 'keep' && ghost.stock === 1500 && ghost.hp === rememberedHp, 'an unseen ruin replaced the last look')
+  assert(!viewTileVisible(state, enemy.tx + 1, enemy.ty + 1), 'the ruined Silo was still in sight')
+  state.selectedUnits = []
+  state.selectedBuilding = null
+  state.selectedGhost = enemy.id
+  const panel = describeSelection(state)
+  assert(panel.includes('Last seen') && panel.includes('Dumps: 1500 / 3000'), 'the ghost panel was not the last look')
+  fly.x = center.x
+  fly.y = center.y
+  updateVision(state)
+  assert(!state.playerSpotted.some((spot) => spot.id === enemy.id), 'seeing the ruin left the ghost up')
+  assert(state.selectedGhost == null, 'the ghost stayed selected after it was seen')
+
+  const ai = createMatch(5)
+  const playerKeep = ai.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const aiKeep = ai.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(playerKeep && aiKeep, 'missing silos for AI fog memory')
+  const watched = buildingCenter(playerKeep)
+  const nest = buildingCenter(aiKeep)
+  const scout = makeUnit(ai, 1, 'drone', watched.x, watched.y)
+  updateVision(ai)
+  assert(sideKnowsEnemyKeep(ai, 1), 'SiloAI did not remember a Silo it saw')
+  scout.x = nest.x
+  scout.y = nest.y
+  scout.order = null
+  scout.goalX = null
+  scout.goalY = null
+  updateVision(ai)
+  for (const unit of ai.units) {
+    if (unit.owner !== 0) continue
+    unit.x = TILE
+    unit.y = TILE
+    unit.order = null
+    unit.goalX = null
+    unit.goalY = null
+  }
+  playerKeep.hp = 0
+  ai.aiAcc = 0
+  step(ai, 0.05)
+  assert(sideKnowsEnemyKeep(ai, 1), 'SiloAI forgot a Silo it did not see fall')
+  scout.x = watched.x
+  scout.y = watched.y
+  updateVision(ai)
+  assert(!sideKnowsEnemyKeep(ai, 1), 'SiloAI kept a Silo after seeing the ruin')
+
+  const renamed = createMatch(1)
+  assert(!runCommand(renamed, 'off fow') && !renamed.fogCleared, 'off fow still clears the fog')
+  assert(renamed.toasts[renamed.toasts.length - 1]?.text === 'Unknown command.', 'off fow was still a command')
+  assert(!runCommand(renamed, 'off god mode') && !renamed.godMode, 'off god mode still toggles god mode')
+  assert(runCommand(renamed, 'god mode') && renamed.godMode, 'god mode did not turn on')
+  assert(runCommand(renamed, 'god mode off') && !renamed.godMode, 'god mode off did not turn god mode off')
+}
+
+function flyGuardCallsHalfTheNearbyArmy(): void {
+  const state = createMatch(8)
+  state.units = state.units.filter((unit) => unit.owner !== 0 || unit.kind === 'porter')
+  const fly = makeUnit(state, 0, 'drone', 800, 800)
+  toggleGuard(state, [fly.id])
+  assert(fly.guarding && !fly.scanning && fly.order == null, 'Guard did not hold the Fly')
+  toggleScanner(state, [fly.id])
+  assert(fly.scanning && !fly.guarding, 'Scanner left Guard on')
+  toggleGuard(state, [fly.id])
+  assert(fly.guarding && !fly.scanning, 'Guard left Scanner on')
+
+  const near = makeUnit(state, 0, 'pike', fly.x + 80, fly.y)
+  const mid = makeUnit(state, 0, 'howler', fly.x + 140, fly.y)
+  const far = makeUnit(state, 0, 'pike', fly.x + 220, fly.y)
+  const stalker = makeUnit(state, 0, 'porter', fly.x + 40, fly.y)
+  const buddy = makeUnit(state, 0, 'drone', fly.x + 50, fly.y)
+  const frog = makeUnit(state, 0, 'frog', fly.x + 60, fly.y)
+  const frozen = makeUnit(state, 0, 'pike', fly.x + 90, fly.y)
+  frozen.frozen = 1
+  const empty = makeUnit(state, 0, 'pike', fly.x + 100, fly.y)
+  empty.power = 0
+  const outside = makeUnit(state, 0, 'pike', fly.x + 50 * TILE, fly.y)
+  const foe = makeUnit(state, 1, 'pike', fly.x + 30, fly.y)
+  const nearOrder = () => near.order
+  const farOrder = () => far.order
+  updateGuards(state)
+  assert(nearOrder()?.type === 'attackMove' && mid.order?.type === 'attackMove', 'Guard did not call the nearest half')
+  assert(farOrder() == null && stalker.order == null && buddy.order == null && frog.order == null, 'Guard called a unit it should skip')
+  assert(frozen.order == null && empty.order == null && outside.order == null, 'Guard called a frozen, empty, or distant unit')
+  assert(state.pings.some((ping) => ping.color === '#ffd24a' && Math.hypot(ping.x - foe.x, ping.y - foe.y) < 2), 'Guard did not ping the spot')
+  const first = nearOrder()
+  state.time = 10
+  updateGuards(state)
+  assert(nearOrder() === first, 'Guard called a unit that was already responding')
+  assert(farOrder()?.type === 'attackMove', 'Guard did not call a fresh unit after the cooldown')
+
+  const sweep = createMatch(2)
+  sweep.explored.fill(0)
+  sweep.visible.fill(0)
+  const scout = makeUnit(sweep, 0, 'drone', 20 * TILE, 20 * TILE)
+  const blocker = makeUnit(sweep, 1, 'pike', 24 * TILE, 20 * TILE)
+  scout.scanning = true
+  updateScanners(sweep)
+  const order = scout.order
+  assert(order?.type === 'move', 'Scanner gave the Fly no patrol')
+  if (order?.type === 'move') {
+    const gap = distToSegment(blocker.x, blocker.y, scout.x, scout.y, order.x, order.y)
+    assert(gap >= DRONE_BIKE_AVOID, `Scanner flew through a Flasher (${gap.toFixed(0)})`)
+  }
+
+  const nest = createMatch(7)
+  const aiKeep = nest.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(aiKeep, 'missing the AI Silo for a Guard Fly')
+  const pad = buildingCenter(aiKeep)
+  const watch = makeUnit(nest, 1, 'drone', pad.x, pad.y)
+  const roam = makeUnit(nest, 1, 'drone', pad.x + 36, pad.y)
+  updateSiloAi(nest, 0.5)
+  const guards = [watch, roam].filter((unit) => unit.guarding)
+  const scans = [watch, roam].filter((unit) => unit.scanning)
+  assert(guards.length === 1 && scans.length === 1, 'SiloAI did not leave one Fly on Guard and one scanning')
+}
+
 function hoverCostsDumpsAndNoStoreCells(): void {
   assert(UNIT_STATS.drone.cost === 50, `hover cost is ${UNIT_STATS.drone.cost}, not 50 dumps`)
   assert(UNIT_STATS.drone.supply === 0, 'hover still uses store cells')
@@ -3634,6 +3829,7 @@ function towerFitsInsideCastleSightAndShoots(): void {
   assert(outside, 'no open cell outside Castle sight')
   assert(placementAllowed(state, 0, 'tower', inside.tx, inside.ty), 'a cell inside Castle sight rejected the Tower')
   assert(!placementAllowed(state, 0, 'tower', outside.tx, outside.ty), 'a cell outside Castle sight accepted the Tower')
+  state.explored[outside.ty * state.mapW + outside.tx] = 1
   const refused = tryPlace(state, 0, 'tower', outside.tx, outside.ty, [])
   assert(refused === 'Pillars must stand inside Silo sight', refused ?? 'the outside Tower was built')
   assert(BUILDING_STATS.tower.w === 1 && BUILDING_STATS.tower.h === 1, 'the Tower is not one cell')
@@ -3897,7 +4093,7 @@ function hoversGridAcrossTheMap(): void {
 function gridCloakHidesHovers(): void {
   assert(GRID_CLOAK_SECONDS === 45, `Grid invisibility is ${GRID_CLOAK_SECONDS}s`)
   assert(
-    loreBody('Hover').includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
+    loreBody('Fly').includes(`invisible for ${GRID_CLOAK_SECONDS} seconds`),
     'the Hover lore omits Grid invisibility',
   )
   assert(
@@ -3961,11 +4157,11 @@ function gridCloakHidesHovers(): void {
 
 function scannerEndsHoverCloak(): void {
   assert(
-    loreBody('Hover').includes('scanning Hover reveals an invisible enemy Hover'),
+    loreBody('Fly').includes('scanning Fly reveals an invisible enemy Fly'),
     'the Hover lore omits the Scanner reveal',
   )
   assert(
-    UNIT_STATS.drone.blurb.includes('scanning Hover reveals an invisible enemy Hover'),
+    UNIT_STATS.drone.blurb.includes('scanning Fly reveals an invisible enemy Fly'),
     'the Hover tooltip omits the Scanner reveal',
   )
 
@@ -4722,7 +4918,7 @@ function humanPlacementIgnoresAiGap(): void {
   let placed = false
   for (let ty = 1; ty < MAP_H - stats.h - 1 && !placed; ty++) {
     for (let tx = 1; tx < MAP_W - stats.w - 1 && !placed; tx++) {
-      if (!canPlace(state, 'yard', tx, ty)) continue
+      if (!canPlace(state, 'yard', tx, ty) || !footprintExplored(state, 0, 'yard', tx, ty)) continue
       let tight = false
       for (let y = ty - 1; y <= ty + stats.h; y++) {
         for (let x = tx - 1; x <= tx + stats.w; x++) {
@@ -5156,18 +5352,32 @@ function siloAiRefusesUnchartedGround(): void {
 
   const hands = createMatch(2)
   hands.explored.fill(0)
+  hands.visible.fill(0)
   hands.oreHeld[0] = 800
   const stats = BUILDING_STATS.yard
-  let humanBuilt = false
-  for (let ty = 1; ty < MAP_H - stats.h - 1 && !humanBuilt; ty++) {
-    for (let tx = 1; tx < MAP_W - stats.w - 1 && !humanBuilt; tx++) {
+  let spot: { tx: number; ty: number } | null = null
+  for (let ty = 1; ty < MAP_H - stats.h - 1 && !spot; ty++) {
+    for (let tx = 1; tx < MAP_W - stats.w - 1; tx++) {
       if (!canPlace(hands, 'yard', tx, ty)) continue
-      if (hands.explored[ty * MAP_W + tx] !== 0) continue
-      if (tryPlace(hands, 0, 'yard', tx, ty, []) != null) continue
-      humanBuilt = hands.explored[ty * MAP_W + tx] === 0
+      spot = { tx, ty }
+      break
     }
   }
-  assert(humanBuilt, 'a human Stalker was refused a building on unexplored ground')
+  assert(spot, 'no open Factory pad on the black map')
+  const black = tryPlace(hands, 0, 'yard', spot.tx, spot.ty, [])
+  assert(black === 'Unexplored ground', black ?? 'black ground accepted a Factory')
+  assert(!hands.buildings.some((building) => building.kind === 'yard'), 'the refused Factory was still added')
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) hands.explored[(spot.ty + y) * hands.mapW + spot.tx + x] = 1
+  }
+  const corner = (spot.ty + stats.h - 1) * hands.mapW + spot.tx + stats.w - 1
+  hands.explored[corner] = 0
+  const partial = tryPlace(hands, 0, 'yard', spot.tx, spot.ty, [])
+  assert(partial === 'Unexplored ground', partial ?? 'one black footprint tile was enough')
+  hands.explored[corner] = 1
+  const gray = tryPlace(hands, 0, 'yard', spot.tx, spot.ty, [])
+  assert(gray === null, gray ?? 'explored shroud refused the Factory')
+  assert(hands.visible[spot.ty * hands.mapW + spot.tx] === 0, 'the Factory required current sight instead of explored ground')
 }
 
 function ruinedSiloCanBeRepaired(): void {
@@ -5511,8 +5721,231 @@ function cellsBlockTrainingUntilStorage(): void {
   assert(packed.supplyCap[0] === SUPPLY_MAX, 'another Storage raised Cells past 65')
 }
 
+function buildingDumpCaps(): void {
+  assert(SILO_DUMP_CAP === 3000, `Silo cap is ${SILO_DUMP_CAP}`)
+  assert(STORAGE_CAP === 750, `Storage cap is ${STORAGE_CAP}`)
+  assert(BUILDING_STATS.keep.blurb.includes('3000'), 'the Silo blurb omits the 3000 cap')
+  assert(BUILDING_STATS.silo.blurb.includes('750'), 'the Storage blurb omits the 750 cap')
+  assert(keepWindowCount(0) === 0, 'an empty Silo painted a roof cell')
+  assert(keepWindowCount(374) === 0, '374 dumps painted a roof cell')
+  assert(keepWindowCount(375) === 1, '375 dumps did not paint one roof cell')
+  assert(keepWindowCount(1124) === 2, '1124 dumps did not stay at two painted cells')
+  assert(keepWindowCount(1125) === 3, '1125 dumps did not paint a third cell')
+  assert(keepWindowCount(2999) === 7, '2999 dumps filled the roof')
+  assert(keepWindowCount(3000) === 8, 'a full Silo did not paint eight cells')
+  assert(keepWindowCount(4000) === 8, 'paint grew past the eight roof cells')
+  const partial = keepFillLevel(1700)
+  assert(partial > 4 && partial < 5, `1700 dumps painted ${partial} cells`)
+  assert(Math.abs(partial - 1700 / 375) < 1e-9, '1700 dumps did not fill the fifth cell in proportion')
+  assert(storageCylinderCount(0) === 0, 'an empty Storage filled a cylinder')
+  assert(storageCylinderCount(249) === 0, '249 dumps filled a cylinder')
+  assert(storageCylinderCount(250) === 1, '250 dumps did not fill the first cylinder')
+  assert(storageCylinderCount(499) === 1, '499 dumps filled a second cylinder')
+  assert(storageCylinderCount(500) === 2, '500 dumps did not fill two cylinders')
+  assert(storageCylinderCount(749) === 2, '749 dumps filled the third cylinder')
+  assert(storageCylinderCount(750) === 3, 'a full Storage did not fill three cylinders')
+
+  const state = createMatch(4)
+  state.aiAcc = -30
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -30
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'missing a Silo for the cap')
+  keep.hatch = 0
+  keep.stock = SILO_DUMP_CAP - 3
+  state.oreHeld[0] = keep.stock
+  const worker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(worker, 'missing a Stalker to hold a full load')
+  for (const unit of state.units) {
+    if (unit.id === worker.id) continue
+    unit.cargo = 0
+    unit.order = { type: 'move', x: unit.x, y: unit.y }
+    unit.path = []
+    unit.goalX = unit.x
+    unit.goalY = unit.y
+  }
+  const mouth = keepEntrance(keep)
+  worker.x = mouth.x
+  worker.y = mouth.y
+  worker.cargo = GATHER_AMOUNT
+  worker.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  worker.path = []
+  worker.goalX = null
+  worker.goalY = null
+  step(state, 1 / 30)
+  assert(keep.stock === SILO_DUMP_CAP, `the Silo stopped at ${keep.stock}`)
+  assert(state.oreHeld[0] === SILO_DUMP_CAP, `the bank is ${state.oreHeld[0]}`)
+  assert(worker.cargo === GATHER_AMOUNT - 3, `the Stalker did not keep the extra (${worker.cargo})`)
+  assert(keep.hatch === 0, 'a dumps delivery opened the Silo door')
+  step(state, 1 / 30)
+  assert(worker.cargo === GATHER_AMOUNT - 3, `a full Silo took the rest (${worker.cargo})`)
+  assert(worker.order?.type === 'gather', 'the Stalker did not wait with the load')
+  assert(keep.hatch === 0, 'waiting at a full Silo opened the door')
+
+  clearPad(state, 14, 14, 28, 24)
+  const bin = makeBuilding(state, 0, 'silo', 18, 18, true)
+  bin.stock = 0
+  rebuildBlocked(state)
+  worker.x = (bin.tx + 1) * TILE
+  worker.y = (bin.ty + 2) * TILE + 8
+  worker.cargo = GATHER_AMOUNT - 3
+  worker.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  worker.path = []
+  worker.goalX = null
+  worker.goalY = null
+  step(state, 1 / 30)
+  const stored = () => bin.stock
+  assert(stored() === GATHER_AMOUNT - 3, `Storage did not take the haul the Silo refused (${stored()})`)
+  assert(worker.cargo === 0, `the Stalker kept a load Storage could hold (${worker.cargo})`)
+  assert(state.oreHeld[0] === SILO_DUMP_CAP + (GATHER_AMOUNT - 3), `Storage did not raise the total (${state.oreHeld[0]})`)
+  assert(keep.stock === SILO_DUMP_CAP, 'the full Silo accepted the Storage haul')
+
+  bin.stock = STORAGE_CAP
+  keep.stock = SILO_DUMP_CAP
+  state.oreHeld[0] = SILO_DUMP_CAP + STORAGE_CAP
+  worker.cargo = GATHER_AMOUNT
+  worker.order = { type: 'gather', nodeId: -1, phase: 'return' }
+  worker.path = []
+  worker.goalX = null
+  worker.goalY = null
+  step(state, 1 / 30)
+  assert(stored() === STORAGE_CAP, `a full Storage took dumps (${stored()})`)
+  assert(keep.stock === SILO_DUMP_CAP, 'a full Silo took dumps while Storage was full')
+  assert(worker.cargo === GATHER_AMOUNT, `every full drop-off dropped the load (${worker.cargo})`)
+  assert(worker.order?.type === 'gather', 'the Stalker did not wait when every drop-off was full')
+
+  state.selectedBuilding = keep.id
+  state.selectedUnits = []
+  const siloPanel = describeSelection(state)
+  assert(siloPanel.includes(`Dumps: ${SILO_DUMP_CAP} / ${SILO_DUMP_CAP}`), 'the Silo panel omitted its cap')
+  assert(siloPanel.includes('meta full'), 'a full Silo is not marked full')
+  state.selectedBuilding = bin.id
+  const fullPanel = describeSelection(state)
+  assert(fullPanel.includes(`Dumps: ${STORAGE_CAP} / ${STORAGE_CAP}`), 'the Storage panel omitted its cap')
+  assert(fullPanel.includes('meta full'), 'a full Storage is not marked full')
+  bin.stock = 350
+  const openPanel = describeSelection(state)
+  assert(openPanel.includes('Dumps: 350 / 750'), 'the Storage panel does not show 350 / 750')
+  assert(!openPanel.includes('meta full'), 'a Storage with room is marked full')
+
+  const refund = createMatch(4)
+  refund.aiAcc = -30
+  const home = refund.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'missing a Silo to refund into')
+  const purse = makeBuilding(refund, 0, 'silo', 16, 16, true)
+  purse.stock = 0
+  home.stock = SILO_DUMP_CAP - 2
+  refund.oreHeld[0] = home.stock
+  home.queue.push({ kind: 'porter', remaining: 1, total: UNIT_STATS.porter.trainTime })
+  cancelTrain(refund, home.id)
+  assert(home.stock === SILO_DUMP_CAP, `the refund did not fill the Silo first (${home.stock})`)
+  assert(purse.stock === UNIT_STATS.porter.cost - 2, `Storage took ${purse.stock} of the refund`)
+  assert(refund.oreHeld[0] === SILO_DUMP_CAP + purse.stock, `the refund total is ${refund.oreHeld[0]}`)
+  home.stock = SILO_DUMP_CAP
+  purse.stock = STORAGE_CAP
+  refund.oreHeld[0] = SILO_DUMP_CAP + STORAGE_CAP
+  home.queue.push({ kind: 'porter', remaining: 1, total: UNIT_STATS.porter.trainTime })
+  cancelTrain(refund, home.id)
+  assert(refund.oreHeld[0] === SILO_DUMP_CAP + STORAGE_CAP, `a refund with no room was kept (${refund.oreHeld[0]})`)
+  assert(home.stock === SILO_DUMP_CAP && purse.stock === STORAGE_CAP, 'a full building accepted a refund')
+
+  const seized = createMatch(3)
+  seized.aiAcc = -30
+  const captorKeep = seized.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const victim = seized.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(captorKeep && victim, 'missing a Silo to capture')
+  captorKeep.stock = SILO_DUMP_CAP
+  seized.oreHeld[0] = SILO_DUMP_CAP
+  victim.stock = 40
+  seized.oreHeld[1] = 40
+  victim.hp = 0
+  step(seized, 1 / 60)
+  assert(seized.oreHeld[0] === SILO_DUMP_CAP, `capture pushed a full Silo to ${seized.oreHeld[0]}`)
+  assert(seized.oreHeld[1] === 0, 'the captured side kept dumps')
+
+  const cryo = createMatch(5)
+  cryo.aiAcc = -30
+  for (let owner = 0; owner < cryo.playerCount; owner++) cryo.sideAcc[owner] = -30
+  const silo = cryo.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(silo, 'missing a Silo for the door')
+  silo.cryo = true
+  silo.hatch = 0
+  cryo.oreHeld[0] = CRYO_FREEZE_COST * CRYO_SLOTS
+  silo.stock = cryo.oreHeld[0]
+  const door = keepEntrance(silo)
+  const crew = cryo.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0).slice(0, CRYO_SLOTS)
+  assert(crew.length === CRYO_SLOTS, 'not enough Stalkers to store')
+  for (const unit of crew) {
+    unit.x = door.x
+    unit.y = door.y
+    unit.order = { type: 'freeze', buildingId: silo.id }
+    unit.path = []
+    unit.goalX = null
+    unit.goalY = null
+  }
+  step(cryo, 1 / 30)
+  assert(crew.every((unit) => unit.frozen === silo.id), 'the group was not stored')
+  assert(silo.hatch === 0, 'storing in Cryo opened the Silo door')
+  thawCryo(cryo, silo.id)
+  assert(silo.hatch === 0, 'Defrost opened the Silo door')
+  assert(crew.every((unit) => unit.frozen == null), 'Defrost left the Stalkers inside')
+
+  const brain = createMatch(9)
+  const enemyKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(enemyKeep, 'missing Dunmarch Silo')
+  enemyKeep.stock = SILO_DUMP_CAP
+  brain.oreHeld[1] = SILO_DUMP_CAP
+  const miners = brain.units.filter((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  const mining = miners[0]
+  const carrying = miners[1]
+  assert(mining && carrying, 'Dunmarch is short a Stalker')
+  const node = brain.ore.find((entry) => entry.amount > 0)
+  assert(node, 'missing a heap')
+  mining.cargo = 0
+  mining.order = { type: 'gather', nodeId: node.id, phase: 'approach' }
+  mining.nodeMemory = node.id
+  carrying.cargo = GATHER_AMOUNT
+  carrying.order = { type: 'gather', nodeId: node.id, phase: 'return' }
+  brain.aiAcc = 0.5
+  updateSiloAi(brain, 0)
+  assert(mining.order?.type !== 'gather', 'SiloAI kept harvesting when every drop-off was full')
+  assert(carrying.cargo === GATHER_AMOUNT, 'SiloAI dropped a load it could not deliver')
+  const spare = makeBuilding(brain, 1, 'silo', 12, 12, true)
+  spare.stock = 0
+  rebuildBlocked(brain)
+  mining.order = null
+  mining.cargo = 0
+  mining.nodeMemory = 0
+  brain.oreHeld[1] = 0
+  brain.aiAcc = 0.5
+  updateSiloAi(brain, 0)
+  const stillBlocked = brain.units.some(
+    (unit) => unit.owner === 1 && unit.kind === 'porter' && unit.cargo <= 0 && unit.order?.type === 'gather',
+  )
+  assert(stillBlocked, 'SiloAI refused to mine while a Storage had room')
+
+  const tight = createMatch(8)
+  const tightKeep = tight.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(tightKeep, 'missing a Silo that is nearly full')
+  clearPad(tight, tightKeep.tx - 8, tightKeep.ty - 8, tightKeep.tx + 12, tightKeep.ty + 12)
+  const tightBin = makeBuilding(tight, 1, 'silo', tightKeep.tx + 6, tightKeep.ty, true)
+  tightKeep.stock = SILO_DUMP_CAP - 100
+  tightKeep.cryo = true
+  const parked = tight.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(parked, 'missing a Stalker to hold the Cryo')
+  parked.frozen = tightKeep.id
+  tightBin.stock = STORAGE_CAP - 40
+  tight.oreHeld[1] = tightKeep.stock + tightBin.stock
+  chartBase(tight, 1, tightKeep.tx + 1, tightKeep.ty + 1, 18)
+  rebuildBlocked(tight)
+  const binsBefore = tight.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  tight.aiAcc = 0.5
+  updateSiloAi(tight, 0)
+  const binsAfter = tight.buildings.filter((building) => building.owner === 1 && building.kind === 'silo').length
+  assert(binsAfter > binsBefore, 'SiloAI did not raise Storage when its drop-offs were nearly full')
+}
+
 function fullStorageRefusesAHaul(): void {
-  assert(STORAGE_CAP === 500, `Storage cap is ${STORAGE_CAP}`)
+  assert(STORAGE_CAP === 750, `Storage cap is ${STORAGE_CAP}`)
   const state = createMatch(4)
   state.aiAcc = -30
   for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -30
@@ -5602,12 +6035,12 @@ function fullStorageRefusesAHaul(): void {
   overflow.selectedBuilding = tight.id
   overflow.selectedUnits = []
   const fullPanel = describeSelection(overflow)
-  assert(fullPanel.includes(`${STORAGE_CAP} / ${STORAGE_CAP}`), 'the panel does not show 500 / 500')
-  assert(fullPanel.includes('Full'), 'a full Storage is not marked Full')
+  assert(fullPanel.includes(`Dumps: ${STORAGE_CAP} / ${STORAGE_CAP}`), 'the panel does not show 750 / 750')
+  assert(fullPanel.includes('meta full'), 'a full Storage is not marked full')
   tight.stock = 12
   const openPanel = describeSelection(overflow)
-  assert(openPanel.includes(`12 / ${STORAGE_CAP}`), 'the panel does not show dumps out of 500')
-  assert(!openPanel.includes('Full'), 'a Storage with room is marked Full')
+  assert(openPanel.includes(`Dumps: 12 / ${STORAGE_CAP}`), 'the panel does not show dumps out of 750')
+  assert(!openPanel.includes('meta full'), 'a Storage with room is marked full')
 
   const raid = createMatch(3)
   raid.aiAcc = -30
@@ -5642,6 +6075,7 @@ function fullStorageRefusesAHaul(): void {
   assert(bin.stock === STORAGE_CAP - UNIT_STATS.porter.cost, `spending left ${bin.stock}`)
   const builder = spent.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
   assert(builder, 'missing a builder')
+  chartFootprint(spent, 0, 'silo', 24, 20)
   assert(tryPlace(spent, 0, 'silo', 24, 20, [builder.id]) === null, 'a full Storage blocked a new one')
   assert(
     spent.buildings.some((building) => building.kind === 'silo' && building.id !== bin.id),
@@ -5992,6 +6426,33 @@ function cryoPreservesStalkers(): void {
   assert(extraOrder() !== 'freeze', 'SiloAI pressed Cryo while Stalkers were already inside')
   const cooled = () => bank.cryoRecover
   assert(cooled() === 0, 'a filled Cryo started recovery on its own')
+
+  extra.hp = 0
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(sent.every((unit) => unit.frozen == null), 'SiloAI left its Stalkers in Cryo with none free')
+  assert(cooled() === CRYO_RECOVER, 'defrost did not start Cryo recovery')
+  const mining = sent.filter((unit) => {
+    const order = unit.order
+    return order?.type === 'gather' || (order?.type === 'attack' && order.resumeNode != null)
+  })
+  assert(mining.length >= 3, `only ${mining.length} defrosted Stalkers went back to mining`)
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  assert(sent.every((unit) => unit.frozen == null), 'SiloAI froze the Stalkers it had just released')
+  assert(cooled() === CRYO_RECOVER, 'a second think cleared Cryo recovery')
+
+  bank.cryoRecover = 0
+  brain.oreHeld[1] = 200
+  for (const unit of sent) {
+    unit.order = null
+    unit.frozen = null
+    unit.cargo = 0
+  }
+  brain.aiAcc = 0
+  updateSiloAi(brain, 0.5)
+  const refrozen = sent.filter((unit) => unit.order?.type === 'freeze')
+  assert(refrozen.length === 4, 'SiloAI did not freeze a spare group again after recovery')
 }
 
 function siloAiUsesHoverGrid(): void {
@@ -6812,11 +7273,180 @@ function pillarRechargesPower(): void {
   assert(playedUnit.power > 0.2, 'replay did not recharge under the Pillar')
 }
 
+function frogFreezeShattersTreesAndHalvesRocks(): void {
+  const state = createMatch(8, 'duel')
+  state.aiAcc = -60
+  state.sideAcc.fill(-60)
+  const pad = chargePad(state)
+  assert(pad, 'no open ground for a frost shatter')
+  clearPad(state, pad.tx - 2, pad.ty - 2, pad.tx + 12, pad.ty + 8)
+  const frog = makeUnit(state, 1, 'frog', (pad.tx + 0.5) * TILE, (pad.ty + 0.5) * TILE)
+  const add = (dx: number, dy: number, kind: 'tree' | 'rock', hp: number) => {
+    const tx = pad.tx + dx
+    const ty = pad.ty + dy
+    state.tiles[ty * state.mapW + tx] = kind === 'tree' ? 3 : 1
+    const rock = { id: state.nextId++, tx, ty, hp, hitFlash: 0, kind }
+    state.rocks.push(rock)
+    return rock
+  }
+  const tree = add(2, 0, 'tree', 2)
+  const odd = add(3, 0, 'rock', 27)
+  const chip = add(4, 0, 'rock', 1)
+  const full = add(5, 0, 'rock', ROCK_HP)
+  const farTree = add(8, 0, 'tree', TREE_HP)
+  const farRock = add(8, 1, 'rock', ROCK_HP)
+  rebuildBlocked(state)
+  assert(!isWalkable(state, tree.tx, tree.ty), 'the tree tile was already open')
+  assert(
+    findPath(state.blocked, state.mapW, state.mapH, pad.tx, pad.ty + 6, tree.tx, tree.ty) == null,
+    'a path reached a tree that still stands',
+  )
+  const traveler = makeUnit(state, 0, 'porter', (pad.tx + 0.5) * TILE, (pad.ty + 6.5) * TILE)
+  traveler.goalX = (tree.tx + 0.5) * TILE
+  traveler.goalY = (tree.ty + 0.5) * TILE
+  traveler.path = []
+  commandFrost(state, [frog.id])
+  assert(!state.rocks.some((rock) => rock.id === tree.id), 'the tree in sight survived Freeze')
+  assert(state.tiles[tree.ty * state.mapW + tree.tx] === 0, 'the shattered tree left a blocked tile')
+  assert(isWalkable(state, tree.tx, tree.ty), 'the shattered tree is still unwalkable')
+  assert(
+    findPath(state.blocked, state.mapW, state.mapH, pad.tx, pad.ty + 6, tree.tx, tree.ty) != null,
+    'pathing was not rebuilt through the shattered tree',
+  )
+  assert(traveler.path.length > 0, 'a unit headed at the tree was not given a new path')
+  assert(odd.hp === 13 && state.rocks.some((rock) => rock.id === odd.id), `a 27-point rock has ${odd.hp} after Freeze`)
+  assert(!state.rocks.some((rock) => rock.id === chip.id), 'a 1-point rock was not destroyed')
+  assert(state.tiles[chip.ty * state.mapW + chip.tx] === 0, 'a destroyed rock still blocks its tile')
+  assert(full.hp === 14, `a full rock has ${full.hp} after Freeze`)
+  assert(farTree.hp === TREE_HP && state.rocks.some((rock) => rock.id === farTree.id), 'a tree outside sight shattered')
+  assert(farRock.hp === ROCK_HP, 'a rock outside sight lost hit points')
+  const shards = state.particles.filter(
+    (particle) => particle.x === (tree.tx + 0.5) * TILE && particle.y === (tree.ty + 0.5) * TILE && particle.max <= 0.3,
+  )
+  assert(shards.length > 0 && shards.every((particle) => particle.color !== '#6ea84a'), 'a shattered tree left no frost shards')
+  assert(frog.frostCd === FROG_FREEZE_COOLDOWN, 'the Frog did not spend Freeze')
+}
+
+function frogCannotFreezeNearASilo(): void {
+  assert(BUILDING_STATS.keep.sight === 260, 'the no-freeze ring is no longer the Silo sight')
+  const state = createMatch(37)
+  state.aiAcc = -60
+  state.sideAcc.fill(-60)
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep' && building.hp > 0)
+  const enemyKeep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(home && enemyKeep, 'missing a Silo for the freeze ban')
+  const homeCenter = buildingCenter(home)
+  const enemyCenter = buildingCenter(enemyKeep)
+  const inward = homeCenter.x < (state.mapW * TILE) / 2 ? 1 : -1
+  assert(Math.hypot(enemyCenter.x - homeCenter.x, enemyCenter.y - homeCenter.y) > BUILDING_STATS.keep.sight * 2, 'the two Silos overlap')
+  const banned = makeUnit(state, 0, 'frog', homeCenter.x + inward * 40, homeCenter.y)
+  const foe = makeUnit(state, 1, 'pike', banned.x + 28, banned.y)
+  assert(insideSiloFreezeBan(state, banned.x, banned.y), 'a Frog beside its Silo was treated as outside')
+  state.selectedUnits = [banned.id]
+  const blocked = commandSnapshot(state).find((cmd) => cmd.label === 'Freeze')
+  assert(blocked?.disabled && blocked.title === "Can't Freeze near a Silo", 'Freeze stayed armed beside a Silo')
+  commandFrost(state, [banned.id])
+  assert(banned.frostCd === 0 && foe.ice === 0 && state.rings.length === 0, 'Freeze worked inside a Silo sight')
+  assert(state.toasts.some((toast) => toast.text === "Can't Freeze near a Silo"), 'a refused Freeze stayed quiet')
+
+  const edge = makeUnit(state, 0, 'frog', homeCenter.x + inward * BUILDING_STATS.keep.sight, homeCenter.y)
+  const edgeFoe = makeUnit(state, 1, 'pike', edge.x, edge.y + 20)
+  assert(insideSiloFreezeBan(state, edge.x, edge.y), 'the sight radius itself was outside the ban')
+  commandFrost(state, [edge.id])
+  assert(edge.frostCd === 0 && edgeFoe.ice === 0, 'Freeze worked on the sight radius')
+
+  const clear = makeUnit(state, 0, 'frog', homeCenter.x + inward * (BUILDING_STATS.keep.sight + 1), homeCenter.y)
+  const clearFoe = makeUnit(state, 1, 'pike', clear.x + 24, clear.y)
+  assert(!insideSiloFreezeBan(state, clear.x, clear.y), 'one pixel outside a Silo was banned')
+  commandFrost(state, [clear.id])
+  assert(clear.frostCd === FROG_FREEZE_COOLDOWN && clearFoe.ice === FROG_FREEZE_SECONDS, 'Freeze failed just outside a Silo')
+
+  const hostile = makeUnit(state, 0, 'frog', enemyCenter.x, enemyCenter.y)
+  const hostileFoe = makeUnit(state, 1, 'howler', hostile.x + 30, hostile.y)
+  commandFrost(state, [hostile.id])
+  assert(hostile.frostCd === 0 && hostileFoe.ice === 0, 'Freeze worked inside an enemy Silo')
+
+  home.hp = 0
+  const fallen = makeUnit(state, 0, 'frog', homeCenter.x, homeCenter.y)
+  const fallenFoe = makeUnit(state, 1, 'pike', fallen.x + 22, fallen.y)
+  assert(!insideSiloFreezeBan(state, fallen.x, fallen.y), 'a destroyed Silo still banned Freeze')
+  commandFrost(state, [fallen.id])
+  assert(fallen.frostCd === FROG_FREEZE_COOLDOWN && fallenFoe.ice === FROG_FREEZE_SECONDS, 'a destroyed Silo blocked Freeze')
+
+  const brain = createMatch(39)
+  brain.aiAcc = 0
+  const aiKeep = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
+  assert(aiKeep, 'missing a Silo for the AI freeze ban')
+  const aiCenter = buildingCenter(aiKeep)
+  for (const unit of brain.units) {
+    if (unit.owner === 1 && unit.hp > 0) unit.hp = 0
+  }
+  const caster = makeUnit(brain, 1, 'frog', aiCenter.x, aiCenter.y)
+  const victim = makeUnit(brain, 0, 'pike', caster.x + 30, caster.y)
+  makeUnit(brain, 0, 'howler', caster.x - 24, caster.y)
+  updateSiloAi(brain, 0.5)
+  assert(caster.frostCd === 0 && victim.ice === 0, 'SiloAI froze inside its Silo')
+  assert(!brain.toasts.some((toast) => toast.text === "Can't Freeze near a Silo"), 'SiloAI announced a Freeze it did not try')
+}
+
+function freezeHotkeyIsR(): void {
+  const field = createMatch(41)
+  field.aiAcc = -60
+  field.sideAcc.fill(-60)
+  const pad = chargePad(field)
+  assert(pad, 'no open ground for the Freeze hotkey')
+  const frog = makeUnit(field, 0, 'frog', (pad.tx + 0.5) * TILE, (pad.ty + 0.5) * TILE)
+  const foe = makeUnit(field, 1, 'pike', frog.x + 30, frog.y)
+  const porter = makeUnit(field, 0, 'porter', frog.x - 48, frog.y)
+  const enemy = makeUnit(field, 1, 'frog', frog.x + 400, frog.y)
+  field.selectedUnits = [frog.id]
+  const freeze = commandSnapshot(field).find((cmd) => cmd.label === 'Freeze')
+  assert(freeze?.hotkey === 'R' && !freeze.disabled && freeze.title.includes('Press R'), 'Freeze is not bound to R')
+  assert(!commandSnapshot(field).some((cmd) => cmd.hotkey === 'F'), 'F still labels Freeze')
+  assert(frostHotkey(field), 'R did not take Freeze')
+  const cooled = () => frog.frostCd
+  const iced = () => foe.ice
+  assert(cooled() === FROG_FREEZE_COOLDOWN && iced() === FROG_FREEZE_SECONDS, 'R did not Freeze')
+
+  frog.frostCd = 0
+  foe.ice = 0
+  field.selectedUnits = [enemy.id]
+  assert(!frostHotkey(field), 'an enemy Frog took R')
+  assert(iced() === 0, 'selecting an enemy Frog froze a unit')
+
+  field.selectedUnits = [porter.id]
+  const repair = commandSnapshot(field).find((cmd) => cmd.label === 'Repair')
+  assert(repair?.hotkey === 'R', 'Repair lost R when no Frog is selected')
+  assert(!frostHotkey(field), 'R froze without a Frog')
+  assert(cooled() === 0, 'a Stalker selection spent Freeze')
+
+  field.selectedUnits = [frog.id, porter.id]
+  porter.order = { type: 'move', x: porter.x + 80, y: porter.y }
+  field.activeKind = 'porter'
+  const stalkersFirst = commandSnapshot(field)
+  assert(stalkersFirst.find((cmd) => cmd.label === 'Repair')?.hotkey === 'R', 'the Stalker group lost Repair')
+  assert(!stalkersFirst.some((cmd) => cmd.label === 'Freeze'), 'the Stalker group showed Freeze')
+  assert(stalkersFirst.some((cmd) => cmd.label === 'Move'), 'move left the mixed selection')
+  assert(!frostHotkey(field), 'R froze while Stalkers were the active group')
+  assert(cooled() === 0, 'the Stalker group spent Freeze')
+  field.activeKind = 'frog'
+  const both = commandSnapshot(field)
+  assert(both.find((cmd) => cmd.label === 'Freeze')?.hotkey === 'R', 'the Frog group hid Freeze')
+  assert(!both.some((cmd) => cmd.label === 'Repair'), 'the Frog group showed Repair')
+  assert(both.some((cmd) => cmd.label === 'Attack'), 'attack left the Frog group')
+  assert(frostHotkey(field), 'R repaired instead of freezing')
+  assert(cooled() === FROG_FREEZE_COOLDOWN, 'the Frog group did not Freeze')
+  const kept = () => porter.order
+  assert(kept()?.type === 'move', 'R sent the Stalker to repair')
+}
+
 function frogFreeze(): void {
   const stats = UNIT_STATS.frog
   assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 12 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
   assert(stats.speed === UNIT_STATS.pike.speed && stats.sight === UNIT_STATS.pike.sight, 'Frog speed or sight does not match a Flasher')
-  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 30 && FROG_FREEZE_COOLDOWN === 90 && FROG_THAW_POWER === 0.5, 'Frog Power or Freeze timing changed')
+  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 20 && FROG_FREEZE_COOLDOWN === 90 && FROG_THAW_POWER === 0.5, 'Frog Power or Freeze timing changed')
+  assert(stats.blurb.includes('for 20 seconds') && stats.blurb.includes('half a bar') && stats.blurb.includes('in 30 seconds'), 'the Frog blurb dropped the 20 second Freeze or the Pillar charge')
+  assert(loreBody('Frog').includes('for 20 seconds') && loreBody('Frog').includes('half a bar'), 'Frog lore still says the old Freeze duration')
   const panel = statsPanelHtml(12, 2, [blankSide(), blankSide()])
   assert(panel.includes('Frog') && panel.includes('colspan="5"'), 'the statistics table left out the Frog')
 
@@ -6852,7 +7482,7 @@ function frogFreeze(): void {
   weak.power = 0.4
   field.selectedUnits = [frog.id]
   const armed = commandSnapshot(field).find((cmd) => cmd.label === 'Freeze')
-  assert(armed && !armed.disabled && armed.detail === '90s', 'Freeze was missing from the Frog panel')
+  assert(armed && !armed.disabled && armed.detail === '90s' && armed.title.includes('for 20 seconds') && armed.title.includes('half a bar'), 'Freeze was missing from the Frog panel')
   rememberLive(field, { op: 'frost', ids: [frog.id] })
   commandFrost(field, [frog.id])
   assert(frog.ice === 0 && frog.frostCd === FROG_FREEZE_COOLDOWN, 'the casting Frog froze itself')
@@ -6990,6 +7620,360 @@ function frogFreeze(): void {
   assert(playedThawPorter.power === thawPorter.power, 'replay thaw changed the Stalker')
 }
 
+function key1SelectsTheCommandedSilo(): void {
+  const state = createMatch(4, 'duel')
+  const home = state.buildings.find((building) => building.kind === 'keep' && building.owner === 0)
+  const foe = state.buildings.find((building) => building.kind === 'keep' && building.owner === 1)
+  const stalker = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(home && foe && stalker, 'key 1 had no Silo or Stalker to swap')
+  state.selectedUnits = [stalker.id]
+  state.selectedOre = state.ore[0]?.id ?? null
+  state.selectedGhost = 99
+  state.placement = 'yard'
+  state.moveArmed = true
+  state.attackMoveArmed = true
+  const center = selectOwnSilo(state)
+  const homeCenter = buildingCenter(home)
+  assert(center, 'key 1 found no Silo')
+  assert(Math.hypot(center.x - homeCenter.x, center.y - homeCenter.y) < 1, 'key 1 did not aim at the Silo')
+  assert(state.selectedBuilding === home.id, 'key 1 did not select the Silo')
+  assert(state.selectedUnits.length === 0, 'key 1 left a unit selected')
+  assert(state.selectedOre == null && state.selectedGrave == null && state.selectedGhost == null, 'key 1 left another selection')
+  assert(state.placement == null && !state.moveArmed && !state.attackMoveArmed, 'key 1 left a command armed')
+  const panel = describeSelection(state)
+  assert(panel.includes('Silo</h2>'), 'the Silo panel did not open')
+  assert(SILO_DOUBLE_TAP_MS === 350, 'a double press of 1 no longer matches the group center window')
+
+  state.doubleGame = true
+  state.control = 1
+  const other = selectOwnSilo(state)
+  assert(other && state.selectedBuilding === foe.id, 'key 1 did not follow the commanded side')
+
+  home.owner = 0
+  foe.owner = 0
+  const kept = state.selectedBuilding
+  assert(selectOwnSilo(state) == null && state.selectedBuilding === kept, 'a side with no Silo lost its selection')
+
+  assert(controlGroupIndex('Digit1') == null, 'key 1 is still a control group')
+  assert(controlGroupIndex('Digit0') === 0, 'the old group 1 did not move to 0')
+  assert(controlGroupIndex('Digit2') === 2 && controlGroupIndex('Digit9') === 9, 'groups 2 through 9 moved')
+  assert(controlGroupIndex('Numpad1') == null && controlGroupIndex('KeyA') == null, 'a non-digit became a control group')
+}
+
+function unitsButtonSelectsFlashersAndGorillas(): void {
+  const state = createMatch(8)
+  state.aiAcc = -60
+  state.sideAcc.fill(-60)
+  const flasher = makeUnit(state, 0, 'pike', 400, 400)
+  flasher.power = 0
+  const ape = makeUnit(state, 0, 'howler', 460, 400)
+  ape.ice = 4
+  const stalker = makeUnit(state, 0, 'porter', 520, 400)
+  const fly = makeUnit(state, 0, 'drone', 580, 400)
+  const frog = makeUnit(state, 0, 'frog', 640, 400)
+  const dead = makeUnit(state, 0, 'howler', 700, 400)
+  dead.hp = 0
+  const enemy = makeUnit(state, 1, 'pike', 760, 400)
+  const keep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(keep, 'Units had no Silo to clear')
+  state.selectedBuilding = keep.id
+  state.selectedOre = state.ore[0]?.id ?? null
+  state.selectedUnits = [stalker.id, fly.id]
+  state.replay = true
+  const picked = selectOwnCombatUnits(state)
+  const pickedSet = new Set(picked)
+  assert(pickedSet.size === 2 && pickedSet.has(flasher.id) && pickedSet.has(ape.id), 'Units missed a Flasher or Gorilla')
+  assert(!pickedSet.has(stalker.id) && !pickedSet.has(fly.id) && !pickedSet.has(frog.id), 'Units selected a Stalker, Fly, or Frog')
+  assert(!pickedSet.has(dead.id) && !pickedSet.has(enemy.id), 'Units selected a dead Gorilla or an enemy Flasher')
+  assert(state.selectedBuilding == null && state.selectedOre == null, 'Units left the Silo or a dumps pile selected')
+  assert(state.replay, 'selecting units left the replay')
+
+  state.doubleGame = true
+  state.control = 1
+  const other = makeUnit(state, 1, 'pike', 820, 400)
+  const theirs = new Set(selectOwnCombatUnits(state))
+  assert(theirs.size === 2 && theirs.has(other.id) && theirs.has(enemy.id), 'Units did not follow the commanded side')
+  assert(!theirs.has(flasher.id) && !theirs.has(ape.id), 'Units kept the other side selected')
+
+  state.control = 0
+  for (const unit of state.units) {
+    if (unit.owner === 0 && (unit.kind === 'pike' || unit.kind === 'howler')) unit.hp = 0
+  }
+  state.selectedUnits = [stalker.id]
+  state.selectedBuilding = keep.id
+  const none = selectOwnCombatUnits(state)
+  assert(none.length === 0, 'Units invented a combat unit')
+  assert(state.selectedUnits.length === 1 && state.selectedUnits[0] === stalker.id, 'an empty Units click cleared the selection')
+  assert(state.selectedBuilding === keep.id, 'an empty Units click cleared the Silo')
+  assert(state.toasts.some((toast) => toast.text === 'No Flashers or Gorillas.'), 'an empty Units click stayed quiet')
+}
+
+function shutdownUnitsStayPutAndStayTargets(): void {
+  const field = createMatch(27)
+  field.aiAcc = -60
+  field.sideAcc.fill(-60)
+  const pad = chargePad(field)
+  assert(pad, 'no open ground for a shut-down unit')
+  const originX = (pad.tx + 0.5) * TILE
+  const originY = (pad.ty + 0.5) * TILE
+  const kinds = ['pike', 'howler', 'drone', 'frog'] as const
+  const held: Unit[] = []
+  for (let i = 0; i < kinds.length; i++) {
+    const kind = kinds[i]
+    assert(kind, 'missing a combat kind')
+    const unit = makeUnit(field, 0, kind, originX + i * 80, originY)
+    unit.power = 0
+    unit.order = { type: 'move', x: unit.x + 400, y: unit.y }
+    unit.goalX = unit.x + 400
+    unit.goalY = unit.y
+    unit.scanning = kind === 'drone'
+    unit.guarding = kind === 'drone'
+    unit.cloak = kind === 'drone' ? 10 : 0
+    held.push(unit)
+  }
+  const sleeper = held[0]
+  assert(sleeper, 'missing the shut-down Flasher')
+  const shover = makeUnit(field, 0, 'porter', sleeper.x + 4, sleeper.y)
+  const spots = held.map((unit) => ({ id: unit.id, x: unit.x, y: unit.y }))
+  for (let i = 0; i < 20; i++) step(field, 1 / 60)
+  for (const spot of spots) {
+    const unit = unitById(field, spot.id)
+    assert(unit, 'a shut-down unit vanished')
+    assert(unit.x === spot.x && unit.y === spot.y, `${unit.kind} moved after Power hit 0`)
+    const order = () => unit.order
+    assert(order() == null, `${unit.kind} kept an order at 0 Power`)
+    assert(!unit.scanning && !unit.guarding && unit.cloak === 0, `${unit.kind} kept Scanner, Guard, or a cloak`)
+    assert(!field.projectiles.some((shot) => shot.sourceId === unit.id), `${unit.kind} fired at 0 Power`)
+  }
+  assert(shover.x !== sleeper.x || shover.y !== sleeper.y, 'nothing tried to shove the shut-down Flasher')
+  const decoy = makeUnit(field, 1, 'frog', sleeper.x + 600, sleeper.y)
+  commandMove(field, [sleeper.id], sleeper.x + 80, sleeper.y, false)
+  commandAttack(field, [sleeper.id], decoy.id, 'unit')
+  const refused = () => sleeper.order
+  assert(refused() == null, 'a shut-down Flasher accepted a move or an attack')
+  const rock = field.rocks.find((entry) => entry.hp > 0 && !isWalkable(field, entry.tx, entry.ty))
+  assert(rock, 'no rock to pin a shut-down unit on')
+  const pinned = makeUnit(field, 0, 'howler', (rock.tx + 0.5) * TILE, (rock.ty + 0.5) * TILE)
+  pinned.power = 0
+  const pinX = pinned.x
+  const pinY = pinned.y
+  step(field, 1 / 60)
+  assert(pinned.x === pinX && pinned.y === pinY, 'a shut-down Gorilla was pushed out of a rock')
+
+  const duel = createMatch(29)
+  duel.aiAcc = -60
+  duel.sideAcc.fill(-60)
+  const arena = chargePad(duel)
+  assert(arena, 'no open ground for a shut-down target')
+  const victim = makeUnit(duel, 1, 'pike', (arena.tx + 0.5) * TILE, (arena.ty + 0.5) * TILE)
+  victim.power = 0
+  const hunter = makeUnit(duel, 0, 'pike', victim.x + 36, victim.y)
+  step(duel, 1 / 60)
+  const acquired = hunter.order
+  assert(
+    acquired != null && acquired.type === 'attack' && acquired.kind === 'unit' && acquired.targetId === victim.id,
+    'a Flasher ignored a 0-Power enemy',
+  )
+  victim.hp = 1
+  const fellX = victim.x
+  const fellY = victim.y
+  for (let i = 0; i < 90 && duel.units.some((unit) => unit.id === victim.id); i++) step(duel, 1 / 60)
+  assert(!duel.units.some((unit) => unit.id === victim.id), 'the 0-Power Flasher could not be destroyed')
+  const cellX = Math.floor(fellX / TILE)
+  const cellY = Math.floor(fellY / TILE)
+  assert(
+    duel.batteries.some((battery) => battery.tx === cellX && battery.ty === cellY),
+    'a destroyed 0-Power Flasher left no battery',
+  )
+
+  const brain = createMatch(31)
+  brain.aiAcc = 0
+  const home = brain.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home, 'missing a Silo for the 0-Power attack')
+  const spot = buildingCenter(home)
+  const fighter = makeUnit(brain, 1, 'pike', spot.x + 36, spot.y)
+  const dormant = makeUnit(brain, 1, 'howler', spot.x - 36, spot.y)
+  dormant.power = 0
+  dormant.order = { type: 'move', x: spot.x + 400, y: spot.y }
+  dormant.goalX = spot.x + 400
+  dormant.goalY = spot.y
+  const foe = makeUnit(brain, 0, 'frog', spot.x + 90, spot.y)
+  foe.power = 0
+  const foeTx = Math.floor(foe.x / TILE)
+  const foeTy = Math.floor(foe.y / TILE)
+  brain.aiVisible[foeTy * brain.mapW + foeTx] = 1
+  brain.aiExplored[foeTy * brain.mapW + foeTx] = 1
+  const dormantX = dormant.x
+  const dormantY = dormant.y
+  updateSiloAi(brain, 0.5)
+  const sent = fighter.order
+  assert(
+    sent != null && sent.type === 'attack' && sent.kind === 'unit' && sent.targetId === foe.id,
+    'SiloAI did not attack a 0-Power Frog',
+  )
+  const dormantOrder = () => dormant.order
+  assert(dormantOrder()?.type !== 'attack', 'SiloAI ordered a shut-down Gorilla')
+  step(brain, 1 / 60)
+  assert(dormant.x === dormantX && dormant.y === dormantY, 'SiloAI moved a shut-down Gorilla')
+  const after = () => dormant.order
+  assert(after() == null, 'a shut-down Gorilla kept an order')
+  assert(foe.hp > 0 && foe.power === 0, 'the 0-Power Frog was removed before it could be a target')
+
+  const charge = createMatch(33)
+  charge.aiAcc = -60
+  charge.sideAcc.fill(-60)
+  const cell = chargePad(charge)
+  assert(cell, 'no open ground for a battery revive')
+  const revived = makeUnit(charge, 0, 'frog', (cell.tx + 0.5) * TILE, (cell.ty + 0.5) * TILE)
+  revived.power = 0
+  charge.batteries.push({ id: charge.nextId++, tx: cell.tx, ty: cell.ty })
+  step(charge, 1 / 60)
+  assert(revived.power === 1 && !isShutdown(revived), 'a battery did not revive a shut-down Frog')
+  commandMove(charge, [revived.id], revived.x + 40, revived.y, false)
+  assert(revived.order?.type === 'move', 'a revived Frog still refused orders')
+}
+
 function blankSide(): MatchState['stats'][number] {
   return { created: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }, lost: { porter: 0, pike: 0, howler: 0, drone: 0, frog: 0 }, dumps: 0, silos: 0 }
+}
+
+function cameraZoomsOutToTheWholeMap(): void {
+  const viewW = 1280
+  const viewH = 720
+  const mapPxW = 150 * TILE
+  const mapPxH = 150 * TILE
+  const fit = fitZoom(viewW, viewH, mapPxW, mapPxH)
+  assert(fit < FAR_ZOOM, 'a 150×150 map would not use the far-zoom sprite cache')
+  assert(fit <= viewW / mapPxW && fit <= viewH / mapPxH, 'the fit zoom still crops the map')
+  assert(fit <= ZOOM_MAX, 'the fit zoom passed the close-in limit')
+  const cam = { x: 400, y: 300, zoom: 1.35 }
+  zoomToward(cam, viewW, viewH, mapPxW, mapPxH, 0.01, 500, 240)
+  assert(Math.abs(cam.zoom - fit) < 1e-9, `zoom out stopped at ${cam.zoom}, not the full map`)
+  assert(viewW / cam.zoom + 0.01 >= mapPxW && viewH / cam.zoom + 0.01 >= mapPxH, 'the fitted camera still crops a side')
+  zoomToward(cam, viewW, viewH, mapPxW, mapPxH, 80, viewW / 2, viewH / 2)
+  assert(cam.zoom === ZOOM_MAX, `zoom in passed ${cam.zoom}, not ${ZOOM_MAX}`)
+
+  const steady = { x: 800, y: 600, zoom: 1 }
+  const anchor = { x: 180, y: 90 }
+  const before = screenToWorld(steady, anchor.x, anchor.y)
+  zoomToward(steady, viewW, viewH, mapPxW, mapPxH, 1.4, anchor.x, anchor.y)
+  const after = screenToWorld(steady, anchor.x, anchor.y)
+  assert(Math.abs(before.x - after.x) < 1e-6 && Math.abs(before.y - after.y) < 1e-6, 'zoom slid off the cursor')
+  assert(steady.zoom > 1 && steady.zoom <= ZOOM_MAX, 'a modest zoom-in left the allowed band')
+}
+
+function productionIconsReplaceLabels(): void {
+  const state = createMatch(12)
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(home, 'production had no Silo')
+  state.selectedBuilding = home.id
+  state.selectedUnits = []
+  state.oreHeld[0] = 8000
+  const stalker = commandSnapshot(state).find((cmd) => cmd.label === 'Stalker')
+  assert(stalker, 'the Silo train button lost the Stalker')
+  assert(stalker.iconKind === 'porter' && stalker.hotkey === 'P', 'the Silo train button lost the Stalker portrait')
+  assert(stalker.title.startsWith('Stalker'), 'the Stalker tooltip dropped the name')
+  assert(stalker.detail.includes('dumps'), 'the Stalker button dropped its cost')
+
+  const yard = makeBuilding(state, 0, 'yard', home.tx + 8, home.ty + 8, true)
+  state.selectedBuilding = yard.id
+  const trained = commandSnapshot(state)
+  const expect: Array<[string, string, string]> = [
+    ['Flasher', 'pike', 'K'],
+    ['Gorilla', 'howler', 'J'],
+    ['Fly', 'drone', 'H'],
+    ['Frog', 'frog', 'G'],
+  ]
+  for (const [label, kind, hotkey] of expect) {
+    const cmd = trained.find((entry) => entry.label === label)
+    assert(cmd, `${label} is missing from the Factory`)
+    assert(cmd.iconKind === kind && cmd.hotkey === hotkey, `${label} is not an icon button`)
+    assert(cmd.title.startsWith(label), `${label} tooltip dropped the name`)
+    assert(cmd.detail.includes('dumps'), `${label} dropped its cost`)
+  }
+  yard.queue = [
+    { kind: 'pike', remaining: 11.2, total: 12 },
+    { kind: 'howler', remaining: 20, total: 20 },
+    { kind: 'frog', remaining: 8, total: 8 },
+  ]
+  const panel = describeSelection(state)
+  assert(panel.includes('class="queue-slot"') && panel.includes('data-kind="pike"'), 'the queue is not portraits')
+  assert(panel.includes('data-kind="howler"') && panel.includes('data-kind="frog"'), 'the queue dropped a unit')
+  assert(panel.includes('title="Flasher"') && panel.includes('>12s<'), 'the active job lost its name or time')
+  assert(!panel.includes('Queue:'), 'the queue is still a text list')
+  assert(!panel.includes(`${Math.ceil(yard.hp)} / ${BUILDING_STATS.yard.hp}`), 'the Factory panel still prints health')
+}
+
+function selectionIconsGroupByType(): void {
+  const state = createMatch(15)
+  state.aiAcc = -60
+  state.sideAcc.fill(-60)
+  const stalkers = [makeUnit(state, 0, 'porter', 120, 160)]
+  const flashers = [makeUnit(state, 0, 'pike', 180, 160), makeUnit(state, 0, 'pike', 220, 160)]
+  const gorillas = [
+    makeUnit(state, 0, 'howler', 280, 160),
+    makeUnit(state, 0, 'howler', 320, 160),
+    makeUnit(state, 0, 'howler', 360, 160),
+  ]
+  const fly = makeUnit(state, 0, 'drone', 420, 160)
+  const frog = makeUnit(state, 0, 'frog', 480, 160)
+  const ids = [...stalkers, ...flashers, ...gorillas, fly, frog].map((unit) => unit.id)
+  state.selectedUnits = ids.slice()
+  state.activeKind = null
+  state.selectedBuilding = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')?.id ?? null
+  state.oreHeld[0] = 8000
+  const panel = describeSelection(state)
+  assert(panel.includes('data-kind="porter"') && panel.includes('select only Stalkers'), 'Stalkers were not grouped')
+  assert(panel.includes('data-kind="pike"') && panel.includes('select only Flashers'), 'Flashers were not grouped')
+  assert(panel.includes('data-kind="howler"') && panel.includes('select only Gorillas'), 'Gorillas were not grouped')
+  assert(panel.includes('Ctrl-click: active group'), 'the group tooltip omitted the active group')
+  assert(panel.includes('class="select-chip active" data-kind="porter"'), 'the first group was not highlighted')
+  assert(panel.includes('>×1<') && panel.includes('>×2<') && panel.includes('>×3<'), 'quantity badges were wrong')
+  assert(panel.includes('8 selected'), 'the group header dropped the count')
+  assert(!panel.includes('3 Gorillas') && !panel.includes('2 Flashers'), 'the group panel is still a text list')
+  assert(activeKind(state) === 'porter', 'a mixed selection did not start on the first type')
+  assert(cycleActiveKind(state) === 'pike', 'Tab did not move to Flashers')
+  assert(setActiveKind(state, 'howler') && activeKind(state) === 'howler', 'Ctrl-click did not make Gorillas active')
+  const gorillasCard = commandSnapshot(state)
+  assert(gorillasCard.some((cmd) => cmd.label === 'Move') && gorillasCard.some((cmd) => cmd.label === 'Attack'), 'the active group hid move and attack')
+  assert(!gorillasCard.some((cmd) => cmd.label === 'Factory' || cmd.label === 'Freeze' || cmd.label === 'Scanner'), 'Gorillas showed another type\'s abilities')
+  setActiveKind(state, 'frog')
+  const frogCard = commandSnapshot(state)
+  assert(frogCard.some((cmd) => cmd.label === 'Freeze') && frogCard.some((cmd) => cmd.label === 'Move'), 'the Frog group hid Freeze or move')
+  assert(!frogCard.some((cmd) => cmd.label === 'Factory'), 'the Frog group showed construction')
+  setActiveKind(state, 'drone')
+  const flyCard = commandSnapshot(state)
+  assert(flyCard.some((cmd) => cmd.label === 'Scanner') && flyCard.some((cmd) => cmd.label === 'Guard'), 'the Fly group hid Scanner or Guard')
+  assert(!flyCard.some((cmd) => cmd.label === 'Freeze'), 'the Fly group showed Freeze')
+  setActiveKind(state, 'porter')
+  const buildCard = commandSnapshot(state)
+  const factory = buildCard.find((cmd) => cmd.label === 'Factory')
+  const storage = buildCard.find((cmd) => cmd.label === 'Storage')
+  const pillar = buildCard.find((cmd) => cmd.label === 'Pillar')
+  const repair = buildCard.find((cmd) => cmd.label === 'Repair')
+  assert(factory && storage && pillar && repair, 'a construction button is missing')
+  assert(factory.iconBuilding === 'yard' && factory.hotkey === 'Y' && factory.title.startsWith('Factory'), 'Factory is not a building icon')
+  assert(storage.iconBuilding === 'silo' && storage.hotkey === 'L' && storage.title.startsWith('Storage'), 'Storage is not a building icon')
+  assert(pillar.iconBuilding === 'tower' && pillar.hotkey === 'T' && pillar.title.startsWith('Pillar'), 'Pillar is not a building icon')
+  assert(repair.iconBuilding === 'repair' && repair.hotkey === 'R' && repair.title.startsWith('Repair'), 'Repair is not a building icon')
+  assert(factory.detail.includes('dumps') && storage.detail.includes('dumps') && pillar.detail.includes('dumps'), 'a construction button dropped its cost')
+  const highlighted = describeSelection(state)
+  assert(highlighted.includes('class="select-chip active" data-kind="porter"'), 'the Stalker group lost its highlight')
+
+  const onlyApes = narrowSelection(state, 'howler', false)
+  assert(onlyApes.length === 3 && onlyApes.every((id) => unitById(state, id)?.kind === 'howler'), 'a type click kept other units')
+  assert(state.selectedBuilding == null, 'a type click left the building selected')
+
+  state.selectedUnits = ids.slice()
+  const withoutApes = narrowSelection(state, 'howler', true)
+  assert(withoutApes.length === ids.length - 3, 'shift-click did not drop the Gorillas')
+  assert(withoutApes.every((id) => unitById(state, id)?.kind !== 'howler'), 'a Gorilla stayed after shift-click')
+
+  const lone = narrowSelection(state, 'frog', false)
+  assert(lone.length === 1 && lone[0] === frog.id, 'narrowing to Frogs missed the only Frog')
+  const one = describeSelection(state)
+  assert(one.includes('>Frog<') || one.includes('Frog</h2>') || one.includes('Frog'), 'a single Frog lost its description')
+  assert(!one.includes('data-kind='), 'a single unit still shows the group icons')
+  assert(!one.includes(`${Math.ceil(frog.hp)} / ${UNIT_STATS.frog.hp}`), 'a single unit still prints the health line')
+  assert(one.includes('class="meter"'), 'a single unit lost its health meter')
 }

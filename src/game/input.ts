@@ -1,9 +1,10 @@
-import { clampCamera, screenToWorld, worldToScreen, type Camera } from './camera'
+import { clampCamera, screenToWorld, worldToScreen, zoomToward, type Camera } from './camera'
 import { controlledSide, cycleSide, handsOff } from './control'
 import {
   commandAttack,
   commandConstruct,
   commandFreeze,
+  commandFrost,
   commandGather,
   commandHarvestOrAttack,
   commandMove,
@@ -17,10 +18,12 @@ import {
 import { rememberAlways, rememberLive } from './replay'
 import { toggleScanner } from './scanner'
 import { buildingById, buildingCenter, pushToast, rockAt, sideAnchor, unitById } from './state'
-import { viewBuildingSeen, viewGroundShown, viewUnitSeen } from './vision'
+import { viewBuildingSeen, viewGroundShown, viewMemories, viewUnitSeen } from './vision'
 import {
+  BUILDING_STATS,
   powerSeconds,
   TILE,
+  UNIT_KINDS,
   type BuildingKind,
   type MatchState,
   type UnitKind,
@@ -52,6 +55,147 @@ export interface InputController {
   dragRect(): DragRect | null
   pointerWorld(): { x: number; y: number } | null
   clearGroups(): void
+}
+
+/** A second press of 1 inside this window centers the camera, same as a control group. */
+export const SILO_DOUBLE_TAP_MS = 350
+
+const SILO_KEY_MARK = -200
+
+/**
+ * Control groups are 0 and 2–9. Key 1 selects the Silo, so the group that used
+ * to live on 1 is recalled and saved with 0.
+ */
+export function controlGroupIndex(code: string): number | null {
+  const match = /^Digit(\d)$/.exec(code)
+  if (!match) return null
+  const n = Number(match[1])
+  if (n === 0 || (n >= 2 && n <= 9)) return n
+  return null
+}
+
+/**
+ * Select every living Flasher and Gorilla of the commanded side.
+ * Stalkers, Flies, and Frogs stay out. Returns the ids, or an empty list when there are none.
+ */
+export function selectOwnCombatUnits(state: MatchState): number[] {
+  const side = controlledSide(state)
+  const ids = state.units
+    .filter(
+      (unit) => unit.owner === side && unit.hp > 0 && (unit.kind === 'pike' || unit.kind === 'howler'),
+    )
+    .map((unit) => unit.id)
+  if (!ids.length) {
+    pushToast(state, 'No Flashers or Gorillas.')
+    return []
+  }
+  state.selectedUnits = ids
+  state.selectedBuilding = null
+  state.selectedOre = null
+  state.selectedGrave = null
+  state.selectedGhost = null
+  state.events.push({ type: 'select' })
+  return ids
+}
+
+/** Living selected unit types, in the standard Stalker → Frog order. */
+export function selectionKinds(state: MatchState): UnitKind[] {
+  const present = new Set<UnitKind>()
+  for (const id of state.selectedUnits) {
+    const unit = unitById(state, id)
+    if (unit && unit.hp > 0) present.add(unit.kind)
+  }
+  return UNIT_KINDS.filter((kind) => present.has(kind))
+}
+
+/** The subgroup whose abilities are on the command card. Move and attack still use everyone. */
+export function activeKind(state: MatchState): UnitKind | null {
+  const kinds = selectionKinds(state)
+  if (!kinds.length) return null
+  if (state.activeKind && kinds.includes(state.activeKind)) return state.activeKind
+  return kinds[0] ?? null
+}
+
+/** Ctrl-click a type icon. The selection stays; this type becomes the command card. */
+export function setActiveKind(state: MatchState, kind: UnitKind): boolean {
+  if (!selectionKinds(state).includes(kind)) return false
+  state.activeKind = kind
+  return true
+}
+
+/** Tab moves the highlight to the next type in the selection. */
+export function cycleActiveKind(state: MatchState): UnitKind | null {
+  const kinds = selectionKinds(state)
+  if (kinds.length < 2) return activeKind(state)
+  const current = activeKind(state)
+  const index = Math.max(0, current ? kinds.indexOf(current) : 0)
+  const next = kinds[(index + 1) % kinds.length] ?? null
+  state.activeKind = next
+  return next
+}
+
+/**
+ * R while the active group is your Frogs. Freeze takes the key, so Repair does not also run.
+ * F stays on idle Stalkers and does not cast Freeze.
+ */
+export function frostHotkey(state: MatchState): boolean {
+  if (activeKind(state) !== 'frog') return false
+  const frogs = state.selectedUnits.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.owner === controlledSide(state) && unit.kind === 'frog' && unit.hp > 0
+  })
+  if (!frogs.length) return false
+  const ready = frogs.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.frostCd <= 0 && unit.ice <= 0 && unit.power > 0
+  })
+  if (ready.length) {
+    rememberLive(state, { op: 'frost', ids: ready })
+    commandFrost(state, ready)
+    state.moveArmed = false
+    state.attackMoveArmed = false
+  }
+  return true
+}
+
+/**
+ * From the current selection, keep only one unit type, or drop that type when remove is set.
+ * Shift-click on a group icon passes remove. A plain click passes false.
+ */
+export function narrowSelection(state: MatchState, kind: UnitKind, remove: boolean): number[] {
+  const living = state.selectedUnits.filter((id) => {
+    const unit = unitById(state, id)
+    return !!unit && unit.hp > 0
+  })
+  const next = living.filter((id) => {
+    const unit = unitById(state, id)
+    const same = unit?.kind === kind
+    return remove ? !same : same
+  })
+  state.selectedUnits = next
+  state.activeKind = remove ? (state.activeKind === kind ? null : state.activeKind) : kind
+  state.selectedBuilding = null
+  state.selectedOre = null
+  state.selectedGrave = null
+  state.selectedGhost = null
+  state.events.push({ type: 'select' })
+  return next
+}
+
+/** Select the commanded side's Silo and drop every other selection. Null when that side has none. */
+export function selectOwnSilo(state: MatchState): { x: number; y: number } | null {
+  const keep = sideAnchor(state, controlledSide(state))
+  if (!keep) return null
+  state.selectedUnits = []
+  state.selectedOre = null
+  state.selectedGrave = null
+  state.selectedGhost = null
+  state.placement = null
+  state.attackMoveArmed = false
+  state.moveArmed = false
+  state.selectedBuilding = keep.id
+  state.events.push({ type: 'select' })
+  return buildingCenter(keep)
 }
 
 export function attachInput(opts: {
@@ -98,6 +242,7 @@ export function attachInput(opts: {
     const keep = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
     const porters = state.selectedUnits.some((id) => unitById(state, id)?.kind === 'porter')
     const keepOk = keep?.owner === side && keep.kind === 'keep'
+    if (state.selectedUnits.length > 0 && activeKind(state) !== 'porter') return
     if (!porters && !keepOk && !state.units.some((unit) => unit.owner === side && unit.kind === 'porter' && unit.hp > 0)) {
       pushToast(state, 'Select a stalker or the Silo first.')
       return
@@ -122,6 +267,7 @@ function clearSelection(state: MatchState): void {
   state.selectedBuilding = null
   state.selectedOre = null
   state.selectedGrave = null
+    state.selectedGhost = null
 }
 
   function selectUnit(state: MatchState, id: number, shift: boolean): void {
@@ -133,6 +279,7 @@ function clearSelection(state: MatchState): void {
     state.selectedBuilding = null
     state.selectedOre = null
     state.selectedGrave = null
+    state.selectedGhost = null
     if (shift) {
       const index = state.selectedUnits.indexOf(id)
       if (index >= 0) state.selectedUnits.splice(index, 1)
@@ -225,6 +372,14 @@ function clearSelection(state: MatchState): void {
     const hit = pick(state, world.x, world.y)
 
     if (!hit) {
+      const memory = !shift ? pickMemory(state, world.x, world.y) : undefined
+      if (memory) {
+        clearSelection(state)
+        state.selectedGhost = memory.id
+        state.events.push({ type: 'select' })
+        lastClick = { t: performance.now(), id: -1 }
+        return
+      }
       if (!shift) clearSelection(state)
       return
     }
@@ -245,6 +400,7 @@ function clearSelection(state: MatchState): void {
           state.selectedBuilding = null
           state.selectedOre = null
           state.selectedGrave = null
+    state.selectedGhost = null
           state.events.push({ type: 'select' })
         }
       } else {
@@ -260,6 +416,7 @@ function clearSelection(state: MatchState): void {
         state.selectedUnits = []
         state.selectedOre = null
         state.selectedGrave = null
+    state.selectedGhost = null
         state.events.push({ type: 'select' })
         lastClick = { t: performance.now(), id: -1 }
         return
@@ -272,6 +429,7 @@ function clearSelection(state: MatchState): void {
       state.selectedUnits = []
       state.selectedBuilding = null
       state.selectedGrave = null
+    state.selectedGhost = null
       state.events.push({ type: 'select' })
       lastClick = { t: performance.now(), id: -1 }
       return
@@ -394,11 +552,13 @@ function clearSelection(state: MatchState): void {
       state.selectedBuilding = null
       state.selectedOre = null
       state.selectedGrave = null
+    state.selectedGhost = null
       state.events.push({ type: 'select' })
     } else if (!shift) {
       state.selectedBuilding = null
       state.selectedOre = null
       state.selectedGrave = null
+    state.selectedGhost = null
     }
   }
 
@@ -499,16 +659,13 @@ function clearSelection(state: MatchState): void {
     'wheel',
     (event) => {
       event.preventDefault()
+      if (event.deltaY === 0) return
       const pos = local(event)
       const cam = opts.getCamera()
-      const before = screenToWorld(cam, pos.x, pos.y)
-      const next = cam.zoom * (event.deltaY > 0 ? 0.9 : 1.11)
-      cam.zoom = Math.max(0.55, Math.min(2, next))
-      cam.x = before.x - pos.x / cam.zoom
-      cam.y = before.y - pos.y / cam.zoom
       const box = view()
       const state = opts.getState()
-      clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
+      const factor = event.deltaY > 0 ? 0.9 : 1.11
+      zoomToward(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE, factor, pos.x, pos.y)
     },
     { passive: false },
   )
@@ -529,9 +686,32 @@ function clearSelection(state: MatchState): void {
       event.code === 'ArrowUp' ||
       event.code === 'ArrowDown' ||
       event.code === 'ArrowLeft' ||
-      event.code === 'ArrowRight'
+      event.code === 'ArrowRight' ||
+      event.code === 'Minus' ||
+      event.code === 'Equal' ||
+      event.code === 'NumpadSubtract' ||
+      event.code === 'NumpadAdd'
     ) {
       event.preventDefault()
+    }
+    if (event.code === 'Tab') {
+      event.preventDefault()
+      const tabbed = opts.getState()
+      if (!tabbed.outcome && selectionKinds(tabbed).length > 1) {
+        cycleActiveKind(tabbed)
+        return
+      }
+      if (event.repeat) return
+      if (tabbed.doubleGame && !tabbed.outcome && !tabbed.replay && !opts.commandOpen()) {
+        cycleSide(tabbed)
+        rememberAlways(tabbed, { op: 'side', owner: tabbed.control })
+        const keep = sideAnchor(tabbed, tabbed.control)
+        if (keep) {
+          const center = buildingCenter(keep)
+          opts.focusPoint(center.x, center.y)
+        }
+      }
+      return
     }
     if (event.repeat) return
     const state = opts.getState()
@@ -543,17 +723,6 @@ function clearSelection(state: MatchState): void {
     if (event.code === 'Pause') {
       event.preventDefault()
       state.paused = !state.paused
-      return
-    }
-    if (event.code === 'Tab' && state.doubleGame && !state.outcome && !state.replay && !opts.commandOpen()) {
-      event.preventDefault()
-      cycleSide(state)
-      rememberAlways(state, { op: 'side', owner: state.control })
-      const keep = sideAnchor(state, state.control)
-      if (keep) {
-        const center = buildingCenter(keep)
-        opts.focusPoint(center.x, center.y)
-      }
       return
     }
     if (event.code === 'Escape') {
@@ -648,7 +817,9 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyR') {
       if (state.paused) return
+      if (frostHotkey(state)) return
       if (state.selectedUnits.length) {
+        if (activeKind(state) !== 'porter') return
         rememberLive(state, { op: 'repairNearest', ids: state.selectedUnits })
         const error = commandRepairNearest(state, state.selectedUnits)
         if (error) pushToast(state, error)
@@ -673,6 +844,7 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyC') {
       if (state.paused) return
+      if (activeKind(state) !== 'drone') return
       const ids = state.selectedUnits.filter((id) => {
         const unit = unitById(state, id)
         return !!unit && unit.owner === controlledSide(state) && unit.kind === 'drone' && unit.hp > 0
@@ -719,9 +891,19 @@ function clearSelection(state: MatchState): void {
       }
       return
     }
+    if (event.code === 'Digit1' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const center = selectOwnSilo(state)
+      if (!center) return
+      const now = performance.now()
+      if (lastClick.id === SILO_KEY_MARK && now - lastClick.t < SILO_DOUBLE_TAP_MS) {
+        opts.focusPoint(center.x, center.y)
+      }
+      lastClick = { t: now, id: SILO_KEY_MARK }
+      return
+    }
     if (event.code.startsWith('Digit')) {
-      const n = Number(event.code.slice(5))
-      if (n < 1 || n > 9) return
+      const n = controlGroupIndex(event.code)
+      if (n == null) return
       if (event.ctrlKey || event.metaKey) {
         groups.set(n, state.selectedUnits.slice())
         pushToast(state, `Group ${n} saved.`)
@@ -737,6 +919,7 @@ function clearSelection(state: MatchState): void {
       state.selectedBuilding = null
       state.selectedOre = null
       state.selectedGrave = null
+    state.selectedGhost = null
       state.events.push({ type: 'select' })
       if (lastClick.id === -100 - n && performance.now() - lastClick.t < 350) {
         const members = ids
@@ -763,6 +946,15 @@ function clearSelection(state: MatchState): void {
     pan(dt: number) {
       const cam = opts.getCamera()
       const box = view()
+      const state = opts.getState()
+      let zoomDir = 0
+      if (held('Minus') || held('NumpadSubtract')) zoomDir -= 1
+      if (held('Equal') || held('NumpadAdd')) zoomDir += 1
+      if (zoomDir !== 0 && !opts.commandOpen()) {
+        const ax = pointer?.over ? pointer.sx : box.w / 2
+        const ay = pointer?.over ? pointer.sy : box.h / 2
+        zoomToward(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE, Math.exp(zoomDir * dt * 1.15), ax, ay)
+      }
       const speed = 740 / cam.zoom
       let dx = 0
       let dy = 0
@@ -781,7 +973,6 @@ function clearSelection(state: MatchState): void {
       const len = Math.hypot(dx, dy) || 1
       cam.x += (dx / len) * speed * dt
       cam.y += (dy / len) * speed * dt
-      const state = opts.getState()
       clampCamera(cam, box.w, box.h, state.mapW * TILE, state.mapH * TILE)
     },
     dragRect() {
@@ -814,6 +1005,19 @@ function orderBattery(state: MatchState, batteryId: number): boolean {
   rememberLive(state, { op: 'move', ids, x, y, attack: false })
   commandMove(state, ids, x, y, false)
   return true
+}
+
+function pickMemory(state: MatchState, x: number, y: number): { id: number } | undefined {
+  for (const spot of viewMemories(state)) {
+    if (!spot.kind || spot.tx == null || spot.ty == null) continue
+    const stats = BUILDING_STATS[spot.kind]
+    const left = spot.tx * TILE
+    const top = spot.ty * TILE
+    const right = left + stats.w * TILE
+    const bottom = top + stats.h * TILE
+    if (x >= left && y >= top && x <= right && y <= bottom) return spot
+  }
+  return undefined
 }
 
 function pick(

@@ -1,69 +1,32 @@
 import { BUILDING_STATS, PLAYER_COLOR, SUPPLY_MAX } from './types'
 
 /**
- * Storage is a round warehouse of three stacked tiers. The whole drawing is
- * cached. A side's first Storage is empty. Further Cells capacity fills the
- * bottom tier, then the middle, then the top, up to the Cells maximum.
+ * Storage is three standing cylinders on a 2×2 pad. The shells are drawn live
+ * so the contents can rise and drain. Player color marks the rim and the hoop.
+ * Empty tanks stay hollow. One tank fills at 250 stored dumps, two at 500, all
+ * three at 750. Cells capacity is a separate meter: see storageFill.
  */
 
 const W = 64
-const H = 64
-const PAD_X = 16
-const PAD_Y = 18
 
-interface Tier {
-  rimY: number
-  baseY: number
+interface Tank {
+  cx: number
   rx: number
-  ry: number
-  /** Crate slots in the open top, from -1 to 1 across the ellipse. */
-  slots: Array<[number, number]>
 }
 
-const TIERS: Tier[] = [
-  {
-    rimY: 42,
-    baseY: 56,
-    rx: 28,
-    ry: 10,
-    slots: [
-      [-0.62, 0.05],
-      [0.62, 0.05],
-      [-0.38, 0.42],
-      [0.38, 0.42],
-      [-0.7, -0.38],
-      [0.7, -0.38],
-      [-0.12, 0.55],
-      [0.12, 0.55],
-    ],
-  },
-  {
-    rimY: 28,
-    baseY: 42,
-    rx: 19,
-    ry: 7.5,
-    slots: [
-      [-0.58, 0.2],
-      [0.58, 0.2],
-      [-0.22, 0.5],
-      [0.22, 0.5],
-      [0, -0.35],
-    ],
-  },
-  {
-    rimY: 16,
-    baseY: 28,
-    rx: 12,
-    ry: 5.2,
-    slots: [
-      [-0.35, 0.15],
-      [0.38, 0.2],
-      [0, -0.25],
-    ],
-  },
+const TANKS: Tank[] = [
+  { cx: 12, rx: 8 },
+  { cx: 32, rx: 8 },
+  { cx: 52, rx: 8 },
 ]
+const TOP = 16
+const BOTTOM = 48
+const RY = 3.6
+/** One filled cylinder per this many stored dumps. */
+const CYLINDER_DUMPS = 250
+/** Seconds for a tank to fill or drain when the stock crosses a step. */
+const FILL_SECONDS = 1
 
-const bodies = new Map<string, HTMLCanvasElement>()
 const portraits = new Map<number, string>()
 
 /**
@@ -77,6 +40,12 @@ export function storageFill(cap: number): number {
   return Math.max(0, Math.min(1, (cap - emptyAt) / span))
 }
 
+/** How many of the three tanks read as full. None below 250, all three at 750. */
+export function storageCylinderCount(stock: number): number {
+  if (stock <= 0) return 0
+  return Math.min(TANKS.length, Math.floor(stock / CYLINDER_DUMPS))
+}
+
 export function storageDamageStage(hp: number, full: number): number {
   const ratio = full > 0 ? hp / full : 1
   if (ratio > 0.75) return 0
@@ -85,145 +54,162 @@ export function storageDamageStage(hp: number, full: number): number {
   return 3
 }
 
-function tierAmount(fill: number, index: number): number {
-  const start = index / TIERS.length
-  const end = (index + 1) / TIERS.length
-  if (fill <= start) return 0
-  if (fill >= end) return 1
-  return (fill - start) / (end - start)
+interface TankAnim {
+  levels: number[]
+  time: number
 }
 
-function paintTier(
-  ctx: CanvasRenderingContext2D,
-  tier: Tier,
-  color: string,
-  amount: number,
-  stage: number,
-): void {
-  const cx = W / 2
-  const wall = ctx.createLinearGradient(cx - tier.rx, 0, cx + tier.rx, 0)
-  wall.addColorStop(0, '#6a7076')
-  wall.addColorStop(0.28, '#c9ced3')
-  wall.addColorStop(0.55, '#a3a9b0')
-  wall.addColorStop(1, '#4e555c')
+const tankAnims = new Map<number, TankAnim>()
+
+function tankLevels(stock: number, anim?: { id: number; time: number }): number[] {
+  const count = storageCylinderCount(stock)
+  const target = TANKS.map((_, index) => (index < count ? 1 : 0))
+  if (!anim || !Number.isFinite(anim.time)) return target
+  let state = tankAnims.get(anim.id)
+  if (!state) {
+    state = { levels: target.slice(), time: anim.time }
+    tankAnims.set(anim.id, state)
+    return state.levels
+  }
+  const dt = anim.time - state.time
+  state.time = anim.time
+  if (dt < -0.001 || dt > 3) {
+    for (let i = 0; i < target.length; i++) state.levels[i] = target[i] ?? 0
+    return state.levels
+  }
+  if (dt <= 0) return state.levels
+  const step = dt / FILL_SECONDS
+  for (let i = 0; i < target.length; i++) {
+    const goal = target[i] ?? 0
+    const cur = state.levels[i] ?? 0
+    if (cur < goal) state.levels[i] = Math.min(goal, cur + step)
+    else if (cur > goal) state.levels[i] = Math.max(goal, cur - step)
+  }
+  return state.levels
+}
+
+function paintTank(ctx: CanvasRenderingContext2D, tank: Tank, color: string, level: number, stage: number): void {
+  const { cx, rx } = tank
+  const wall = ctx.createLinearGradient(cx - rx, 0, cx + rx, 0)
+  wall.addColorStop(0, '#5c656e')
+  wall.addColorStop(0.32, '#d7dde3')
+  wall.addColorStop(0.68, '#8e979f')
+  wall.addColorStop(1, '#3e464e')
   ctx.fillStyle = wall
   ctx.beginPath()
-  ctx.ellipse(cx, tier.rimY, tier.rx, tier.ry, 0, Math.PI, 0, true)
-  ctx.lineTo(cx + tier.rx, tier.baseY)
-  ctx.ellipse(cx, tier.baseY, tier.rx, tier.ry, 0, 0, Math.PI, false)
+  ctx.moveTo(cx - rx, TOP)
+  ctx.lineTo(cx - rx, BOTTOM)
+  ctx.bezierCurveTo(cx - rx, BOTTOM + RY, cx + rx, BOTTOM + RY, cx + rx, BOTTOM)
+  ctx.lineTo(cx + rx, TOP)
+  ctx.bezierCurveTo(cx + rx, TOP - RY, cx - rx, TOP - RY, cx - rx, TOP)
   ctx.closePath()
   ctx.fill()
 
-  const floor = ctx.createRadialGradient(cx, tier.rimY, 1, cx, tier.rimY, tier.rx)
-  floor.addColorStop(0, '#171b20')
-  floor.addColorStop(0.72, '#2a3036')
-  floor.addColorStop(1, '#3a4148')
-  ctx.fillStyle = floor
-  ctx.beginPath()
-  ctx.ellipse(cx, tier.rimY, tier.rx * 0.86, tier.ry * 0.78, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  const shown = amount <= 0 ? 0 : Math.max(1, Math.round(amount * tier.slots.length))
+  const irx = rx - 1.7
   ctx.save()
   ctx.beginPath()
-  ctx.ellipse(cx, tier.rimY, tier.rx * 0.84, tier.ry * 0.74, 0, 0, Math.PI * 2)
+  ctx.moveTo(cx - irx, TOP + 0.5)
+  ctx.lineTo(cx - irx, BOTTOM - 1)
+  ctx.bezierCurveTo(cx - irx, BOTTOM + RY - 1.2, cx + irx, BOTTOM + RY - 1.2, cx + irx, BOTTOM - 1)
+  ctx.lineTo(cx + irx, TOP + 0.5)
+  ctx.bezierCurveTo(cx + irx, TOP - RY + 1.4, cx - irx, TOP - RY + 1.4, cx - irx, TOP + 0.5)
+  ctx.closePath()
   ctx.clip()
-  for (let i = 0; i < shown; i++) {
-    const slot = tier.slots[i]
-    if (!slot) continue
-    const [ox, oy] = slot
-    const x = cx + ox * tier.rx * 0.62
-    const y = tier.rimY + oy * tier.ry * 0.5
-    const cw = Math.max(3.2, tier.rx * 0.22)
-    const ch = Math.max(2.2, tier.ry * 0.42)
-    ctx.fillStyle = i % 2 === 0 ? '#c4a06a' : '#8d6840'
-    ctx.fillRect(x - cw / 2, y - ch / 2, cw, ch)
-    ctx.fillStyle = 'rgba(40, 28, 16, 0.35)'
-    ctx.fillRect(x - cw / 2, y - ch / 2, cw, 0.7)
-    if (i % 3 === 0) {
-      ctx.fillStyle = color
-      ctx.fillRect(x - cw / 2, y - 0.4, cw, 0.9)
-    }
+  ctx.fillStyle = '#12161b'
+  ctx.fillRect(cx - rx, TOP - RY, rx * 2, BOTTOM - TOP + RY * 2 + 4)
+  if (level > 0.004) {
+    const surface = BOTTOM - (BOTTOM - TOP) * Math.max(0, Math.min(1, level))
+    const liquid = ctx.createLinearGradient(cx - irx, 0, cx + irx, 0)
+    liquid.addColorStop(0, '#8a5a22')
+    liquid.addColorStop(0.42, '#e2b15a')
+    liquid.addColorStop(1, '#6b4218')
+    ctx.fillStyle = liquid
+    ctx.fillRect(cx - rx, surface, rx * 2, BOTTOM - surface + RY + 4)
+    ctx.fillStyle = level > 0.92 ? '#f3d7a0' : '#f0c98a'
+    ctx.beginPath()
+    ctx.ellipse(cx, surface, irx * 0.92, RY * 0.62, 0, 0, Math.PI * 2)
+    ctx.fill()
   }
   ctx.restore()
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)'
-  ctx.lineWidth = 1.2
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.28)'
+  ctx.fillRect(cx - rx + 1.4, TOP + 2, 1.3, BOTTOM - TOP - 4)
+
+  ctx.strokeStyle = '#e7ebef'
+  ctx.lineWidth = 1.15
   ctx.beginPath()
-  ctx.ellipse(cx, tier.rimY - 0.4, tier.rx * 0.96, tier.ry * 0.86, 0, Math.PI * 1.05, Math.PI * 1.95)
+  ctx.ellipse(cx, TOP, rx * 0.92, RY * 0.85, 0, 0, Math.PI * 2)
   ctx.stroke()
   ctx.strokeStyle = color
   ctx.lineWidth = 1.7
   ctx.beginPath()
-  ctx.ellipse(cx, tier.rimY, tier.rx, tier.ry, 0, 0, Math.PI * 2)
+  ctx.ellipse(cx, TOP, rx, RY, 0, 0, Math.PI * 2)
+  ctx.stroke()
+
+  const hoopY = TOP + (BOTTOM - TOP) * 0.58
+  ctx.strokeStyle = color
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(cx - rx + 0.4, hoopY)
+  ctx.bezierCurveTo(cx - rx, hoopY + RY * 0.85, cx + rx, hoopY + RY * 0.85, cx + rx - 0.4, hoopY)
   ctx.stroke()
 
   if (stage >= 1) {
-    ctx.strokeStyle = 'rgba(36, 30, 26, 0.65)'
+    ctx.strokeStyle = 'rgba(36, 30, 26, 0.7)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(cx - tier.rx * 0.4, tier.rimY + 2)
-    ctx.lineTo(cx - tier.rx * 0.1, (tier.rimY + tier.baseY) / 2)
-    ctx.lineTo(cx + tier.rx * 0.15, tier.baseY - 1)
+    ctx.moveTo(cx - rx * 0.2, TOP + 6)
+    ctx.lineTo(cx + rx * 0.15, (TOP + BOTTOM) / 2)
+    ctx.lineTo(cx - rx * 0.05, BOTTOM - 4)
     ctx.stroke()
   }
   if (stage >= 2) {
-    ctx.fillStyle = 'rgba(28, 24, 20, 0.35)'
+    ctx.fillStyle = 'rgba(28, 24, 20, 0.38)'
     ctx.beginPath()
-    ctx.ellipse(cx + tier.rx * 0.25, (tier.rimY + tier.baseY) / 2, tier.rx * 0.28, tier.ry * 0.45, 0.2, 0, Math.PI * 2)
+    ctx.ellipse(cx + rx * 0.2, (TOP + BOTTOM) / 2 + 2, rx * 0.45, 4, 0.2, 0, Math.PI * 2)
     ctx.fill()
   }
 }
 
-function paintBody(ctx: CanvasRenderingContext2D, color: string, fill: number, stage: number): void {
-  ctx.fillStyle = 'rgba(16, 12, 8, 0.3)'
+function paintStorage(ctx: CanvasRenderingContext2D, color: string, levels: number[], stage: number): void {
+  ctx.fillStyle = 'rgba(16, 12, 8, 0.28)'
   ctx.beginPath()
-  ctx.ellipse(W / 2 + 2, 60, 30, 7, 0, 0, Math.PI * 2)
+  ctx.ellipse(W / 2 + 1, 60, 28, 6, 0, 0, Math.PI * 2)
   ctx.fill()
 
-  const pad = ctx.createLinearGradient(0, 36, 64, 64)
-  pad.addColorStop(0, '#d9d4c8')
-  pad.addColorStop(1, '#8e897e')
+  const pad = ctx.createLinearGradient(4, 44, 60, 62)
+  pad.addColorStop(0, '#e4ddd0')
+  pad.addColorStop(1, '#9a9386')
   ctx.fillStyle = pad
   ctx.beginPath()
-  ctx.ellipse(W / 2, 54, 31, 11, 0, 0, Math.PI * 2)
+  ctx.moveTo(6, 46)
+  ctx.lineTo(58, 46)
+  ctx.quadraticCurveTo(62, 46, 62, 52)
+  ctx.lineTo(62, 56)
+  ctx.quadraticCurveTo(62, 62, 56, 62)
+  ctx.lineTo(8, 62)
+  ctx.quadraticCurveTo(2, 62, 2, 56)
+  ctx.lineTo(2, 52)
+  ctx.quadraticCurveTo(2, 46, 6, 46)
+  ctx.closePath()
   ctx.fill()
+  ctx.strokeStyle = '#7d766c'
+  ctx.lineWidth = 1
+  ctx.stroke()
 
-  for (let i = 0; i < TIERS.length; i++) {
-    const tier = TIERS[i]
-    if (!tier) continue
-    paintTier(ctx, tier, color, tierAmount(fill, i), stage)
+  for (let i = 0; i < TANKS.length; i++) {
+    const tank = TANKS[i]
+    if (!tank) continue
+    paintTank(ctx, tank, color, levels[i] ?? 0, stage)
   }
 
   if (stage >= 3) {
-    ctx.fillStyle = 'rgba(20, 18, 16, 0.4)'
+    ctx.fillStyle = 'rgba(20, 18, 16, 0.42)'
     ctx.beginPath()
-    ctx.ellipse(22, 48, 8, 3, -0.2, 0, Math.PI * 2)
-    ctx.ellipse(44, 34, 6, 2.4, 0.3, 0, Math.PI * 2)
+    ctx.ellipse(18, 40, 7, 3, -0.2, 0, Math.PI * 2)
+    ctx.ellipse(46, 36, 6, 2.6, 0.3, 0, Math.PI * 2)
     ctx.fill()
   }
-}
-
-function fillKey(fill: number): number {
-  return Math.max(0, Math.min(6, Math.round(fill * 6)))
-}
-
-function bodySprite(color: string, fill: number, stage: number): HTMLCanvasElement {
-  const step = fillKey(fill)
-  const key = `${color}:${step}:${stage}`
-  const cached = bodies.get(key)
-  if (cached) return cached
-  const canvas = document.createElement('canvas')
-  canvas.width = W + PAD_X * 2
-  canvas.height = H + PAD_Y * 2
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return canvas
-  ctx.translate(PAD_X, PAD_Y)
-  ctx.lineJoin = 'round'
-  ctx.lineCap = 'round'
-  paintBody(ctx, color, step / 6, stage)
-  bodies.set(key, canvas)
-  return canvas
 }
 
 export function drawStorageSprite(
@@ -231,10 +217,16 @@ export function drawStorageSprite(
   x: number,
   y: number,
   color: string,
-  fill: number,
+  stock: number,
   stage: number,
+  anim?: { id: number; time: number },
 ): void {
-  ctx.drawImage(bodySprite(color, fill, stage), x - PAD_X, y - PAD_Y)
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  paintStorage(ctx, color, tankLevels(stock, anim), stage)
+  ctx.restore()
 }
 
 /** Selection portrait and build-menu icon. Empty when there is no document, so smoke can call it. */
@@ -250,9 +242,9 @@ export function storagePortraitUrl(owner: number): string {
   ctx.fillStyle = '#6d6248'
   ctx.fillRect(0, 0, 72, 72)
   ctx.save()
-  ctx.translate(10, 8)
-  ctx.scale(0.78, 0.78)
-  drawStorageSprite(ctx, 0, 0, PLAYER_COLOR[owner] ?? '#5ec8ff', 0.5, 0)
+  ctx.translate(6, 6)
+  ctx.scale(0.9, 0.9)
+  drawStorageSprite(ctx, 0, 0, PLAYER_COLOR[owner] ?? '#5ec8ff', 500, 0)
   ctx.restore()
   const url = canvas.toDataURL()
   portraits.set(owner, url)

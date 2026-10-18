@@ -1,5 +1,15 @@
 import { controlledSide } from './control'
-import { BUILDING_STATS, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Unit } from './types'
+import {
+  BUILDING_STATS,
+  TILE,
+  UNIT_STATS,
+  type Building,
+  type BuildingKind,
+  type BuildingSighting,
+  type MatchState,
+  type PlayerId,
+  type Unit,
+} from './types'
 
 /** Refresh every side's sight. Off Fog of War reveals the map for Silo 01 only. */
 export function updateVision(state: MatchState): void {
@@ -97,6 +107,27 @@ export function sideTileExplored(state: MatchState, owner: PlayerId, tx: number,
   return exploredGrid(state, owner)[ty * state.mapW + tx] === 1
 }
 
+/**
+ * Every footprint tile is ground this side has explored.
+ * Current sight and the translucent shroud both count. Black fog does not.
+ * One black tile, or a tile off the map, rejects the building.
+ */
+export function footprintExplored(
+  state: MatchState,
+  owner: PlayerId,
+  kind: BuildingKind,
+  tx: number,
+  ty: number,
+): boolean {
+  const stats = BUILDING_STATS[kind]
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (!sideTileExplored(state, owner, tx + x, ty + y)) return false
+    }
+  }
+  return true
+}
+
 /** Rocks and minerals stay drawn on explored ground, including the gray shroud. Black ground hides them. */
 export function groundShown(state: MatchState, tx: number, ty: number): boolean {
   return tileExplored(state, tx, ty)
@@ -133,8 +164,8 @@ export function viewGroundShown(state: MatchState, tx: number, ty: number): bool
   return viewTileExplored(state, tx, ty)
 }
 
-/** True when this camera includes that side, so the side still sees its own cloaked Hovers. */
-function viewerOwns(state: MatchState, owner: PlayerId): boolean {
+/** True when this camera includes that side, so the side still sees its own cloaked Flies. */
+export function viewerOwns(state: MatchState, owner: PlayerId): boolean {
   if (state.bothCam) return true
   if (state.enemyCam) return owner !== 0
   return owner === controlledSide(state)
@@ -214,31 +245,155 @@ function reveal(state: MatchState, visible: Uint8Array, explored: Uint8Array, x:
   }
 }
 
+function cryoHeld(state: MatchState, buildingId: number): number {
+  let count = 0
+  for (const unit of state.units) {
+    if (unit.frozen === buildingId && unit.hp > 0) count += 1
+  }
+  return count
+}
+
+function takeSighting(state: MatchState, building: Building): BuildingSighting {
+  const stats = BUILDING_STATS[building.kind]
+  const job = building.queue[0]
+  return {
+    id: building.id,
+    x: (building.tx + stats.w / 2) * TILE,
+    y: (building.ty + stats.h / 2) * TILE,
+    kind: building.kind,
+    owner: building.owner,
+    tx: building.tx,
+    ty: building.ty,
+    hp: building.hp,
+    stock: building.stock,
+    progress: building.progress,
+    complete: building.complete,
+    ruined: building.ruined,
+    cryo: building.cryo,
+    held: building.cryo ? cryoHeld(state, building.id) : 0,
+    hatch: building.hatch,
+    dish: building.dish,
+    jobKind: job?.kind,
+    jobLeft: job?.remaining,
+    jobTotal: job?.total,
+  }
+}
+
+function ownerSeesTiles(state: MatchState, owner: PlayerId, tx: number, ty: number, w: number, h: number): boolean {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (sideTileVisible(state, owner, tx + x, ty + y)) return true
+    }
+  }
+  return false
+}
+
+/** The footprint this side would have to look at before a remembered building can be dropped. */
+function footprintCurrentlySeen(
+  state: MatchState,
+  owner: PlayerId,
+  spot: BuildingSighting,
+  building: Building | undefined,
+): boolean {
+  if (spot.kind && spot.tx != null && spot.ty != null) {
+    const stats = BUILDING_STATS[spot.kind]
+    return ownerSeesTiles(state, owner, spot.tx, spot.ty, stats.w, stats.h)
+  }
+  if (building) {
+    const stats = BUILDING_STATS[building.kind]
+    return ownerSeesTiles(state, owner, building.tx, building.ty, stats.w, stats.h)
+  }
+  return sideTileVisible(state, owner, Math.floor(spot.x / TILE), Math.floor(spot.y / TILE))
+}
+
 function rememberSightings(state: MatchState): void {
   for (let owner = 0; owner < state.playerCount; owner++) {
-    const spots = owner === 0 ? state.playerSpotted : owner === 1 ? state.aiSpotted : state.sideSpotted[owner]
+    const spots = state.sideSpotted[owner]
     if (!spots) continue
     for (const building of state.buildings) {
-      if (building.owner === owner || building.hp <= 0) continue
+      if (building.owner === owner || building.hp <= 0 || building.ruined) continue
       if (!ownerSeesBuilding(state, owner, building)) continue
-      const stats = BUILDING_STATS[building.kind]
-      const x = (building.tx + stats.w / 2) * TILE
-      const y = (building.ty + stats.h / 2) * TILE
+      const next = takeSighting(state, building)
       const known = spots.find((spot) => spot.id === building.id)
-      if (known) {
-        known.x = x
-        known.y = y
-      } else {
-        spots.push({ id: building.id, x, y })
-      }
+      if (known) Object.assign(known, next)
+      else spots.push(next)
     }
     for (let i = spots.length - 1; i >= 0; i--) {
       const spot = spots[i]
       if (!spot) continue
       const building = state.buildings.find((entry) => entry.id === spot.id)
-      if (!building || building.hp <= 0 || building.owner === owner) spots.splice(i, 1)
+      if (!footprintCurrentlySeen(state, owner, spot, building)) continue
+      const gone = !building || building.hp <= 0 || building.owner === owner || building.ruined
+      if (gone) spots.splice(i, 1)
     }
   }
+  if (state.selectedGhost != null && !viewMemories(state).some((spot) => spot.id === state.selectedGhost)) {
+    state.selectedGhost = null
+  }
+}
+
+function viewOwners(state: MatchState): PlayerId[] {
+  const owners: PlayerId[] = []
+  if (state.bothCam) {
+    for (let owner = 0; owner < state.playerCount; owner++) owners.push(owner)
+  } else if (state.enemyCam) {
+    for (let owner = 1; owner < state.playerCount; owner++) owners.push(owner)
+  } else owners.push(controlledSide(state))
+  return owners
+}
+
+function memoryInShroud(state: MatchState, spot: BuildingSighting): boolean {
+  if (!spot.kind || spot.tx == null || spot.ty == null) return false
+  const stats = BUILDING_STATS[spot.kind]
+  let explored = false
+  let visible = false
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (viewTileVisible(state, spot.tx + x, spot.ty + y)) visible = true
+      if (viewTileExplored(state, spot.tx + x, spot.ty + y)) explored = true
+    }
+  }
+  return explored && !visible
+}
+
+/** Enemy buildings this camera remembers but cannot see right now. Units are never included. */
+export function viewMemories(state: MatchState): BuildingSighting[] {
+  const list: BuildingSighting[] = []
+  const seen = new Set<number>()
+  for (const owner of viewOwners(state)) {
+    for (const spot of state.sideSpotted[owner] ?? []) {
+      if (seen.has(spot.id) || !memoryInShroud(state, spot)) continue
+      seen.add(spot.id)
+      list.push(spot)
+    }
+  }
+  return list
+}
+
+/**
+ * What this side still believes about a sighting.
+ * A snapshot stands in for a building that fell while the footprint was hidden.
+ * A note with no snapshot still requires the live building.
+ */
+export function rememberedBuilding(
+  state: MatchState,
+  owner: PlayerId,
+  spot: BuildingSighting,
+): { id: number; x: number; y: number; kind: BuildingKind; complete: boolean } | null {
+  if (spot.kind) {
+    if (spot.ruined || spot.owner === owner) return null
+    if (spot.hp != null && spot.hp <= 0) return null
+    return {
+      id: spot.id,
+      x: spot.x,
+      y: spot.y,
+      kind: spot.kind,
+      complete: spot.complete !== false,
+    }
+  }
+  const building = state.buildings.find((entry) => entry.id === spot.id && entry.hp > 0 && !entry.ruined && entry.owner !== owner)
+  if (!building) return null
+  return { id: building.id, x: spot.x, y: spot.y, kind: building.kind, complete: building.complete }
 }
 
 function ownerSeesBuilding(state: MatchState, owner: PlayerId, building: Building): boolean {

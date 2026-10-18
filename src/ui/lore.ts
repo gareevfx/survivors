@@ -20,8 +20,8 @@ export const LORE_ENTRIES: ReadonlyArray<{ name: string; body: string }> = [
   { name: 'Factory', body: 'Facility for manufacturing combat and exploration units;' },
   { name: 'Flasher', body: 'Very fast unit;' },
   { name: 'Gorilla', body: 'Tank;' },
-  { name: 'Hover', body: `Surface explorer; Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight.` },
-  { name: 'Frog', body: 'White buggy with a cryo tank. Freeze ices every other unit in its sight for 30 seconds. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar.' },
+  { name: 'Fly', body: `Surface explorer; Select 10 Flies to activate the Grid. Those Flies turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Fly reveals an invisible enemy Fly inside its sight.` },
+  { name: 'Frog', body: 'White buggy with a cryo tank. Freeze ices every other unit in its sight for 20 seconds. Cannot Freeze inside a Silo\'s sight. Trees in that circle shatter, and each rock loses half its current hit points. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar.' },
 ]
 
 export function loreBody(name: string): string {

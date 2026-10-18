@@ -21,7 +21,7 @@ function leaveViews(state: MatchState, keep: 'normal' | 'clear' | 'enemy' | 'bot
 export function runCommand(state: MatchState, raw: string): boolean {
   const text = raw.trim().toLowerCase().replace(/\s+/g, ' ')
   if (!text) return false
-  if (text === 'off fow' || text === 'off fog of war') {
+  if (text === 'fow off' || text === 'fog of war off') {
     if (state.fogCleared && !state.enemyCam && !state.bothCam) {
       pushToast(state, 'FOW is already off.')
       return true
@@ -49,7 +49,7 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'God Mode is on.')
     return true
   }
-  if (text === 'off god mode') {
+  if (text === 'god mode off') {
     if (!state.godMode) {
       pushToast(state, 'God Mode is already off.')
       return true

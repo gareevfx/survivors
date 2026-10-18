@@ -3,7 +3,7 @@ import { Sfx } from './game/audio'
 import { centerCamera, type Camera } from './game/camera'
 import { runCommand } from './game/console'
 import { controlledSide, cycleSide, handsOff, takeSide } from './game/control'
-import { attachInput } from './game/input'
+import { attachInput, narrowSelection, selectOwnCombatUnits, setActiveKind } from './game/input'
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, sealReplayStats } from './game/replay'
 import { step } from './game/sim'
@@ -20,6 +20,7 @@ const statisticButton = document.querySelector<HTMLButtonElement>('#statistic')
 const camsButton = document.querySelector<HTMLButtonElement>('#cams')
 const speedButton = document.querySelector<HTMLButtonElement>('#speed')
 const idle = document.querySelector<HTMLButtonElement>('#idle')
+const unitsButton = document.querySelector<HTMLButtonElement>('#units')
 
 if (!view || !minimap) {
   throw new Error('Survivors failed to find its canvas.')
@@ -212,6 +213,7 @@ function selectIdlePorters(): void {
   live.selectedBuilding = null
   live.selectedOre = null
   live.selectedGrave = null
+  live.selectedGhost = null
   live.events.push({ type: 'select' })
   const first = unitById(live, ids[0] ?? -1)
   if (first) focus(first.x, first.y)
@@ -272,6 +274,25 @@ speedButton?.addEventListener('click', () => {
 idle?.addEventListener('click', () => {
   sfx.unlock()
   selectIdlePorters()
+})
+unitsButton?.addEventListener('click', () => {
+  sfx.unlock()
+  if (match) selectOwnCombatUnits(match)
+})
+document.querySelector('#inspect')?.addEventListener('pointerdown', (event) => {
+  if (!match || menuOpen || !(event instanceof PointerEvent)) return
+  if (event.button !== 0) return
+  const node = event.target instanceof Element ? event.target.closest('.select-chip') : null
+  if (!(node instanceof HTMLElement)) return
+  const kind = node.dataset.kind
+  if (kind !== 'porter' && kind !== 'pike' && kind !== 'howler' && kind !== 'drone' && kind !== 'frog') return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.ctrlKey || event.metaKey) {
+    setActiveKind(match, kind)
+    return
+  }
+  narrowSelection(match, kind, event.shiftKey)
 })
 document.querySelector('#side-switch')?.addEventListener('click', (event) => {
   if (!match?.doubleGame || match.outcome || match.replay) return

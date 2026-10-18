@@ -3,9 +3,9 @@ import type { MatchState, PlayerId } from './types'
 /**
  * Double game is hot-seat control. It does not change who the match is about.
  * Win, lose, god mode, `siloai`, and `show enemy cam` stay tied to Silo 01.
- * `all cams` and `off fow` stay view cheats: they are not cleared by double game,
+ * `all cams` and `fow off` stay view cheats: they are not cleared by double game,
  * and double game is not cleared by them. While either is on, that view replaces
- * the controlled side's own fog. `off fow` still shows the whole map.
+ * the controlled side's own fog. `fow off` still shows the whole map.
  * The side you are sitting in has its SiloAI suspended, including Silo 01 when
  * `siloai` is also on. Leaving that side resumes it. `double game off` does not
  * clear `siloai`, so Silo 01 goes back to SiloAI if that command is still on.
@@ -34,6 +34,7 @@ export function clearHands(state: MatchState): void {
   state.selectedBuilding = null
   state.selectedOre = null
   state.selectedGrave = null
+  state.selectedGhost = null
   state.placement = null
   state.attackMoveArmed = false
   state.moveArmed = false

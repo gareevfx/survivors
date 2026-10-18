@@ -1,10 +1,12 @@
 import { controlledSide } from './control'
+import { frostGround } from './sim'
 import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
-import { depositKnown } from './vision'
+import { depositKnown, footprintExplored } from './vision'
 import {
   buildingById,
   buildingCenter,
   buildingRect,
+  insideSiloFreezeBan,
   canPlace,
   cryoOccupants,
   cryoParty,
@@ -26,7 +28,9 @@ import {
   FROG_FREEZE_COOLDOWN,
   FROG_FREEZE_SECONDS,
   MINERS_PER_DEPOSIT,
+  SILO_DUMP_CAP,
   SILO_REPAIR_COST,
+  STORAGE_CAP,
   GRID_CLOAK_SECONDS,
   isShutdown,
   TILE,
@@ -236,6 +240,7 @@ export function fillOpenGatherSlots(state: MatchState): void {
       unit.nodeMemory === 0,
   )
   for (const owner of [0, 1] as const) {
+    if (dropoffsFull(state, owner)) continue
     const group = waiting.filter((unit) => unit.owner === owner)
     if (group.length) assignMiners(state, group, null)
   }
@@ -370,6 +375,7 @@ export function commandStop(state: MatchState, ids: number[]): void {
     noteProgress(unit)
     unit.order = null
     unit.scanning = false
+    unit.guarding = false
     unit.nodeMemory = -1
     unit.idleAcquire = false
     stopMoving(unit)
@@ -386,6 +392,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
   units.sort((a, b) => a.y - b.y || a.x - b.x)
   units.forEach((unit, index) => {
     unit.scanning = false
+    unit.guarding = false
     const col = index % cols
     const row = Math.floor(index / cols)
     const ox = (col - (cols - 1) / 2) * spacing
@@ -525,6 +532,7 @@ export function sendHoverGrid(state: MatchState, units: Unit[]): void {
   hovers.forEach((unit, index) => {
     const spot = spots[assign[index]]
     unit.scanning = false
+    unit.guarding = false
     unit.cloak = GRID_CLOAK_SECONDS
     unit.order = { type: 'move', x: spot.x, y: spot.y }
     noteProgress(unit)
@@ -645,6 +653,7 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
     unit.idleAcquire = false
     unit.nodeMemory = -1
     unit.scanning = false
+    unit.guarding = false
     stopMoving(unit)
   }
   if (tell) {
@@ -733,13 +742,82 @@ export function thawCryo(state: MatchState, buildingId: number): void {
   if (released > 0) building.cryoRecover = CRYO_RECOVER
 }
 
-/** Spend dumps, and draw the same amount out of Storage, richest pile first. */
+/** How many dumps this building can hold. A Silo and a Storage each have their own cap. */
+export function buildingDumpCap(kind: Building['kind']): number {
+  if (kind === 'keep') return SILO_DUMP_CAP
+  if (kind === 'silo') return STORAGE_CAP
+  return 0
+}
+
+/** True when a finished Silo or Storage can take another dump. */
+export function dropoffHasRoom(building: Building): boolean {
+  const cap = buildingDumpCap(building.kind)
+  return cap > 0 && building.stock < cap
+}
+
+/** Finished Silos and Storages that still stand for this side. */
+export function sideDropoffs(state: MatchState, owner: number): Building[] {
+  return state.buildings.filter(
+    (building) =>
+      building.owner === owner &&
+      (building.kind === 'keep' || building.kind === 'silo') &&
+      building.hp > 0 &&
+      !building.ruined &&
+      building.complete,
+  )
+}
+
+/** True when every drop-off this side owns is at its own cap. */
+export function dropoffsFull(state: MatchState, owner: number): boolean {
+  const bins = sideDropoffs(state, owner)
+  return bins.length > 0 && bins.every((building) => !dropoffHasRoom(building))
+}
+
+/** Free dump space across this side's Silo and Storages. */
+export function dropoffRoom(state: MatchState, owner: number): number {
+  return sideDropoffs(state, owner).reduce((sum, building) => {
+    return sum + Math.max(0, buildingDumpCap(building.kind) - building.stock)
+  }, 0)
+}
+
+/**
+ * Put income into buildings with room. The Silo fills first, then Storages.
+ * Dumps that fit nowhere are lost. Returns how much was stored.
+ */
+export function creditDumps(state: MatchState, owner: number, amount: number): number {
+  if (amount <= 0) return 0
+  let left = amount
+  const bins = sideDropoffs(state, owner).sort((a, b) => {
+    const rank = (building: Building) => (building.kind === 'keep' ? 0 : 1)
+    const byKind = rank(a) - rank(b)
+    if (byKind !== 0) return byKind
+    return a.id - b.id
+  })
+  for (const bin of bins) {
+    const room = buildingDumpCap(bin.kind) - bin.stock
+    if (room <= 0) continue
+    const take = Math.min(room, left)
+    bin.stock += take
+    left -= take
+    if (left <= 0) break
+  }
+  const placed = amount - left
+  if (placed > 0) state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) + placed
+  return placed
+}
+
+/** Spend dumps. Storages are drawn richest first, then the Silo, matching the old pile order. */
 export function debitDumps(state: MatchState, owner: number, amount: number): void {
   state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) - amount
   let left = amount
-  const bins = state.buildings
-    .filter((building) => building.owner === owner && building.kind === 'silo' && building.hp > 0 && building.stock > 0)
-    .sort((a, b) => b.stock - a.stock)
+  const bins = sideDropoffs(state, owner)
+    .filter((building) => building.stock > 0)
+    .sort((a, b) => {
+      const rank = (building: Building) => (building.kind === 'silo' ? 0 : 1)
+      const byKind = rank(a) - rank(b)
+      if (byKind !== 0) return byKind
+      return b.stock - a.stock
+    })
   for (const bin of bins) {
     if (left <= 0) break
     const take = Math.min(bin.stock, left)
@@ -870,6 +948,7 @@ export function commandRepair(state: MatchState, ids: number[], buildingId: numb
     unit.idleAcquire = false
     unit.nodeMemory = -1
     unit.scanning = false
+    unit.guarding = false
     stopMoving(unit)
   }
   noteOrder(state, crew)
@@ -893,7 +972,7 @@ export function tryTrain(state: MatchState, buildingId: number, kind: UnitKind):
   if (!building || building.hp <= 0) return 'That structure is gone'
   if (!building.complete) return 'Still under construction'
   if (building.kind === 'keep' && kind !== 'porter') return 'The Silo trains stalkers'
-  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains flashers, gorillas, hovers, and frogs'
+  if (building.kind === 'yard' && kind === 'porter') return 'The Factory trains flashers, gorillas, flies, and frogs'
   if (building.kind === 'silo') return 'A storage does not train anyone'
   const stats = UNIT_STATS[kind]
   if (state.oreHeld[building.owner] < stats.cost) return `Need ${stats.cost} dumps`
@@ -914,7 +993,7 @@ export function cancelTrain(state: MatchState, buildingId: number): void {
   if (!building || building.queue.length === 0) return
   const job = building.queue.pop()
   if (!job) return
-  state.oreHeld[building.owner] += UNIT_STATS[job.kind].cost
+  creditDumps(state, building.owner, UNIT_STATS[job.kind].cost)
   recomputeSupply(state)
   if (building.owner === controlledSide(state)) pushToast(state, `Cancelled ${UNIT_STATS[job.kind].label}.`)
 }
@@ -948,6 +1027,8 @@ export function tryPlace(
   if (kind === 'keep') return 'The Silo is already standing'
   const stats = BUILDING_STATS[kind]
   if (state.oreHeld[owner] < stats.cost) return `Need ${stats.cost} dumps`
+  const onMap = tx >= 0 && ty >= 0 && tx + stats.w <= state.mapW && ty + stats.h <= state.mapH
+  if (onMap && !footprintExplored(state, owner, kind, tx, ty)) return 'Unexplored ground'
   if (!canPlace(state, kind, tx, ty)) return 'That ground will not hold it'
   if (kind === 'tower' && !pillarsClear(state, tx, ty)) return 'Leave two empty cells between Pillars'
   if (!placementAllowed(state, owner, kind, tx, ty)) return 'Pillars must stand inside Silo sight'
@@ -997,6 +1078,7 @@ export function tryPlace(
     state.selectedUnits = []
     state.selectedOre = null
     state.selectedGrave = null
+    state.selectedGhost = null
     state.events.push({ type: 'build' })
     pushToast(state, `Raising a ${stats.label}.`)
   }
@@ -1008,8 +1090,8 @@ export function cancelBuilding(state: MatchState, buildingId: number): void {
   const building = buildingById(state, buildingId)
   if (!building || building.complete || building.kind === 'keep') return
   const refund = Math.floor(BUILDING_STATS[building.kind].cost * 0.75)
-  for (const job of building.queue) state.oreHeld[building.owner] += UNIT_STATS[job.kind].cost
-  state.oreHeld[building.owner] += refund
+  for (const job of building.queue) creditDumps(state, building.owner, UNIT_STATS[job.kind].cost)
+  creditDumps(state, building.owner, refund)
   state.buildings = state.buildings.filter((entry) => entry.id !== building.id)
   for (const unit of state.units) {
     if (unit.order?.type === 'construct' && unit.order.buildingId === building.id) {
@@ -1087,16 +1169,23 @@ export function coverOpenSites(state: MatchState): void {
 }
 
 /**
- * Freeze every other unit inside this Frog's sight for 30 seconds.
+ * Freeze every other unit inside this Frog's sight for 20 seconds.
+ * Trees in that circle are removed. Rocks lose half their current hit points, rounded down.
  * Power is not removed now. Half a bar comes off when the ice ends. The caster is left out.
+ * A Frog inside any living Silo's sight does not freeze, and the player is told.
  */
 export function commandFrost(state: MatchState, ids: number[]): void {
   if (state.outcome || state.paused) return
   const reach = UNIT_STATS.frog.sight
+  let banned = false
   for (const id of ids) {
     const frog = unitById(state, id)
     if (!frog || frog.kind !== 'frog' || frog.hp <= 0 || frog.frozen != null) continue
     if (frog.ice > 0 || frog.frostCd > 0 || isShutdown(frog)) continue
+    if (insideSiloFreezeBan(state, frog.x, frog.y)) {
+      banned = true
+      continue
+    }
     frog.frostCd = FROG_FREEZE_COOLDOWN
     for (const unit of state.units) {
       if (unit.id === frog.id || unit.hp <= 0 || unit.frozen != null) continue
@@ -1104,8 +1193,10 @@ export function commandFrost(state: MatchState, ids: number[]): void {
       unit.ice = FROG_FREEZE_SECONDS
       stopMoving(unit)
     }
+    frostGround(state, frog.x, frog.y, reach)
     state.rings.push({ x: frog.x, y: frog.y, life: 0.7, max: 0.7, reach })
   }
+  if (banned) pushToast(state, "Can't Freeze near a Silo")
 }
 
 export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower', owner: PlayerId = 1): boolean {

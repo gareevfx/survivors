@@ -26,8 +26,10 @@ export const GRID_CLOAK_SECONDS = 45
 export const STARTING_ORE = 120
 /** Hard ceiling on Cells. Finished buildings still add their supply (Silo 12, Storage 8); the sum is clamped to this. */
 export const SUPPLY_MAX = 65
-/** One Storage holds this many dumps. A Silo does not. */
-export const STORAGE_CAP = 500
+/** One Storage holds this many dumps. */
+export const STORAGE_CAP = 750
+/** One Silo holds this many dumps. Spendable dumps are the sum of Silo and Storage stocks, with no side-wide cap. */
+export const SILO_DUMP_CAP = 3000
 export const INTERACT = 42
 /** Flasher, Gorilla, Hover, and Frog run this long from a full Power bar. */
 export const FLASHER_POWER_SECONDS = 3 * 60
@@ -35,7 +37,7 @@ export const GORILLA_POWER_SECONDS = 10 * 60
 export const HOVER_POWER_SECONDS = 8 * 60
 export const FROG_POWER_SECONDS = 6 * 60
 /** Frog Freeze holds every other unit in its sight this long. Power does not drain while that lasts. */
-export const FROG_FREEZE_SECONDS = 30
+export const FROG_FREEZE_SECONDS = 20
 /** Seconds before that Frog can Freeze again. */
 export const FROG_FREEZE_COOLDOWN = 90
 /** Fraction of a full Power bar removed when Freeze ends. Empty Power shuts the unit down. */
@@ -79,7 +81,7 @@ export function powerSeconds(kind: UnitKind): number {
   return 0
 }
 
-/** A Flasher, Gorilla, Hover, or Frog with an empty Power bar. It is still alive. */
+/** A Flasher, Gorilla, Fly, or Frog with an empty Power bar. It stays put and can still be destroyed. */
 export function isShutdown(unit: { kind: UnitKind; power: number }): boolean {
   return powerSeconds(unit.kind) > 0 && unit.power <= 0
 }
@@ -167,8 +169,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     flying: false,
   },
   drone: {
-    label: 'Hover',
-    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Hovers to activate the Grid. Those Hovers turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Hover reveals an invisible enemy Hover inside its sight. Power lasts 8 minutes, then the Hover shuts down until a battery recharges it. Inside a friendly Pillar's sight, Power refills in 30 seconds instead of draining.`,
+    label: 'Fly',
+    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Flies to activate the Grid. Those Flies turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Fly reveals an invisible enemy Fly inside its sight. Power lasts 8 minutes, then the Fly shuts down until a battery recharges it. Inside a friendly Pillar's sight, Power refills in 30 seconds instead of draining.`,
     hp: 80,
     speed: 118,
     radius: 8,
@@ -185,7 +187,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   frog: {
     label: 'Frog',
-    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 30 seconds. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
+    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 20 seconds. Cannot Freeze inside a Silo\'s sight. Trees in that circle shatter, and each rock loses half its current hit points. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
     hp: 64,
     speed: 104,
     radius: 11,
@@ -219,7 +221,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
+    blurb: 'Drop-off for dumps and home of the stalkers. Holds at most 3000 dumps. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -230,7 +232,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains flashers, gorillas, hovers, and frogs. Destruction leaves 6 piles of 15 dumps.',
+    blurb: 'Trains flashers, gorillas, flies, and frogs. Destruction leaves 6 piles of 15 dumps.',
     w: 3,
     h: 2,
     hp: 720,
@@ -241,7 +243,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8. Holds at most 500 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile. Destruction also leaves 4 piles of 10 dumps.',
+    blurb: 'Raises the cells cap by 8. Holds at most 750 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile. Destruction also leaves 4 piles of 10 dumps.',
     w: 2,
     h: 2,
     hp: 400,
@@ -252,7 +254,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Hover and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Hovers take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, Hover, or Frog inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
+    blurb: 'One cell. Sees as far as a Fly and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Flies take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, Fly, or Frog inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
     w: 1,
     h: 1,
     hp: 160,
@@ -336,8 +338,14 @@ export interface Unit {
   idleAcquire: boolean
   nodeMemory: number
   repathIn: number
-  /** Player Hover flying itself across black fog, then the oldest sightings. */
+  /** Player Fly flying itself across the map, then the oldest sightings. */
   scanning: boolean
+  /** Fly holding still and calling allies when an enemy combat unit enters sight. */
+  guarding: boolean
+  /** Match time before this Fly may call allies again. */
+  guardCd: number
+  /** Allies already sent that have not finished responding. */
+  guardSent: number[]
   /** Seconds of Grid invisibility left. Enemies cannot see or attack while this is above zero. */
   cloak: number
   /** Seconds this unit has been in the match. A Stalker's hit points drain across STALKER_LIFESPAN. */
@@ -527,6 +535,33 @@ export type GameEvent =
   | { type: 'win' }
   | { type: 'lose' }
 
+/**
+ * Last look at an enemy or neutral building.
+ * id, x, and y are enough for older notes; kind and the visual fields are filled once it is actually seen.
+ */
+export interface BuildingSighting {
+  id: number
+  x: number
+  y: number
+  kind?: BuildingKind
+  owner?: PlayerId
+  tx?: number
+  ty?: number
+  hp?: number
+  stock?: number
+  progress?: number
+  complete?: boolean
+  ruined?: boolean
+  cryo?: boolean
+  /** Stalkers frozen in a Silo Cryo at the moment it was seen. */
+  held?: number
+  hatch?: number
+  dish?: number
+  jobKind?: UnitKind
+  jobLeft?: number
+  jobTotal?: number
+}
+
 export interface MatchState {
   seed: number
   mode: MatchMode
@@ -551,12 +586,12 @@ export interface MatchState {
   sideExplored: Uint8Array[]
   /** Current sight for every side, indexed by owner. */
   sideVisible: Uint8Array[]
-  /** Enemy buildings each side has seen. */
-  sideSpotted: Array<Array<{ id: number; x: number; y: number }>>
+  /** Enemy buildings each side has seen. A ghost keeps the last look until that footprint is seen again. */
+  sideSpotted: BuildingSighting[][]
   /** Player buildings Silo 02 has seen. Same array as sideSpotted[1]. */
-  aiSpotted: Array<{ id: number; x: number; y: number }>
+  aiSpotted: BuildingSighting[]
   /** Enemy buildings Silo 01 has seen. Same array as sideSpotted[0]. */
-  playerSpotted: Array<{ id: number; x: number; y: number }>
+  playerSpotted: BuildingSighting[]
   /** Drone, bike, or spare worker currently scouting fog for minerals and the enemy. */
   aiScout: number
   /** Northmark scout while AI control is on. */
@@ -609,7 +644,14 @@ export interface MatchState {
   replay: boolean
   outcome: null | 'win' | 'lose'
   selectedUnits: number[]
+  /**
+   * Unit type whose abilities are on the command card inside a mixed selection.
+   * Null lets the first selected type take that role until Tab or Ctrl-click picks one.
+   */
+  activeKind: UnitKind | null
   selectedBuilding: number | null
+  /** Last-known enemy building under the shroud. Not a live target. */
+  selectedGhost: number | null
   selectedOre: number | null
   selectedGrave: number | null
   placement: BuildingKind | null

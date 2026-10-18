@@ -2,9 +2,10 @@ import { spawnAnimals } from './animals'
 import { generateBattlefield, pickFfa8Sites, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
-import { updateVision } from './vision'
+import { footprintExplored, updateVision } from './vision'
 import {
   BUILDING_STATS,
+  type BuildingSighting,
   FFA8_MAP_H,
   FFA8_MAP_W,
   FFA_MAP_H,
@@ -204,6 +205,17 @@ export function footprintInKeepSight(
   return Math.hypot(x - kx, y - ky) <= BUILDING_STATS.keep.sight + 0.5
 }
 
+/** True when this point is inside any living Silo's sight. A Frog there cannot Freeze. */
+export function insideSiloFreezeBan(state: MatchState, x: number, y: number): boolean {
+  const reach = BUILDING_STATS.keep.sight
+  for (const building of state.buildings) {
+    if (building.kind !== 'keep' || building.hp <= 0) continue
+    const center = buildingCenter(building)
+    if (Math.hypot(center.x - x, center.y - y) <= reach) return true
+  }
+  return false
+}
+
 /** Empty cells required between Pillar footprints. */
 export const PILLAR_GAP = 2
 
@@ -216,6 +228,7 @@ export function placementAllowed(
   ty: number,
 ): boolean {
   if (!canPlace(state, kind, tx, ty)) return false
+  if (!footprintExplored(state, owner, kind, tx, ty)) return false
   if (kind !== 'tower') return true
   if (!pillarsClear(state, tx, ty)) return false
   const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
@@ -314,6 +327,9 @@ export function makeUnit(
     nodeMemory: -1,
     repathIn: 0,
     scanning: false,
+    guarding: false,
+    guardCd: 0,
+    guardSent: [],
     cloak: 0,
     age: 0,
     frozen: null,
@@ -438,8 +454,8 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
   const visible = new Uint8Array(cells)
   const aiExplored = new Uint8Array(cells)
   const aiVisible = new Uint8Array(cells)
-  const playerSpotted: Array<{ id: number; x: number; y: number }> = []
-  const aiSpotted: Array<{ id: number; x: number; y: number }> = []
+  const playerSpotted: BuildingSighting[] = []
+  const aiSpotted: BuildingSighting[] = []
   const sideExplored = [explored, aiExplored]
   const sideVisible = [visible, aiVisible]
   const sideSpotted = [playerSpotted, aiSpotted]
@@ -500,7 +516,9 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     replay: false,
     outcome: null,
     selectedUnits: [],
+    activeKind: null,
     selectedBuilding: null,
+    selectedGhost: null,
     selectedOre: null,
     selectedGrave: null,
     placement: null,
@@ -561,6 +579,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     if (!site || !keep) continue
     const aim = aimSite(site, sites)
     aimRally(keep)
+    keep.stock = STARTING_ORE
     for (const [tx, ty] of workerCamp(site, aim, field.ore, mapW, mapH)) {
       const unit = makeUnit(state, owner, 'porter', (tx + 0.5) * TILE, (ty + 0.5) * TILE)
       const dx = (aim.tx + 1.5) * TILE - unit.x

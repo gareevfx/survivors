@@ -850,18 +850,38 @@ function oreSprites(): HTMLCanvasElement[] {
   return ore
 }
 
+export function rockVariant(tx: number, ty: number, seed: number): number {
+  return Math.floor(hash2(tx + 3, ty + 9, seed) * ROCK_SPRITES) % ROCK_SPRITES
+}
+
+export function treeVariant(tx: number, ty: number, seed: number): number {
+  return Math.floor(hash2(tx + 11, ty + 4, seed) * TREE_SPRITES) % TREE_SPRITES
+}
+
+export function oreVariant(tx: number, ty: number, seed: number): number {
+  return Math.floor(hash2(tx + 5, ty + 2, seed + 3) * ORE_SPRITES) % ORE_SPRITES
+}
+
+export function rockVariantSprite(index: number): HTMLCanvasElement | undefined {
+  return rockSprites()[index]
+}
+
+export function treeVariantSprite(index: number): HTMLCanvasElement | undefined {
+  return treeSprites()[index]
+}
+
+export function oreVariantSprite(index: number): HTMLCanvasElement | undefined {
+  return oreSprites()[index]
+}
+
 export function drawRockSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = rockSprites()
-  const index = Math.floor(hash2(tx + 3, ty + 9, seed) * ROCK_SPRITES) % ROCK_SPRITES
-  const sprite = sheet[index]
+  const sprite = rockVariantSprite(rockVariant(tx, ty, seed))
   if (!sprite) return
   ctx.drawImage(sprite, tx * TILE - 6, ty * TILE - 6)
 }
 
 export function drawTreeSprite(ctx: CanvasRenderingContext2D, tx: number, ty: number, seed: number): void {
-  const sheet = treeSprites()
-  const index = Math.floor(hash2(tx + 11, ty + 4, seed) * TREE_SPRITES) % TREE_SPRITES
-  const sprite = sheet[index]
+  const sprite = treeVariantSprite(treeVariant(tx, ty, seed))
   if (!sprite) return
   ctx.drawImage(sprite, tx * TILE - 8, ty * TILE - 22)
 }
@@ -983,9 +1003,7 @@ export function drawOreSprite(
     ctx.stroke()
     ctx.restore()
   }
-  const sheet = oreSprites()
-  const index = Math.floor(hash2(tx + 5, ty + 2, seed + 3) * ORE_SPRITES) % ORE_SPRITES
-  const sprite = sheet[index]
+  const sprite = oreVariantSprite(oreVariant(tx, ty, seed))
   if (!sprite) return
   const ratio = full > 0 ? Math.max(0.15, Math.min(1, amount / full)) : 1
   const scale = 0.68 + 0.32 * ratio
