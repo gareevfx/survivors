@@ -159,25 +159,67 @@
         </div>
       </div>
 
-      <div id="about" class="hidden" role="dialog" aria-modal="true">
+      <div id="about" class="hidden" role="dialog" aria-modal="true" aria-labelledby="about-title">
         <div class="card about-card">
           <div class="about-body">
             <p>The world has run out of fresh resources, and what's left is the wreckage. Piles of technical debris, called Dumps, lie scattered across the map. Each player starts with a single Silo, the command center that trains Stalkers. These hardy scavengers can't be destroyed. They haul Dumps back to the Silo or to Storages that hold your Cells, and they clear rocks and trees from their path as they go.</p>
-            <p>Stalkers aren't safe from everyone. Anyone can capture one that wanders outside the watchful range of a Silo, Flasher, Gorilla or Storage. Pillars, the windmills with battle towers, can also capture them. So you expand carefully. A Silo can add a Cryo once, for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo to freeze them. Freezing costs 50 dumps each, 200 for the group, when they enter. Inside, a Stalker leaves the map, cannot be attacked, and its 5-minute life is paused. Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes. If the Silo is destroyed or captured, they are released too. Factories turn out Flashers, which are lightning-fast raiders. They also build Gorillas, the heavy tanks that smash buildings, and Fly scouts that map the unknown, because nobody can build in uncharted land.</p>
-            <p>Everything comes down to the Silo. Destroy an enemy's Silo and you capture it, along with every building, every unit and every resource that player owned. In a 1v1 on a tight 80x40 map, that ends the match. In the four-player free-for-all on 90x50, and the eight-player free-for-all on 100x100, the war goes on. Even a ruined Silo isn't gone for good, since a brave Stalker can repair it.</p>
+            <p>Stalkers aren't safe from everyone. Anyone can capture one that wanders outside the watchful range of a Silo, Flasher, Gorilla or Storage. Pillars, the windmills with battle towers, can also capture them. So you expand carefully. Factories turn out Flashers, which are lightning-fast raiders. They also build Gorillas, the heavy tanks that smash buildings, and Hover scouts that map the unknown, because nobody can build in uncharted land.</p>
+            <p>Everything comes down to the Silo. Destroy an enemy's Silo and you capture it, along with every building, every unit and every resource that player owned. In a 1v1 on a tight 80x40 map, that ends the match. In the four-player free-for-all on 90x50, the war goes on. Even a ruined Silo isn't gone for good, since a brave Stalker can repair it.</p>
             <p>Each match is a race between scavenging and fighting. The SiloAI plays by the same rules and never lets a Stalker idle. It builds Storages beside fresh Dumps and keeps a tidy gap between its buildings. It widens narrow passages and gathers its army before it strikes. You can face it as an opponent, or hand it your own side as an autoplayer.</p>
-            <p>Select your own Factory, Storage, or Pillar and press B to demolish it. The button turns red and reads Confirm for 3 seconds, and a second press tears the building down. A Factory returns 40 dumps, a Storage 20, and a Pillar 25: a quarter of the cost. An unfinished building returns a quarter of the dumps already spent on it. Dumps stored in a Storage that will not fit in the buildings you still have are lost, and the button says how many. The Silo cannot be demolished.</p>
-            <p><a href="https://github.com/gareevfx/survivors" target="_blank" rel="noopener">GitHub: github.com/gareevfx/survivors</a></p>
+            <h2 id="about-title">Game rules</h2>
+            <h3>Goal</h3>
+            <ul>
+              <li>Destroy an enemy Silo to capture it. All of that player's buildings and units become yours, and their resources transfer to you.</li>
+              <li>In 1v1 that wins the match. In the 4-player mode the game continues.</li>
+              <li>A destroyed Silo stays as a ruin, and a Stalker can repair it.</li>
+            </ul>
+            <h3>Economy</h3>
+            <ul>
+              <li>Stalkers gather Dumps (piles of technical debris) and deliver them to the Silo or to a Storage.</li>
+              <li>Storage raises your Cells capacity, and the limit is 100 Cells. Training units checks Cells.</li>
+              <li>A Storage holding 500 Dumps is full and accepts no more deliveries.</li>
+              <li>A Stalker can also harvest from an enemy Storage.</li>
+              <li>When a Storage is destroyed by a Flasher or Gorilla, one pile of Dumps is left at the site.</li>
+            </ul>
+            <h3>Stalkers</h3>
+            <ul>
+              <li>Stalkers can't be destroyed, but an enemy can capture them.</li>
+              <li>They can't be captured inside the vision range of a Silo, Flasher, Gorilla or Storage.</li>
+              <li>They can be captured while they are building a Storage.</li>
+              <li>Pillars can capture them.</li>
+              <li>They clear rocks and trees from their path.</li>
+            </ul>
+            <h3>Buildings and units</h3>
+            <ul>
+              <li>Silo: trains Stalkers and is the command center. It is 3x3.</li>
+              <li>Storage: stores Cells.</li>
+              <li>Pillar: a windmill with a battle tower. Its build time and life are halved.</li>
+              <li>Factory: makes combat and exploration units. It is 3x3.</li>
+              <li>Flasher: a very fast unit.</li>
+              <li>Gorilla: a tank, best against buildings.</li>
+              <li>Hover: a flying scout.</li>
+            </ul>
+            <h3>Map</h3>
+            <ul>
+              <li>Narrow passages must be at least 2 tiles wide.</li>
+              <li>Tree and rock life is halved.</li>
+              <li>Stalkers can't build in uncharted territory.</li>
+              <li>Modes: 1v1 on 80x40, and 4 players on 90x50.</li>
+            </ul>
+            <h3>SiloAI</h3>
+            <ul>
+              <li>It plays by the same rules, as an opponent or as an autoplayer.</li>
+              <li>Military units attack or defend, and Stalkers never idle.</li>
+              <li>It builds Storage near new Dumps when the ones near its Silo run out.</li>
+              <li>It keeps a 2-cell gap between buildings.</li>
+              <li>It gathers a group of units before attacking.</li>
+              <li>It widens narrow passages.</li>
+            </ul>
+            <h3>Donat</h3>
+            <p>If you are interested in the game and would like to help expand its universe (or perhaps even support the development of a 3D version), please consider making a contribution by transferring funds:</p>
+            <p>Crypto (ETH) <span class="selectable">0x8853fae653B3b0600377928a1D528ABF43c9fe7F</span></p>
           </div>
           <button id="about-close" type="button">Close</button>
-        </div>
-      </div>
-
-      <div id="donat" class="hidden" role="dialog" aria-modal="true">
-        <div class="card donat-card">
-          <p>If you are interested in the game and would like to help expand its universe (or perhaps even support the development of a 3D version), please consider making a contribution by transferring funds:</p>
-          <p>Crypto (ETH) <span class="selectable">0x8853fae653B3b0600377928a1D528ABF43c9fe7F</span></p>
-          <button id="donat-close" type="button">Close</button>
         </div>
       </div>
 
@@ -196,7 +238,6 @@
           <p class="meta" id="menu-tutorial-note"></p>
           <button id="menu-resume" type="button" class="hidden">Resume</button>
           <button id="menu-about" type="button">About the Game</button>
-          <button id="menu-donat" type="button">Donat</button>
         </div>
       </div>
 

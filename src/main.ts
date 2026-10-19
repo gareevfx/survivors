@@ -244,13 +244,6 @@ document.querySelector('#menu-tutorial')?.addEventListener('click', () => startM
 document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
 document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
 document.querySelector('#menu-ffa8')?.addEventListener('click', () => startMatch('ffa8'))
-const donat = document.querySelector<HTMLElement>('#donat')
-document.querySelector('#menu-donat')?.addEventListener('click', () => {
-  donat?.classList.remove('hidden')
-})
-document.querySelector('#donat-close')?.addEventListener('click', () => {
-  donat?.classList.add('hidden')
-})
 const about = document.querySelector<HTMLElement>('#about')
 document.querySelector('#menu-about')?.addEventListener('click', () => {
   about?.classList.remove('hidden')

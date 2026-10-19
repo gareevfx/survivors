@@ -184,7 +184,6 @@ button, canvas { font: inherit; }
 #lesson-menu,
 #lesson-skip,
 #lesson-exit,
-#donat-close,
 #about-close,
 .menu-card button {
   background: var(--panel-2);
@@ -204,7 +203,6 @@ button, canvas { font: inherit; }
 #lesson-menu:hover,
 #lesson-skip:hover,
 #lesson-exit:hover,
-#donat-close:hover,
 #about-close:hover,
 .menu-card button:hover,
 .cmd:hover:not(:disabled) {
@@ -875,7 +873,6 @@ button, canvas { font: inherit; }
   flex-shrink: 0;
 }
 
-#donat,
 #about {
   position: absolute;
   inset: 0;
@@ -887,10 +884,8 @@ button, canvas { font: inherit; }
   padding: 20px;
 }
 
-.donat-card,
-.about-card { width: min(520px, 100%); }
-
 .about-card {
+  width: min(560px, 100%);
   display: flex;
   flex-direction: column;
   max-height: 100%;
@@ -901,9 +896,9 @@ button, canvas { font: inherit; }
 .about-body {
   min-height: 0;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
-.donat-card p,
 .about-card p {
   margin: 0;
   color: var(--text);
@@ -911,22 +906,41 @@ button, canvas { font: inherit; }
   line-height: 1.5;
 }
 
-.about-card p + p { margin-top: 12px; }
+.about-body p + p { margin-top: 12px; }
 
-.about-card a {
-  color: var(--gold);
-  text-underline-offset: 2px;
+.about-body h2 {
+  margin: 22px 0 4px;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-weight: 500;
+  font-size: 26px;
+  line-height: 1.15;
 }
 
-.about-card a:hover { color: var(--paper); }
+.about-body h3 {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+}
+
+.about-body ul {
+  margin: 0;
+  padding-left: 1.15em;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.about-body li + li { margin-top: 6px; }
 
 .selectable {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   user-select: text;
   -webkit-user-select: text;
 }
 
-#donat-close,
-#about-close { margin-top: 14px; }
+#about-close { margin-top: 14px; flex-shrink: 0; }
 
 #menu {
   position: absolute;
