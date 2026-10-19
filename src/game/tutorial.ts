@@ -233,7 +233,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'fog',
-    text: 'Pan east into the black. You cannot see that ground, and shots or deaths there stay silent. Sound comes only from your current sight. Fog of war off, and all cams, open the whole map.',
+    text: 'Pan east into the black. You cannot see that ground, and shots or deaths there stay silent. Sound comes only from your current sight.',
     hud: null,
     world: () => tileCenter(FOG_AT.tx, FOG_AT.ty),
     done: (state) => {
