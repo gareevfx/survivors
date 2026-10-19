@@ -10,7 +10,7 @@ export const FFA_MAP_H = 50
 /** Eight-player free-for-all uses a 100×100 field. */
 export const FFA8_MAP_W = 100
 export const FFA8_MAP_H = 100
-export type MatchMode = 'duel' | 'ffa' | 'ffa8'
+export type MatchMode = 'duel' | 'ffa' | 'ffa8' | 'tutorial'
 
 export const GATHER_TIME = 1.2
 export const GATHER_AMOUNT = 8
@@ -672,7 +672,46 @@ export interface MatchState {
   /** Match time when this side last ordered Hover Grid. -1 until the first use. */
   gridAt: number[]
   events: GameEvent[]
+  /** First-match hint banner. The guided Tutorial button uses `lesson` instead. */
   tutorial: boolean
+  /** Guided tutorial. Null in every normal match. */
+  lesson: Lesson | null
+}
+
+/** Latches for the guided tutorial. Normal matches leave these unused. */
+export interface LessonFlags {
+  panned: boolean
+  zoomed: boolean
+  idle: boolean
+  units: boolean
+  grouped: boolean
+  recalled: boolean
+  scanned: boolean
+  guarded: boolean
+}
+
+export interface Lesson {
+  index: number
+  /** Step whose entry bookkeeping already ran. -1 before the first step. */
+  prepared: number
+  finished: boolean
+  /** The enemy squad may attack. Stays false until the last step. */
+  fight: boolean
+  anchorX: number
+  anchorY: number
+  anchorZoom: number
+  viewX: number
+  viewY: number
+  siloPresses: number
+  siloMark: number
+  oreMark: number
+  bornPike: number
+  bornHowler: number
+  bornFly: number
+  towerIds: number[]
+  captive: number
+  drained: number
+  flags: LessonFlags
 }
 
 export interface Target {

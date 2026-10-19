@@ -1,4 +1,5 @@
 import { updateAnimals } from './animals'
+import { LESSON_PACE, lessonEnemyPush } from './tutorial'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateGuards, updateScanners } from './scanner'
@@ -70,6 +71,7 @@ export function step(state: MatchState, dt: number): void {
   state.time += dt
   drainPower(state, dt)
   updateSiloAi(state, dt)
+  lessonEnemyPush(state)
   revealCloakedByScanners(state)
 
   for (const unit of state.units) {
@@ -921,7 +923,8 @@ function advanceConstruct(state: MatchState, dt: number): void {
     // A site with no worker in range is paused. Progress stays where it is until someone returns.
     if (!crew.length) continue
     const speed = 1 + (crew.length - 1) * 0.6
-    building.progress += (dt * speed) / BUILDING_STATS[building.kind].buildTime
+    const pace = state.lesson && !state.lesson.finished ? LESSON_PACE : 1
+    building.progress += (dt * pace * speed) / BUILDING_STATS[building.kind].buildTime
     if (building.progress < 1) continue
     building.progress = 1
     building.complete = true
@@ -1002,7 +1005,8 @@ function advanceProduction(state: MatchState, dt: number): void {
     if (!building.complete || building.hp <= 0) continue
     const job = building.queue[0]
     if (!job) continue
-    job.remaining -= dt
+    const pace = state.lesson && !state.lesson.finished ? LESSON_PACE : 1
+    job.remaining -= dt * pace
     if (job.remaining > 0) continue
     building.queue.shift()
     spawnTrained(state, building, job.kind)

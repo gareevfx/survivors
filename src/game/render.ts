@@ -1,5 +1,6 @@
 import { drawAnimal } from './animalArt'
 import { FAR_ZOOM, type Camera } from './camera'
+import { lessonView } from './tutorial'
 import { controlledSide } from './control'
 import { buildingCenter, buildingRect, cryoOccupants, getTarget, inFriendlyPillarSight, placementAllowed, sideKeep } from './state'
 import { flasherFrame, flasherSprite } from './flasherArt'
@@ -175,6 +176,7 @@ export function renderWorld(
   for (const spot of memories) drawMemory(ctx, state, spot, view, coarse, bucket)
 
   for (const ping of state.pings) drawPing(ctx, ping.x, ping.y, ping.life / ping.max, ping.color)
+  drawLessonMark(ctx, state)
 
   const selected = new Set(state.selectedUnits)
   const units = state.units.slice().sort((a, b) => a.y - b.y)
@@ -1369,6 +1371,19 @@ function drawOrderLine(ctx: CanvasRenderingContext2D, unit: Unit): void {
   ctx.moveTo(unit.x, unit.y)
   for (const point of unit.path) ctx.lineTo(point.x, point.y)
   if (unit.goalX != null && unit.goalY != null) ctx.lineTo(unit.goalX, unit.goalY)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawLessonMark(ctx: CanvasRenderingContext2D, state: MatchState): void {
+  const hint = lessonView(state)
+  if (!hint?.world) return
+  const pulse = 14 + Math.sin(state.time * 5) * 6
+  ctx.save()
+  ctx.strokeStyle = 'rgba(230, 193, 90, 0.95)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(hint.world.x, hint.world.y, 18 + pulse, 0, Math.PI * 2)
   ctx.stroke()
   ctx.restore()
 }

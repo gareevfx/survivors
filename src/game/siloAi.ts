@@ -859,6 +859,8 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
  */
 export function updateSiloAi(state: MatchState, dt: number): void {
   if (state.outcome) return
+  // The guided lesson keeps this side passive until the player is sent to attack.
+  if (state.mode === 'tutorial') return
   // Eight sides think one army per tick, the same stagger as the old 150×150 field.
   // Four-side and duel keep the half-second beat.
   const crowded = state.playerCount > 4

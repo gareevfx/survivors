@@ -86,7 +86,7 @@
       <div id="stage">
         <div id="hud-row">
           <div id="side-switch" class="side-switch hidden" role="group" aria-label="Controlled side"></div>
-          <div class="readout" title="Dumps stored in your Silo and Storages">
+          <div id="dumps-readout" class="readout" title="Dumps stored in your Silo and Storages">
             <span class="swatch ore"></span>
             <span>Dumps</span>
             <b id="ore">0</b>
@@ -100,6 +100,15 @@
           <div id="sides" class="sides"></div>
         </div>
         <canvas id="view" tabindex="0" aria-label="Survivors battlefield"></canvas>
+        <div id="lesson" class="hidden">
+          <p class="eyebrow" id="lesson-kicker">Step 1 / 18</p>
+          <p id="lesson-text"></p>
+          <div class="lesson-actions">
+            <button id="lesson-skip" type="button">Skip step</button>
+            <button id="lesson-exit" type="button">Exit tutorial</button>
+          </div>
+        </div>
+        <div id="lesson-arrow" class="hidden" aria-hidden="true"></div>
         <div id="paused" class="hidden">Paused</div>
         <div id="ai-badge" class="hidden">SiloAI</div>
         <div id="both-badge" class="hidden">All cams</div>
@@ -120,6 +129,18 @@
       <div id="replay-stats" class="hidden" role="dialog" aria-modal="true" aria-label="Match statistics">
         <div class="card end-card">
           <div id="replay-stats-body" class="end-stats"></div>
+        </div>
+      </div>
+
+      <div id="lesson-done" class="hidden">
+        <div class="card end-card">
+          <p class="eyebrow">Lesson</p>
+          <h2>Tutorial complete</h2>
+          <p>You hauled Dumps, raised buildings, and learned the field. A 1v1 is the same rules on a wider map.</p>
+          <div class="end-actions">
+            <button id="lesson-play" type="button">Play 1v1</button>
+            <button id="lesson-menu" type="button">Menu</button>
+          </div>
         </div>
       </div>
 
@@ -172,6 +193,8 @@
           <p class="meta" id="menu-ffa-note"></p>
           <button id="menu-ffa8" type="button">Free for all (8 players)</button>
           <p class="meta" id="menu-ffa8-note"></p>
+          <button id="menu-tutorial" type="button">Tutorial</button>
+          <p class="meta" id="menu-tutorial-note"></p>
           <button id="menu-resume" type="button" class="hidden">Resume</button>
           <button id="menu-about" type="button">About the Game</button>
           <button id="menu-donat" type="button">Donat</button>

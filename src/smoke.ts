@@ -36,6 +36,7 @@ import {
 } from './game/vision'
 import { toggleGuard, toggleScanner, updateGuards, updateScanners } from './game/scanner'
 import { activeKind, controlGroupIndex, cycleActiveKind, frostHotkey, narrowSelection, selectOwnCombatUnits, selectOwnSilo, setActiveKind, SILO_DOUBLE_TAP_MS } from './game/input'
+import { lessonStepCount, lessonStepId, lessonTick, lessonView, noteLessonCamera, skipLesson, TUTORIAL_H, TUTORIAL_W } from './game/tutorial'
 import { commandSnapshot, describeSelection, endStatsHtml, statsPanelHtml } from './ui/hud'
 import { loreBody } from './ui/lore'
 
@@ -2706,6 +2707,7 @@ unitsButtonSelectsFlashersAndGorillas()
 cameraZoomsOutToTheWholeMap()
 productionIconsReplaceLabels()
 selectionIconsGroupByType()
+guidedLessonAdvancesWhenEachActionHappens()
 console.log('smoke ok')
 
 function passagesStayFourWide(): void {
@@ -8160,4 +8162,216 @@ function selectionIconsGroupByType(): void {
   assert(!one.includes('data-kind='), 'a single unit still shows the group icons')
   assert(!one.includes(`${Math.ceil(frog.hp)} / ${UNIT_STATS.frog.hp}`), 'a single unit still prints the health line')
   assert(one.includes('class="meter"'), 'a single unit lost its health meter')
+}
+
+function expectLesson(state: MatchState, id: string): void {
+  lessonTick(state)
+  const lesson = state.lesson
+  assert(lesson && !lesson.finished && lessonStepId(lesson.index) === id, `lesson did not open ${id}`)
+}
+
+function leaveLesson(state: MatchState, id: string): void {
+  const lesson = state.lesson
+  assert(lesson, 'lesson missing')
+  const index = lesson.index
+  lessonTick(state)
+  assert(lesson.index === index + 1, `${id} did not advance`)
+}
+
+function guidedLessonAdvancesWhenEachActionHappens(): void {
+  const total = lessonStepCount()
+  assert(total >= 12 && total <= 18, `tutorial has ${total} steps`)
+
+  const duel = createMatch(2, 'duel')
+  assert(duel.mode === 'duel' && duel.lesson === null && duel.tutorial, 'a duel picked up the lesson')
+
+  const state = createMatch(3, 'tutorial')
+  assert(state.mode === 'tutorial' && state.playerCount === 2, 'tutorial is not a 1v1')
+  assert(state.mapW === TUTORIAL_W && state.mapH === TUTORIAL_H && state.mapW < MAP_W, 'tutorial map is not the small field')
+  assert(state.lesson && state.lesson.index === 0 && !state.lesson.finished && !state.lesson.fight, 'lesson did not start on step 1')
+  assert(!state.tutorial && !state.fogCleared, 'tutorial changed the hint banner or the fog setting')
+  assert(state.oreHeld[0] === 700, 'tutorial did not start with dumps to spend')
+  const foeKeep = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  const homeKeep = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  assert(foeKeep && homeKeep && foeKeep.hp === 420, 'the enemy Silo is not the weak one')
+  assert(Math.hypot(buildingCenter(foeKeep).x - buildingCenter(homeKeep).x, buildingCenter(foeKeep).y - buildingCenter(homeKeep).y) > 260, 'the enemy Silo starts inside home sight')
+  const captive = state.units.find((unit) => unit.id === state.lesson?.captive)
+  assert(captive && captive.owner === 1 && tileVisible(state, Math.floor(captive.x / TILE), Math.floor(captive.y / TILE)), 'the enemy Stalker is not in sight')
+  const quiet = state.units.filter((unit) => unit.owner === 1 && (unit.kind === 'pike' || unit.kind === 'howler'))
+  for (let i = 0; i < 90; i++) step(state, 1 / 60)
+  assert(quiet.every((unit) => unit.order == null), 'the enemy attacked before the last step')
+  assert(state.buildings.filter((building) => building.owner === 1).length === 1, 'SiloAI built during the tutorial')
+
+  const held = createMatch(4, 'tutorial')
+  held.paused = true
+  const frozen = held.time
+  noteLessonCamera(held, 40, 40, 1)
+  noteLessonCamera(held, 160, 40, 1.2)
+  expectLesson(held, 'camera')
+  leaveLesson(held, 'camera')
+  step(held, 1)
+  assert(held.time === frozen && held.lesson?.index === 1, 'pause let the tutorial clock or the enemy move')
+
+  const card = lessonView(state)
+  assert(card && card.step === 1 && card.total === total && card.text.includes('zoom'), 'the first card is wrong')
+  expectLesson(state, 'camera')
+  noteLessonCamera(state, 80, 80, 1.35)
+  noteLessonCamera(state, 220, 80, 1.6)
+  leaveLesson(state, 'camera')
+
+  expectLesson(state, 'silo')
+  assert(selectOwnSilo(state), 'key 1 missed the Silo')
+  leaveLesson(state, 'silo')
+
+  expectLesson(state, 'stalkers')
+  const porter = state.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
+  assert(porter, 'no Stalker to select')
+  state.selectedUnits = [porter.id]
+  leaveLesson(state, 'stalkers')
+
+  expectLesson(state, 'idle')
+  assert(lessonView(state)?.hud === '#idle', 'Idle is not highlighted')
+  assert(state.units.some((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.order == null), 'no idle Stalker')
+  state.lesson!.flags.idle = true
+  leaveLesson(state, 'idle')
+
+  expectLesson(state, 'haul')
+  const node = state.ore[0]
+  assert(node, 'no Dumps pile')
+  commandGather(state, [porter.id], node.id)
+  const marked = state.lesson!.oreMark
+  let hauled = false
+  for (let i = 0; i < 2400 && !hauled; i++) {
+    step(state, 1 / 60)
+    hauled = (state.oreHeld[0] ?? 0) > marked
+  }
+  assert(hauled, 'hauling Dumps did not fill the Silo')
+  commandStop(state, state.units.filter((unit) => unit.owner === 0 && unit.kind === 'porter').map((unit) => unit.id))
+  leaveLesson(state, 'haul')
+
+  expectLesson(state, 'capacity')
+  assert(lessonView(state)?.hud === '#dumps-readout', 'the Dumps readout is not highlighted')
+  selectOwnSilo(state)
+  leaveLesson(state, 'capacity')
+
+  expectLesson(state, 'storage')
+  const storageError = tryPlace(state, 0, 'silo', 8, 4, [])
+  assert(storageError === null, storageError ?? 'Storage placement failed')
+  leaveLesson(state, 'storage')
+  const storage = state.buildings.find((building) => building.owner === 0 && building.kind === 'silo')
+  assert(storage, 'Storage is missing')
+  storage.complete = true
+  storage.progress = 1
+  recomputeSupply(state)
+
+  expectLesson(state, 'factory')
+  const factoryError = tryPlace(state, 0, 'yard', 8, 12, [])
+  assert(factoryError === null, factoryError ?? 'Factory placement failed')
+  leaveLesson(state, 'factory')
+  const yard = state.buildings.find((building) => building.owner === 0 && building.kind === 'yard')
+  assert(yard, 'Factory is missing')
+  yard.complete = true
+  yard.progress = 1
+
+  expectLesson(state, 'train')
+  assert(lessonView(state)?.hud === '#commands', 'the command card is not highlighted')
+  assert(tryTrain(state, yard.id, 'pike') === null, 'Flasher training was refused')
+  assert(tryTrain(state, yard.id, 'howler') === null, 'Gorilla training was refused')
+  assert(tryTrain(state, yard.id, 'drone') === null, 'Fly training was refused')
+  leaveLesson(state, 'train')
+
+  expectLesson(state, 'groups')
+  assert(lessonView(state)?.hud === '#units', 'Units is not highlighted')
+  assert(selectOwnCombatUnits(state).length > 0 && state.lesson!.flags.units, 'Units did not select combat units')
+  state.lesson!.flags.grouped = true
+  state.lesson!.flags.recalled = true
+  leaveLesson(state, 'groups')
+
+  expectLesson(state, 'capture')
+  const flasher = state.units.find((unit) => unit.owner === 0 && unit.kind === 'pike' && unit.power > 0.5 && unit.hp > 0)
+  assert(flasher && state.lesson, 'no Flasher for the capture')
+  commandAttack(state, [flasher.id], state.lesson.captive, 'unit')
+  let captured = false
+  for (let i = 0; i < 900 && !captured; i++) {
+    step(state, 1 / 60)
+    captured = state.units.find((unit) => unit.id === state.lesson?.captive)?.owner === 0
+  }
+  assert(captured, 'the exposed Stalker was not captured')
+  leaveLesson(state, 'capture')
+
+  expectLesson(state, 'pillar')
+  const pillarError = tryPlace(state, 0, 'tower', 6, 3, [])
+  assert(pillarError === null, pillarError ?? 'Pillar placement failed')
+  leaveLesson(state, 'pillar')
+
+  expectLesson(state, 'battery')
+  const drained = state.units.find((unit) => unit.id === state.lesson?.drained)
+  const cell = state.batteries[0]
+  assert(drained && cell, 'the low Flasher or the battery is missing')
+  commandMove(state, [drained.id], (cell.tx + 0.5) * TILE, (cell.ty + 0.5) * TILE, false)
+  let charged = false
+  for (let i = 0; i < 300 && !charged; i++) {
+    step(state, 1 / 60)
+    charged = drained.power >= 0.95
+  }
+  if (!charged) {
+    drained.x = (cell.tx + 0.5) * TILE
+    drained.y = (cell.ty + 0.5) * TILE
+    step(state, 1 / 60)
+  }
+  assert(drained.power >= 0.95, 'walking onto the battery did not refill Power')
+  leaveLesson(state, 'battery')
+
+  expectLesson(state, 'fly')
+  const fly = state.units.find((unit) => unit.owner === 0 && unit.kind === 'drone' && unit.hp > 0)
+  assert(fly, 'no Fly')
+  toggleScanner(state, [fly.id])
+  lessonTick(state)
+  assert(state.lesson!.flags.scanned && lessonStepId(state.lesson!.index) === 'fly', 'Scanner did not latch')
+  toggleGuard(state, [fly.id])
+  leaveLesson(state, 'fly')
+
+  expectLesson(state, 'freeze')
+  const frog = state.units.find((unit) => unit.owner === 0 && unit.kind === 'frog' && unit.hp > 0)
+  assert(frog, 'no Frog')
+  const treesBefore = state.rocks.filter((rock) => rock.kind === 'tree').length
+  commandFrost(state, [frog.id])
+  assert(frog.frostCd > 0, 'Freeze did not fire')
+  assert(state.rocks.filter((rock) => rock.kind === 'tree').length < treesBefore, 'Freeze did not shatter a tree')
+  leaveLesson(state, 'freeze')
+
+  expectLesson(state, 'demolish')
+  const pillar = state.buildings.find((building) => building.owner === 0 && building.kind === 'tower' && building.hp > 0)
+  assert(pillar && state.lesson!.towerIds.includes(pillar.id), 'the Pillar was not marked for demolish')
+  const stock = state.oreHeld[0] ?? 0
+  assert(demolishBuilding(state, pillar.id), 'demolish refused the Pillar')
+  assert((state.oreHeld[0] ?? 0) === stock + 25, 'Pillar demolish did not return 25 dumps')
+  assert(!demolishBuilding(state, homeKeep.id), 'the Silo was demolished')
+  leaveLesson(state, 'demolish')
+
+  expectLesson(state, 'fog')
+  const fogX = 24.5 * TILE
+  const fogY = 8.5 * TILE
+  assert(state.visible[8 * state.mapW + 24] !== 1, 'the eastern ground started visible')
+  noteLessonCamera(state, fogX, fogY, state.lesson!.anchorZoom)
+  leaveLesson(state, 'fog')
+
+  expectLesson(state, 'win')
+  assert(state.lesson!.fight, 'the last step did not release the enemy')
+  assert(quiet.every((unit) => unit.order == null), 'the enemy moved before the push')
+  step(state, 1 / 60)
+  assert(quiet.some((unit) => unit.order?.type === 'attack'), 'the enemy squad did not attack the Silo')
+  foeKeep.hp = 0
+  step(state, 1 / 60)
+  assert(state.outcome === 'win', 'destroying the enemy Silo did not win')
+  assert(lessonView(state) === null, 'the lesson card stayed up after the win')
+  lessonTick(state)
+  assert(state.lesson!.finished, 'the lesson did not finish')
+
+  const skipped = createMatch(9, 'tutorial')
+  lessonTick(skipped)
+  skipLesson(skipped)
+  assert(skipped.lesson?.index === 1 && skipped.lesson.prepared === -1, 'Skip step did not move on')
+  while (skipped.lesson && !skipped.lesson.finished) skipLesson(skipped)
+  assert(skipped.lesson?.finished && skipped.outcome === null && !skipped.fogCleared, 'skipping the lesson ended the match or cleared fog')
 }

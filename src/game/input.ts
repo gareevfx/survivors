@@ -90,6 +90,7 @@ export function selectOwnCombatUnits(state: MatchState): number[] {
     pushToast(state, 'No Flashers or Gorillas.')
     return []
   }
+  if (state.lesson) state.lesson.flags.units = true
   state.selectedUnits = ids
   state.selectedBuilding = null
   state.selectedOre = null
@@ -196,6 +197,7 @@ export function selectOwnSilo(state: MatchState): { x: number; y: number } | nul
   state.moveArmed = false
   state.selectedBuilding = keep.id
   state.events.push({ type: 'select' })
+  if (state.lesson) state.lesson.siloPresses += 1
   return buildingCenter(keep)
 }
 
@@ -916,6 +918,7 @@ function clearSelection(state: MatchState): void {
       if (n == null) return
       if (event.ctrlKey || event.metaKey) {
         groups.set(n, state.selectedUnits.slice())
+        if (state.lesson && state.selectedUnits.length) state.lesson.flags.grouped = true
         pushToast(state, `Group ${n} saved.`)
         return
       }
@@ -924,6 +927,7 @@ function clearSelection(state: MatchState): void {
         return !!unit && unit.hp > 0 && unit.owner === controlledSide(state)
       })
       groups.set(n, ids)
+      if (state.lesson && ids.length) state.lesson.flags.recalled = true
       if (!ids.length) return
       state.selectedUnits = ids.slice()
       state.selectedBuilding = null

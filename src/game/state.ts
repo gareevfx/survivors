@@ -1,4 +1,5 @@
 import { spawnAnimals } from './animals'
+import { createTutorialMatch } from './tutorial'
 import { generateBattlefield, pickFfa8Sites, pickFfaSites, pickKeepSites, workerCamp } from './map'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
@@ -438,6 +439,7 @@ export function makeBuilding(
 }
 
 export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState {
+  if (mode === 'tutorial') return createTutorialMatch(seed)
   const duel = mode === 'duel'
   const grand = mode === 'ffa8'
   const mapW = grand ? FFA8_MAP_W : duel ? MAP_W : FFA_MAP_W
@@ -540,6 +542,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     gridAt: Array.from({ length: playerCount }, () => -1),
     events: [],
     tutorial: true,
+    lesson: null,
   }
 
   const campsByOwner: Array<{ owner: PlayerId; tx: number; ty: number }> = sites.map((site, owner) => ({

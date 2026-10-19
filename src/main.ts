@@ -11,6 +11,8 @@ import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitByI
 import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { playerHearsAt } from './game/vision'
 import { resetHudCache, syncHud, toggleReplayStats } from './ui/hud'
+import { hideLesson, syncLesson } from './ui/lesson'
+import { lessonTick, noteLessonCamera, skipLesson } from './game/tutorial'
 
 const view = document.querySelector<HTMLCanvasElement>('#view')
 const minimap = document.querySelector<HTMLCanvasElement>('#minimap')
@@ -47,6 +49,10 @@ if (ffaNote) {
 const ffa8Note = document.querySelector<HTMLElement>('#menu-ffa8-note')
 if (ffa8Note) {
   ffa8Note.textContent = `${PLAYER_NAME.slice(0, 8).join(', ')}, each against the others, on a ${FFA8_MAP_W}×${FFA8_MAP_H} field.`
+}
+const tutorialNote = document.querySelector<HTMLElement>('#menu-tutorial-note')
+if (tutorialNote) {
+  tutorialNote.textContent = 'A guided match on a small field. The enemy holds still until the last step.'
 }
 const sfx = new Sfx()
 let commandArmedAt = 0
@@ -95,9 +101,11 @@ function showMenu(): void {
   menu?.classList.remove('hidden')
   if (menuResume) menuResume.classList.toggle('hidden', !match || match.outcome != null)
   if (match && !match.outcome) match.paused = true
+  hideLesson()
 }
 
 function presentMatch(mode: MatchMode): void {
+  hideLesson()
   last = performance.now()
   acc = 0
   closeCommand()
@@ -108,9 +116,11 @@ function presentMatch(mode: MatchMode): void {
   camera.zoom = mode === 'ffa8' ? 0.75 : mode === 'ffa' ? 0.85 : 1.35
   if (hintCopy) {
     hintCopy.textContent =
-      mode === 'duel'
-        ? 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
-        : 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+      mode === 'tutorial'
+        ? 'Follow the lesson panel. Skip a step, or leave for the menu, whenever you want.'
+        : mode === 'duel'
+          ? 'Destroy the enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
+          : 'Destroy every enemy Silo and defend your own. Select the stalkers and right-click the dumps beside the Silo.'
   }
   input.clearGroups()
   resetHudCache()
@@ -130,6 +140,7 @@ function startReplay(): void {
   sealReplayStats(match)
   finishRecording()
   match = createMatch(tape.seed, tape.mode)
+  if (match.mode === 'tutorial') match.lesson = null
   match.replay = true
   match.tutorial = false
   match.paused = false
@@ -210,6 +221,7 @@ function selectIdlePorters(): void {
     pushToast(live, 'Every stalker is already busy.')
     return
   }
+  if (live.lesson) live.lesson.flags.idle = true
   live.selectedUnits = ids
   live.selectedBuilding = null
   live.selectedOre = null
@@ -228,6 +240,7 @@ document.querySelector('#pause')?.addEventListener('click', () => {
   match.paused = !match.paused
 })
 document.querySelector('#menu-btn')?.addEventListener('click', () => showMenu())
+document.querySelector('#menu-tutorial')?.addEventListener('click', () => startMatch('tutorial'))
 document.querySelector('#menu-duel')?.addEventListener('click', () => startMatch('duel'))
 document.querySelector('#menu-ffa')?.addEventListener('click', () => startMatch('ffa'))
 document.querySelector('#menu-ffa8')?.addEventListener('click', () => startMatch('ffa8'))
@@ -252,6 +265,14 @@ menuResume?.addEventListener('click', () => {
   match.paused = false
 })
 document.querySelector('#to-menu')?.addEventListener('click', () => showMenu())
+document.querySelector('#lesson-exit')?.addEventListener('click', () => showMenu())
+document.querySelector('#lesson-menu')?.addEventListener('click', () => showMenu())
+document.querySelector('#lesson-skip')?.addEventListener('click', () => {
+  if (!match || match.replay) return
+  skipLesson(match)
+  lessonTick(match)
+})
+document.querySelector('#lesson-play')?.addEventListener('click', () => startMatch('duel'))
 again?.addEventListener('click', () => boot())
 replayButton?.addEventListener('click', () => {
   sfx.unlock()
@@ -358,6 +379,11 @@ function loop(now: number): void {
       pointer: input.pointerWorld(),
     })
     renderMinimap(mini, live, camera, drawn.viewW, drawn.viewH)
+    if (live.lesson) {
+      const size = frameSize()
+      noteLessonCamera(live, camera.x + size.w / (2 * camera.zoom), camera.y + size.h / (2 * camera.zoom), camera.zoom)
+      lessonTick(live)
+    }
     syncHud(live, {
       armPlace: (kind) => {
         if (live.paused || handsOff(live)) return
@@ -383,6 +409,7 @@ function loop(now: number): void {
       selectIdle: () => selectIdlePorters(),
       restart: () => boot(),
     })
+    if (live.lesson || live.mode === 'tutorial') syncLesson(live, camera, stage)
     const events = live.events.splice(0, live.events.length)
     sfx.consume(audibleEvents(events, (x, y) => playerHearsAt(live, x, y)))
     const cursor = live.placement ? 'cell' : live.attackMoveArmed ? 'crosshair' : live.moveArmed ? 'copy' : 'crosshair'

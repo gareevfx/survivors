@@ -180,6 +180,10 @@ button, canvas { font: inherit; }
 #replay,
 #again,
 #to-menu,
+#lesson-play,
+#lesson-menu,
+#lesson-skip,
+#lesson-exit,
 #donat-close,
 #about-close,
 .menu-card button {
@@ -196,6 +200,10 @@ button, canvas { font: inherit; }
 #replay:hover,
 #again:hover,
 #to-menu:hover,
+#lesson-play:hover,
+#lesson-menu:hover,
+#lesson-skip:hover,
+#lesson-exit:hover,
 #donat-close:hover,
 #about-close:hover,
 .menu-card button:hover,
@@ -642,6 +650,57 @@ button, canvas { font: inherit; }
   letter-spacing: 0.06em;
 }
 
+#lesson {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 5;
+  width: min(440px, calc(100% - 24px));
+  padding: 10px 12px 12px;
+  background: rgba(26, 22, 12, 0.94);
+  border: 1px solid #5a4c28;
+  border-radius: 6px;
+  color: #f3e7c2;
+  pointer-events: auto;
+}
+
+#lesson .eyebrow { margin: 0 0 4px; }
+
+#lesson p { margin: 0; font-size: 14px; line-height: 1.4; }
+
+.lesson-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#lesson-arrow {
+  position: fixed;
+  z-index: 6;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 2px solid #e6c15a;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 0 7px rgba(230, 193, 90, 0.28);
+  animation: lesson-pulse 1.05s ease-in-out infinite;
+}
+
+.lesson-hot {
+  outline: 2px solid #e6c15a;
+  outline-offset: 3px;
+  animation: lesson-pulse 1.05s ease-in-out infinite;
+}
+
+@keyframes lesson-pulse {
+  0%,
+  100% { box-shadow: 0 0 0 4px rgba(230, 193, 90, 0.18); }
+  50% { box-shadow: 0 0 0 10px rgba(230, 193, 90, 0.38); }
+}
+
+#lesson-done,
 #overlay {
   position: absolute;
   inset: 0;
