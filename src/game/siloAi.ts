@@ -1,7 +1,7 @@
 import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, dropoffRoom, dropoffsFull, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
-import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestWalkable, stopMoving } from './nav'
+import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestParking, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
-import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, insideSiloFreezeBan, isWalkable, rockAt, rockById } from './state'
+import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, insideSiloFreezeBan, isWalkable, rockAt, rockById, sideStillIn } from './state'
 import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, isShutdown, PILLAR_CHARGE_INSET, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
 import { depositKnown, rememberedBuilding, sideTileExplored } from './vision'
@@ -110,7 +110,14 @@ function tileBit(state: MatchState, grid: Uint8Array, tx: number, ty: number): b
 }
 
 function idlePorter(unit: Unit, owner: PlayerId): boolean {
-  return unit.owner === owner && unit.kind === 'porter' && unit.hp > 0 && unit.frozen == null && !unit.order
+  return (
+    unit.owner === owner &&
+    unit.kind === 'porter' &&
+    unit.hp > 0 &&
+    unit.frozen == null &&
+    unit.captureStun <= 0 &&
+    !unit.order
+  )
 }
 
 /** Unexplored ground this close to the scout is searched first, so new minerals are found before a long hunt. */
@@ -388,6 +395,7 @@ function claimScout(state: MatchState, side: Brain, idle: Unit[]): Unit | null {
   }
   if (
     current?.kind === 'porter' &&
+    current.captureStun <= 0 &&
     porters.length >= 2 &&
     current.cargo <= 0 &&
     current.order?.type !== 'construct' &&
@@ -443,8 +451,9 @@ function knownEnemyBuilding(state: MatchState, side: Brain): { x: number; y: num
   return fallback
 }
 
-function keepStands(state: MatchState, owner: PlayerId): boolean {
-  return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+/** A side with no Silo still plays while a Factory or a combat unit can take one back. */
+function sideStillPlaying(state: MatchState, owner: PlayerId): boolean {
+  return sideStillIn(state, owner)
 }
 
 function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
@@ -794,7 +803,7 @@ function sendStalkerToDump(state: MatchState, side: Brain, nodeId: number): void
   )
   if (mining) return
   const candidate = state.units.find((unit) => {
-    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0) return false
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0 || unit.captureStun > 0) return false
     if (unit.id === side.scout) return false
     const order = unit.order
     if (order?.type === 'construct') return false
@@ -825,6 +834,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
       unit.owner === side.owner &&
       unit.kind === 'porter' &&
       unit.hp > 0 &&
+      unit.captureStun <= 0 &&
       unit.cargo <= 0 &&
       unit.order == null &&
       unit.id !== side.scout,
@@ -870,7 +880,7 @@ export function updateSiloAi(state: MatchState, dt: number): void {
   state.aiAcc += dt
   if (state.aiAcc >= think) {
     if (aiSuspended(state, 1)) state.aiAcc = think
-    else if (state.eliminated[1] || !keepStands(state, 1)) state.aiAcc = 0
+    else if (state.eliminated[1] || !sideStillPlaying(state, 1)) state.aiAcc = 0
     else if (budget > 0) {
       state.aiAcc = 0
       budget -= 1
@@ -884,7 +894,7 @@ export function updateSiloAi(state: MatchState, dt: number): void {
       state.sideAcc[owner] = think
       continue
     }
-    if (state.eliminated[owner] || !keepStands(state, owner)) {
+    if (state.eliminated[owner] || !sideStillPlaying(state, owner)) {
       state.sideAcc[owner] = 0
       continue
     }
@@ -896,7 +906,7 @@ export function updateSiloAi(state: MatchState, dt: number): void {
     budget -= 1
     runSide(state, owner)
   }
-  if (!state.aiControl || state.eliminated[0] || !keepStands(state, 0) || aiSuspended(state, 0)) return
+  if (!state.aiControl || state.eliminated[0] || !sideStillPlaying(state, 0) || aiSuspended(state, 0)) return
   state.playerAiAcc += dt
   if (state.playerAiAcc < think) return
   if (budget <= 0 && crowded) {
@@ -1066,11 +1076,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
   sendScout(state, side, scout)
 
   const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
-  if (!keep?.complete) {
-    finish(state, side)
-    return
-  }
-
+  if (keep?.complete) {
   if (cryoWanted(state, side)) installCryo(state, keep.id)
 
   const queuedPorters = keep.queue.filter((job) => job.kind === 'porter').length
@@ -1107,6 +1113,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
       placeChartedNearKeep(state, side, 'yard')
     }
   }
+  }
 
   const readyYards = state.buildings.filter(
     (building) => building.owner === side.owner && building.kind === 'yard' && building.complete && building.hp > 0,
@@ -1139,6 +1146,17 @@ function runSide(state: MatchState, owner: PlayerId): void {
       unit.hp > 0 &&
       !isShutdown(unit),
   )
+  if (!keep?.complete) {
+    const ownRuin = ownRuinedKeep(state, side.owner)
+    const enemyRuin = enemyRuinToHold(state, side)
+    if (ownRuin) holdNearRuin(state, army, ownRuin)
+    else if (enemyRuin) {
+      side.attacking = true
+      holdNearRuin(state, army, enemyRuin)
+    }
+    finish(state, side)
+    return
+  }
   const keepPoint = buildingCenter(keep)
   const threats = siloAttackers(state, side, keepPoint)
   const castle = spottedKeep(state, side.owner)
@@ -1150,6 +1168,13 @@ function runSide(state: MatchState, owner: PlayerId): void {
   if (threats.length) {
     side.attacking = false
     defendHome(state, army, threats)
+    finish(state, side)
+    return
+  }
+  const enemyRuin = enemyRuinToHold(state, side)
+  if (enemyRuin) {
+    side.attacking = true
+    holdNearRuin(state, army, enemyRuin)
     finish(state, side)
     return
   }
@@ -1285,6 +1310,7 @@ function employIdleStalkers(state: MatchState, side: Brain): void {
       unit.owner === side.owner &&
       unit.kind === 'porter' &&
       unit.hp > 0 &&
+      unit.captureStun <= 0 &&
       unit.cargo <= 0 &&
       !unit.order &&
       unit.id !== side.scout,
@@ -1355,12 +1381,77 @@ function nearestKnownDump(
  * Repair the closest ruined Silo this side has explored, when the ground is safe
  * and the repair is affordable. One Stalker goes. A site already being repaired is left alone.
  */
+/** Park Flashers and Gorillas on open ground beside a ruined Silo. A later think leaves that spot alone. */
+function holdNearRuin(state: MatchState, units: Unit[], building: Building): void {
+  const rect = buildingRect(building)
+  const stats = BUILDING_STATS[building.kind]
+  for (const unit of units) {
+    if (unit.kind !== 'pike' && unit.kind !== 'howler') continue
+    if (unit.hp <= 0 || unit.ice > 0 || isShutdown(unit)) continue
+    const range = UNIT_STATS[unit.kind].range
+    const order = unit.order
+    const orderedInside =
+      (order?.type === 'attackMove' || order?.type === 'move') && distToRect(order.x, order.y, rect) <= range
+    if (distToRect(unit.x, unit.y, rect) <= range * 0.85) {
+      if (
+        (order?.type === 'attackMove' || order?.type === 'move') &&
+        distToRect(order.x, order.y, rect) > range
+      ) {
+        unit.order = null
+        stopMoving(unit)
+      }
+      continue
+    }
+    if (orderedInside) continue
+    const park = nearestParking(state, building.tx, building.ty, stats.w, stats.h, unit.x, unit.y)
+    if (!park) continue
+    commandMove(state, [unit.id], park.x, park.y, true)
+  }
+}
+
+/** A ruined enemy Silo this side is already fighting, claiming, or standing next to. */
+function enemyRuinToHold(state: MatchState, side: Brain): Building | null {
+  const homeBuilding = ownKeep(state, side.owner) ?? ownRuinedKeep(state, side.owner)
+  const home = homeBuilding ? buildingCenter(homeBuilding) : { x: 0, y: 0 }
+  let best: Building | null = null
+  let bestD = Infinity
+  const stats = BUILDING_STATS.keep
+  for (const building of state.buildings) {
+    if (building.kind !== 'keep' || !building.ruined || building.owner < 0 || building.owner === side.owner) continue
+    const center = buildingCenter(building)
+    const seen = seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)
+    const claiming = building.captureBy === side.owner
+    const struck = building.struckBy === side.owner
+    let near = false
+    for (const unit of state.units) {
+      if (unit.owner !== side.owner || unit.hp <= 0) continue
+      if (unit.kind !== 'pike' && unit.kind !== 'howler') continue
+      if (Math.hypot(unit.x - center.x, unit.y - center.y) <= 8 * TILE) {
+        near = true
+        break
+      }
+    }
+    if (!seen && !claiming && !near && !struck) continue
+    if (!claiming && !near && !struck && !side.attacking) continue
+    const distance = Math.hypot(center.x - home.x, center.y - home.y)
+    if (distance < bestD) {
+      best = building
+      bestD = distance
+    }
+  }
+  return best
+}
+
+function ownRuinedKeep(state: MatchState, owner: PlayerId): Building | undefined {
+  return state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.ruined)
+}
+
 function repairRuins(state: MatchState, side: Brain): void {
-  const keep = ownKeep(state, side.owner)
+  const keep = ownKeep(state, side.owner) ?? ownRuinedKeep(state, side.owner)
   if (!keep) return
   const home = buildingCenter(keep)
   const ruins = state.buildings
-    .filter((building) => building.ruined && building.kind === 'keep')
+    .filter((building) => building.ruined && building.kind === 'keep' && building.owner === side.owner)
     .sort((a, b) => {
       const da = Math.hypot(buildingCenter(a).x - home.x, buildingCenter(a).y - home.y)
       const db = Math.hypot(buildingCenter(b).x - home.x, buildingCenter(b).y - home.y)
@@ -1396,7 +1487,7 @@ function repairPorter(state: MatchState, side: Brain, x: number, y: number): Uni
   let best: Unit | undefined
   let bestRank = Infinity
   for (const unit of state.units) {
-    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0) continue
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.cargo > 0 || unit.captureStun > 0) continue
     if (unit.id === side.scout) continue
     const order = unit.order
     if (order?.type === 'construct' || order?.type === 'repair') continue

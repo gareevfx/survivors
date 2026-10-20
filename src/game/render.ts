@@ -1,3 +1,4 @@
+import { SILO_CAPTURE_SECONDS, buildingMaxHp } from './balance'
 import { drawAnimal } from './animalArt'
 import { FAR_ZOOM, type Camera } from './camera'
 import { lessonView } from './tutorial'
@@ -576,6 +577,8 @@ function memoryBuilding(spot: BuildingSighting): Building | null {
     repairPaid: false,
     cryo: spot.cryo === true,
     cryoRecover: 0,
+    capture: 0,
+    captureBy: -1,
   }
   if (spot.held != null) ghostHeld.set(building, spot.held)
   ghostDraw.add(building)
@@ -782,7 +785,7 @@ function buildingLod(state: MatchState, building: Building, bucket: number): Lod
     building.kind === 'keep'
       ? building.ruined
         ? 4
-        : keepDamageStage(building.hp, stats.hp)
+        : keepDamageStage(building.hp, buildingMaxHp(building.kind))
       : building.kind === 'yard'
         ? factoryDamageStage(building.hp, stats.hp)
         : building.kind === 'tower'
@@ -882,7 +885,7 @@ function drawUnitLod(ctx: CanvasRenderingContext2D, unit: Unit, selected: boolea
   const sprite = unitLod(unit.kind, unit.owner, bucket)
   ctx.save()
   ctx.imageSmoothingEnabled = true
-  if (isShutdown(unit)) ctx.globalAlpha = 0.35
+  if (isShutdown(unit) || unit.captureStun > 0) ctx.globalAlpha = 0.35
   else if (unit.cloak > 0) ctx.globalAlpha = 0.45
   ctx.drawImage(sprite.canvas, unit.x - UNIT_BOX / 2, unit.y - UNIT_BOX / 2, sprite.worldW, sprite.worldH)
   ctx.restore()
@@ -910,6 +913,7 @@ function drawUnitLod(ctx: CanvasRenderingContext2D, unit: Unit, selected: boolea
     bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
   }
   if (powered) bar(ctx, unit.x - 12, unit.y - stats.radius - 4, 24, unit.power, unit.power <= 0 ? '#6d7c84' : '#3ec6ff')
+  if (unit.captureStun > 0) drawStunCountdown(ctx, unit.x, unit.y - stats.radius - 16, unit.captureStun)
 }
 
 function drawBuilding(ctx: CanvasRenderingContext2D, state: MatchState, building: Building): void {
@@ -958,7 +962,8 @@ function drawBuildingChrome(
   const w = stats.w * TILE
   const h = stats.h * TILE
   const selected = state.selectedBuilding === building.id
-  if (!building.ruined && building.hp < stats.hp) {
+  const maxHp = buildingMaxHp(building.kind)
+  if (!building.ruined && building.hp < maxHp) {
     ctx.strokeStyle = 'rgba(40, 24, 18, 0.45)'
     ctx.beginPath()
     ctx.moveTo(x + w * 0.3, y + 10)
@@ -971,6 +976,18 @@ function drawBuildingChrome(
     const repairing = state.units.some(
       (unit) => unit.order?.type === 'repair' && unit.order.buildingId === building.id && unit.hp > 0,
     )
+    if (building.capture > 0 || building.captureBy >= 0) {
+      const progress = Math.max(0, Math.min(1, building.capture / SILO_CAPTURE_SECONDS))
+      const remain = Math.max(0, Math.ceil(SILO_CAPTURE_SECONDS - building.capture))
+      drawCaptureRing(ctx, x + w / 2, y + h / 2, Math.min(w, h) * 0.28, progress)
+      if (labels) {
+        ctx.fillStyle = '#f4e7bf'
+        ctx.font = 'bold 12px "Segoe UI", sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(`${remain}s`, x + w / 2, y + h / 2)
+      }
+    }
     if (building.progress > 0 || repairing) {
       bar(ctx, x + 8, y - 8, w - 16, building.progress, '#e6c15a')
       if (labels) {
@@ -1001,7 +1018,7 @@ function drawBuildingChrome(
       ctx.fillText(`Recovery ${formatRecover(remain)}`, x + w / 2, y - 12)
     }
   } else if (selected || building.hp < stats.hp || building.hitFlash > 0) {
-    bar(ctx, x + 8, y - 7, w - 16, building.hp / stats.hp, hpColor(building.hp / stats.hp))
+    bar(ctx, x + 8, y - 7, w - 16, building.hp / maxHp, hpColor(building.hp / maxHp))
   }
 
   if (selected) {
@@ -1023,7 +1040,6 @@ function drawKeep(
   y: number,
   color: string,
 ): void {
-  const stats = BUILDING_STATS.keep
   const job = building.queue[0]
   const progress = job && job.total > 0 ? Math.max(0, Math.min(1, 1 - job.remaining / job.total)) : -1
   ctx.save()
@@ -1034,7 +1050,7 @@ function drawKeep(
     open: building.ruined ? 0 : keepDoorSlide(building.hatch),
     lit: building.ruined ? 0 : keepFillLevel(building.stock),
     id: building.id,
-    stage: building.ruined ? 4 : keepDamageStage(building.hp, stats.hp),
+    stage: building.ruined ? 4 : keepDamageStage(building.hp, buildingMaxHp('keep')),
     dish: building.dish,
     progress: building.ruined ? -1 : progress,
     smoke: state.time,
@@ -1193,7 +1209,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
 
   ctx.save()
   ctx.translate(unit.x, unit.y + bob)
-  if (isShutdown(unit)) ctx.globalAlpha = 0.35
+  if (isShutdown(unit) || unit.captureStun > 0) ctx.globalAlpha = 0.35
   else if (unit.cloak > 0) ctx.globalAlpha = 0.45
   if (unit.kind === 'porter') {
     ctx.fillStyle = 'rgba(16, 12, 8, 0.34)'
@@ -1350,7 +1366,9 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
     ctx.restore()
   }
 
-  if (unit.owner === controlledSide(state) && unit.kind === 'porter' && !unit.order) {
+  if (unit.captureStun > 0) drawStunCountdown(ctx, unit.x, unit.y - stats.radius - 16, unit.captureStun)
+
+  if (unit.owner === controlledSide(state) && unit.kind === 'porter' && !unit.order && unit.captureStun <= 0) {
     ctx.fillStyle = '#f0c857'
     ctx.beginPath()
     ctx.moveTo(unit.x, unit.y - 16)
@@ -1415,6 +1433,35 @@ function drawBattery(ctx: CanvasRenderingContext2D, x: number, y: number): void 
   ctx.fillRect(-4, -2, 8, 6)
   ctx.fillStyle = '#e9fbff'
   ctx.fillRect(-2, -7, 4, 3)
+  ctx.restore()
+}
+
+function drawStunCountdown(ctx: CanvasRenderingContext2D, x: number, y: number, seconds: number): void {
+  const label = `${Math.ceil(seconds)}s`
+  ctx.save()
+  ctx.font = 'bold 11px "Segoe UI", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'bottom'
+  ctx.lineWidth = 3
+  ctx.strokeStyle = '#2a2a2a'
+  ctx.fillStyle = '#c8c4bc'
+  ctx.strokeText(label, x, y)
+  ctx.fillText(label, x, y)
+  ctx.restore()
+}
+
+function drawCaptureRing(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, progress: number): void {
+  ctx.save()
+  ctx.beginPath()
+  ctx.strokeStyle = 'rgba(40, 36, 28, 0.75)'
+  ctx.lineWidth = 3
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.strokeStyle = '#e6c15a'
+  ctx.lineWidth = 3
+  ctx.arc(x, y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress)
+  ctx.stroke()
   ctx.restore()
 }
 

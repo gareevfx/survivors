@@ -247,7 +247,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'win',
-    text: 'Destroy the enemy Silo. Their squad attacks now. In a 1v1, that capture ends the match.',
+    text: 'Destroy the enemy Silo and hold the ruin for 60 seconds. Their squad attacks now. The match ends when the enemy has no Silo, no Factory, and no combat units.',
     hud: null,
     world: (state) => {
       const keep = enemyKeep(state)

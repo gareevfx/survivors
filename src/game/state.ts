@@ -4,6 +4,7 @@ import { generateBattlefield, pickFfa8Sites, pickFfaSites, pickKeepSites, worker
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
 import { footprintExplored, updateVision } from './vision'
+import { siloMaxHp } from './balance'
 import {
   BUILDING_STATS,
   type BuildingSighting,
@@ -20,6 +21,7 @@ import {
   TILE,
   TREE_HP,
   UNIT_STATS,
+  isCombatUnit,
   type Building,
   type BuildingKind,
   type MatchMode,
@@ -56,6 +58,24 @@ export function rebuildBlocked(state: MatchState): void {
       }
     }
   }
+}
+
+/**
+ * A side stays in while it owns a Silo (a ruin it still owns counts), or any other
+ * building, or any living unit. It is out only when none of those remain.
+ */
+/** Still in the match with a Silo (a ruin counts), a Factory, or a combat unit. */
+export function sideStillIn(state: MatchState, owner: number): boolean {
+  if (owner < 0 || owner >= state.playerCount) return false
+  for (const building of state.buildings) {
+    if (building.owner !== owner) continue
+    if (building.kind === 'keep') return true
+    if (building.kind === 'yard' && building.hp > 0) return true
+  }
+  for (const unit of state.units) {
+    if (unit.owner === owner && unit.hp > 0 && isCombatUnit(unit.kind)) return true
+  }
+  return false
 }
 
 export function recomputeSupply(state: MatchState): void {
@@ -337,6 +357,8 @@ export function makeUnit(
     ice: 0,
     frostCd: 0,
     power: 1,
+    captureStun: 0,
+    captureOwner: -1,
   }
   state.units.push(unit)
   noteUnitCreated(state, owner, kind)
@@ -412,7 +434,7 @@ export function makeBuilding(
     kind,
     tx,
     ty,
-    hp: stats.hp,
+    hp: kind === 'keep' ? siloMaxHp() : stats.hp,
     progress: complete ? 1 : 0,
     complete,
     queue: [],
@@ -433,6 +455,8 @@ export function makeBuilding(
     repairPaid: false,
     cryo: false,
     cryoRecover: 0,
+    capture: 0,
+    captureBy: -1,
   }
   state.buildings.push(building)
   return building

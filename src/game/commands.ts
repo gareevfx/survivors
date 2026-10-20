@@ -1,6 +1,6 @@
 import { controlledSide } from './control'
 import { frostGround } from './sim'
-import { builderTravel, findBuildSpot, gatherBlockRock, harvestTime, haulCost, nearestParking, setUnitDestination, stopMoving } from './nav'
+import { builderTravel, findBuildSpot, gatherBlockRock, harvestLowerBound, harvestTime, haulCost, haulLowerBound, nearestParking, setUnitDestination, stopMoving, withRouteMemo } from './nav'
 import { depositKnown, footprintExplored } from './vision'
 import {
   buildingById,
@@ -50,7 +50,7 @@ function living(state: MatchState, ids: number[]): Unit[] {
   const units: Unit[] = []
   for (const id of ids) {
     const unit = unitById(state, id)
-    if (unit && unit.hp > 0 && unit.ice <= 0 && !isShutdown(unit)) units.push(unit)
+    if (unit && unit.hp > 0 && unit.ice <= 0 && unit.captureStun <= 0 && !isShutdown(unit)) units.push(unit)
   }
   return units
 }
@@ -99,6 +99,19 @@ function expansionScore(state: MatchState, unit: Unit, node: { tx: number; ty: n
   return access
 }
 
+/**
+ * An open route already in hand beats any deposit whose straight walk is longer.
+ * A sealed best does not prune: a farther deposit can still be the open one.
+ */
+function haulBoundCannotWin(bound: number, best: number): boolean {
+  if (!(best < 1_000_000)) return false
+  return bound > best + 1e-4
+}
+
+function harvestBoundCannotWin(bound: number, best: number): boolean {
+  return bound > best + 1e-4
+}
+
 function castleMineralsRemain(state: MatchState, owner: PlayerId): boolean {
   return state.ore.some(
     (node) => node.amount > 0 && node.base === owner && depositKnown(state, owner, node.tx, node.ty),
@@ -138,31 +151,56 @@ function pickMinerTarget(
   room: (id: number) => boolean,
   mode: 'base' | 'revealed' | 'buried',
 ): { index: number; node: { id: number; tx: number; ty: number } } | null {
-  let bestIndex = -1
-  let bestNode: { id: number; tx: number; ty: number } | null = null
-  let bestD = Infinity
+  if (mode === 'base') {
+    let bestIndex = -1
+    let bestNode: { id: number; tx: number; ty: number } | null = null
+    let bestD = Infinity
+    for (let i = 0; i < miners.length; i++) {
+      const unit = miners[i]
+      if (!unit || unit.captureStun > 0) continue
+      for (const node of state.ore) {
+        if (!room(node.id)) continue
+        if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
+        if (node.base !== unit.owner || !depositKnown(state, unit.owner, node.tx, node.ty)) continue
+        const distance = revealedScore(state, unit, node)
+        if (distance < bestD) {
+          bestD = distance
+          bestIndex = i
+          bestNode = node
+        }
+      }
+    }
+    if (!bestNode || bestIndex < 0) return null
+    return { index: bestIndex, node: bestNode }
+  }
+
+  const buried = mode === 'buried'
+  const ranked: Array<{ index: number; node: { id: number; tx: number; ty: number }; bound: number }> = []
   for (let i = 0; i < miners.length; i++) {
     const unit = miners[i]
-    if (!unit) continue
+    if (!unit || unit.captureStun > 0) continue
     for (const node of state.ore) {
       if (!room(node.id)) continue
       if (unit.avoidNode === node.id && state.time < unit.avoidUntil) continue
-      const known = depositKnown(state, unit.owner, node.tx, node.ty)
-      let distance = Infinity
-      if (mode === 'base') {
-        if (node.base !== unit.owner || !known) continue
-        distance = revealedScore(state, unit, node)
-      } else if (mode === 'revealed') {
-        if (!known || node.base === unit.owner) continue
-        distance = expansionScore(state, unit, node)
-      } else {
-        distance = harvestTime(state, unit, node)
-      }
-      if (distance < bestD) {
-        bestD = distance
-        bestIndex = i
-        bestNode = node
-      }
+      if (!buried && (!depositKnown(state, unit.owner, node.tx, node.ty) || node.base === unit.owner)) continue
+      const bound = buried ? harvestLowerBound(state, unit, node) : haulLowerBound(state, unit, node)
+      ranked.push({ index: i, node, bound })
+    }
+  }
+  ranked.sort((a, b) => a.bound - b.bound)
+  let bestIndex = -1
+  let bestNode: { id: number; tx: number; ty: number } | null = null
+  let bestD = Infinity
+  const cannotWin = buried ? harvestBoundCannotWin : haulBoundCannotWin
+  for (const entry of ranked) {
+    if (bestD < Infinity && cannotWin(entry.bound, bestD)) break
+    const unit = miners[entry.index]
+    if (!unit) continue
+    const distance = buried ? harvestTime(state, unit, entry.node) : expansionScore(state, unit, entry.node)
+    if (distance < bestD) {
+      bestD = distance
+      bestIndex = entry.index
+      bestNode = entry.node
     }
   }
   if (!bestNode || bestIndex < 0) return null
@@ -178,7 +216,7 @@ function pickMinerTarget(
  * (nodeMemory 0) until one opens.
  */
 export function assignMiners(state: MatchState, miners: Unit[], preferredId: number | null): void {
-  const crew = miners.filter((unit) => unit.hp > 0 && unit.kind === 'porter')
+  const crew = miners.filter((unit) => unit.hp > 0 && unit.kind === 'porter' && unit.captureStun <= 0 && unit.frozen == null)
   if (!crew.length) return
   const owner = crew[0]?.owner
   if (owner == null) return
@@ -216,14 +254,16 @@ export function assignMiners(state: MatchState, miners: Unit[], preferredId: num
     (node) => node.amount > 0 && node.base !== owner && depositKnown(state, owner, node.tx, node.ty),
   )
   const left = [...pending]
-  while (left.length) {
-    const mode = homeLeft ? 'base' : revealedRemain ? 'revealed' : 'buried'
-    const picked = pickMinerTarget(state, left, room, mode)
-    if (!picked) break
-    const unit = left.splice(picked.index, 1)[0]
-    if (!unit) break
-    claim(unit, picked.node)
-  }
+  withRouteMemo(() => {
+    while (left.length) {
+      const mode = homeLeft ? 'base' : revealedRemain ? 'revealed' : 'buried'
+      const picked = pickMinerTarget(state, left, room, mode)
+      if (!picked) break
+      const unit = left.splice(picked.index, 1)[0]
+      if (!unit) break
+      claim(unit, picked.node)
+    }
+  })
   for (const unit of left) {
     unit.order = null
     unit.nodeMemory = 0
@@ -239,6 +279,7 @@ export function fillOpenGatherSlots(state: MatchState): void {
       unit.kind === 'porter' &&
       unit.hp > 0 &&
       unit.frozen == null &&
+      unit.captureStun <= 0 &&
       unit.cargo <= 0 &&
       unit.order == null &&
       unit.nodeMemory === 0,
@@ -330,8 +371,7 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
       node.base !== unit.owner &&
       depositKnown(state, unit.owner, node.tx, node.ty),
   )
-  let best: { id: number; tx: number; ty: number } | null = null
-  let bestD = Infinity
+  const eligible: Array<{ id: number; tx: number; ty: number }> = []
   for (const node of state.ore) {
     if (node.amount <= 0) continue
     if (excludeId != null && node.id === excludeId) continue
@@ -340,28 +380,43 @@ function sendNextDeposit(state: MatchState, unit: Unit, excludeId: number | null
     const known = depositKnown(state, unit.owner, node.tx, node.ty)
     if (homeLeft) {
       if (node.base !== unit.owner || !known) continue
-      const distance = revealedScore(state, unit, node)
-      if (distance < bestD) {
-        bestD = distance
-        best = node
-      }
-      continue
-    }
-    if (revealedRemain) {
+    } else if (revealedRemain) {
       if (!known || node.base === unit.owner) continue
-      const distance = expansionScore(state, unit, node)
+    }
+    eligible.push(node)
+  }
+  const best = withRouteMemo(() => {
+    if (homeLeft) {
+      let picked: { id: number; tx: number; ty: number } | null = null
+      let bestD = Infinity
+      for (const node of eligible) {
+        const distance = revealedScore(state, unit, node)
+        if (distance < bestD) {
+          bestD = distance
+          picked = node
+        }
+      }
+      return picked
+    }
+    const ranked = eligible
+      .map((node) => ({
+        node,
+        bound: revealedRemain ? haulLowerBound(state, unit, node) : harvestLowerBound(state, unit, node),
+      }))
+      .sort((a, b) => a.bound - b.bound)
+    const cannotWin = revealedRemain ? haulBoundCannotWin : harvestBoundCannotWin
+    let picked: { id: number; tx: number; ty: number } | null = null
+    let bestD = Infinity
+    for (const entry of ranked) {
+      if (bestD < Infinity && cannotWin(entry.bound, bestD)) break
+      const distance = revealedRemain ? expansionScore(state, unit, entry.node) : harvestTime(state, unit, entry.node)
       if (distance < bestD) {
         bestD = distance
-        best = node
+        picked = entry.node
       }
-      continue
     }
-    const time = harvestTime(state, unit, node)
-    if (time < bestD) {
-      bestD = time
-      best = node
-    }
-  }
+    return picked
+  })
   if (!best) {
     unit.order = null
     unit.nodeMemory = -1
@@ -907,7 +962,29 @@ export function commandConstruct(state: MatchState, ids: number[], buildingId: n
   noteOrder(state, crew)
 }
 
-/** Send these Stalkers to the nearest ruined Silo. */
+/** Dumps that can pay for this ruin: the bank, plus dumps locked in the ruin itself. */
+export function siloRepairFunds(state: MatchState, owner: number, building: Building): number {
+  const locked = building.ruined ? building.stock : 0
+  return (state.oreHeld[owner] ?? 0) + locked
+}
+
+/** Pay the repair. Liquid dumps go first. The rest can come out of the ruin's own stock. */
+export function paySiloRepair(state: MatchState, owner: number, building: Building): boolean {
+  const cost = SILO_REPAIR_COST
+  const liquid = Math.max(0, state.oreHeld[owner] ?? 0)
+  if (liquid >= cost) {
+    debitDumps(state, owner, cost)
+    return true
+  }
+  if (!building.ruined) return false
+  const fromStock = cost - liquid
+  if (building.stock < fromStock) return false
+  if (liquid > 0) debitDumps(state, owner, liquid)
+  building.stock -= fromStock
+  return true
+}
+
+/** Send these Stalkers to the nearest ruined Silo they own. */
 export function commandRepairNearest(state: MatchState, ids: number[]): string | null {
   const crew = living(state, ids).filter((unit) => unit.kind === 'porter')
   if (!crew.length) return 'You need a stalker to repair'
@@ -921,8 +998,9 @@ export function commandRepairNearest(state: MatchState, ids: number[]): string |
   y /= crew.length
   let best: Building | undefined
   let bestD = Infinity
+  const owner = crew[0]?.owner
   for (const building of state.buildings) {
-    if (!building.ruined) continue
+    if (!building.ruined || building.owner !== owner) continue
     const center = buildingCenter(building)
     const distance = Math.hypot(center.x - x, center.y - y)
     if (distance < bestD) {
@@ -940,11 +1018,11 @@ export function commandRepair(state: MatchState, ids: number[], buildingId: numb
   if (state.outcome) return 'The battle is over'
   const building = buildingById(state, buildingId)
   if (!building || !building.ruined) return 'That is not a ruined Silo'
-  const crew = living(state, ids).filter((unit) => unit.kind === 'porter')
-  if (!crew.length) return 'You need a stalker to repair'
+  const crew = living(state, ids).filter((unit) => unit.kind === 'porter' && unit.owner === building.owner)
+  if (!crew.length) return 'Only the owner can repair this Silo'
   const payer = crew[0]
-  if (!payer) return 'You need a stalker to repair'
-  if (!building.repairPaid && (state.oreHeld[payer.owner] ?? 0) < SILO_REPAIR_COST) {
+  if (!payer) return 'Only the owner can repair this Silo'
+  if (!building.repairPaid && siloRepairFunds(state, payer.owner, building) < SILO_REPAIR_COST) {
     return `Need ${SILO_REPAIR_COST} dumps`
   }
   for (const unit of crew) {

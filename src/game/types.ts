@@ -221,7 +221,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. Holds at most 3000 dumps. Destroying a Silo captures that side\'s buildings, units, and dumps. In 1 vs 1 the match ends. In a free-for-all that side is out. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
+    blurb: 'Drop-off for dumps and home of the stalkers. Holds at most 3000 dumps. At 0 hit points it is a ruin that still belongs to its owner. Enemy Flashers or Gorillas must stand in range for 60 seconds to take it. Only that Silo\'s dumps change hands. A side is out when it has no Silo, no Factory, and no combat units. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
     w: 3,
     h: 3,
     hp: 1700,
@@ -362,6 +362,13 @@ export interface Unit {
    * A battery refills it. A finished friendly Pillar refills it while the unit is inside that Pillar's sight.
    */
   power: number
+  /**
+   * Seconds before a captured Stalker can act again. While this is above zero the Stalker
+   * still belongs to its old owner, takes no orders, and is not a miner.
+   */
+  captureStun: number
+  /** Side that receives this Stalker when captureStun hits zero. -1 while it is not being captured. */
+  captureOwner: number
 }
 
 /** Expanding frost left by Frog Freeze. Rendering only, spawned by the order. */
@@ -405,12 +412,16 @@ export interface Building {
   focusKind: TargetKind | null
   /** Dumps physically stored here. Spending draws the richest Storage down first. */
   stock: number
-  /** Owner of the last hit. A fallen Silo is captured by this side when they still have one. */
+  /** Owner of the last hit. Seeds who starts a hold on a ruined Silo. */
   struckBy: number | null
   /** The killing blow was a Flasher or Gorilla, so a Storage leaves one dumps pile. */
   dropDumps: boolean
-  /** A fallen Silo left on the map. Neutral, blocks movement, and can be repaired. */
+  /** A fallen Silo left on the map. It still belongs to its owner, blocks movement, and can be repaired. */
   ruined: boolean
+  /** Seconds of enemy hold already counted toward taking this ruined Silo. */
+  capture: number
+  /** Side currently holding this ruined Silo. -1 when nobody is. */
+  captureBy: number
   /** The repair cost has already been paid, so more Stalkers only add speed. */
   repairPaid: boolean
   /** This Silo has four glass vessels. Bought once for CRYO_COST. */

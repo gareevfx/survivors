@@ -419,6 +419,36 @@ function lineTiles(x0: number, y0: number, x1: number, y1: number): Array<[numbe
   return tiles
 }
 
+const OCTILE = 1.41421356237
+
+/** Remembers walk scores inside one miner assignment. Positions do not change there. */
+let haulMemo: Map<string, number> | null = null
+let harvestMemo: Map<string, number> | null = null
+
+function routeMemoKey(unit: Unit, node: { tx: number; ty: number }): string {
+  return `${unit.id}:${node.tx}:${node.ty}`
+}
+
+/** One miner assignment shares path scores. The maps die when the assignment returns. */
+export function withRouteMemo<T>(body: () => T): T {
+  const previousHaul = haulMemo
+  const previousHarvest = harvestMemo
+  haulMemo = new Map()
+  harvestMemo = new Map()
+  try {
+    return body()
+  } finally {
+    haulMemo = previousHaul
+    harvestMemo = previousHarvest
+  }
+}
+
+function octile(ax: number, ay: number, bx: number, by: number): number {
+  const dx = Math.abs(ax - bx)
+  const dy = Math.abs(ay - by)
+  return Math.max(dx, dy) + (OCTILE - 1) * Math.min(dx, dy)
+}
+
 const APPROACH: ReadonlyArray<readonly [number, number]> = [
   [1, 0],
   [-1, 0],
@@ -431,10 +461,46 @@ const APPROACH: ReadonlyArray<readonly [number, number]> = [
 ]
 
 /**
+ * Shortest possible walk, in tiles, from a worker to the ring around a deposit.
+ * A real route is at least this long, so a farther deposit cannot beat a route already in hand.
+ */
+export function haulLowerBound(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const start = nearestWalkable(state, unit.x, unit.y)
+  if (!start) return Number.POSITIVE_INFINITY
+  let best = Number.POSITIVE_INFINITY
+  for (const [dx, dy] of APPROACH) {
+    const tx = node.tx + dx
+    const ty = node.ty + dy
+    if (tx < 0 || ty < 0 || tx >= state.mapW || ty >= state.mapH) continue
+    const distance = octile(start.tx, start.ty, tx, ty)
+    if (distance < best) best = distance
+  }
+  return best
+}
+
+/** Travel plus one gather, ignoring rocks. A buried patch takes at least this long. */
+export function harvestLowerBound(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const tiles = haulLowerBound(state, unit, node)
+  if (!Number.isFinite(tiles)) return Number.POSITIVE_INFINITY
+  return (tiles * TILE) / UNIT_STATS.porter.speed + GATHER_TIME
+}
+
+/**
  * Walk length from a worker to a deposit. A clear route uses A* on walkable tiles.
  * A sealed route sorts after every clear one, by the same length with rocks ignored.
  */
 export function haulCost(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const key = routeMemoKey(unit, node)
+  if (haulMemo) {
+    const remembered = haulMemo.get(key)
+    if (remembered !== undefined) return remembered
+  }
+  const cost = haulCostUncached(state, unit, node)
+  haulMemo?.set(key, cost)
+  return cost
+}
+
+function haulCostUncached(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return Number.POSITIVE_INFINITY
   const openGoal = adjacentOpen(state, state.blocked, node.tx, node.ty)
@@ -455,6 +521,17 @@ export function haulCost(state: MatchState, unit: Unit, node: { tx: number; ty: 
  * chip every rock on it, then gather once. Lower is sooner.
  */
 export function harvestTime(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
+  const key = routeMemoKey(unit, node)
+  if (harvestMemo) {
+    const remembered = harvestMemo.get(key)
+    if (remembered !== undefined) return remembered
+  }
+  const cost = harvestTimeUncached(state, unit, node)
+  harvestMemo?.set(key, cost)
+  return cost
+}
+
+function harvestTimeUncached(state: MatchState, unit: Unit, node: { tx: number; ty: number }): number {
   const start = nearestWalkable(state, unit.x, unit.y)
   if (!start) return Number.POSITIVE_INFINITY
   const cleared = clearedOfRocks(state)

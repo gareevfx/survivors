@@ -1,3 +1,4 @@
+import { SILO_CAPTURE_SECONDS, buildingMaxHp } from '../game/balance'
 import { cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, demolishArmed, demolishRefund, installCryo, playerHovers, requestDemolish, storageLostOnDemolish, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleGuard, toggleScanner } from '../game/scanner'
@@ -214,7 +215,7 @@ export function syncHud(state: MatchState, actions: HudActions): void {
     sides.innerHTML = Array.from({ length: state.playerCount }, (_, owner) => {
       const name = PLAYER_NAME[owner] ?? `Side ${owner + 1}`
       const color = PLAYER_COLOR[owner] ?? '#ffffff'
-      const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+      const gone = state.eliminated[owner]
       const you = state.doubleGame && owner === side ? ' you' : ''
       return `<span class="${gone && owner !== 0 ? 'out' : ''}${you}"><i style="background:${color}"></i>${escapeHtml(name)}</span>`
     }).join('')
@@ -228,15 +229,15 @@ export function syncHud(state: MatchState, actions: HudActions): void {
       endTitle.textContent = 'Surface is yours'
       endCopy.textContent =
         state.playerCount > 2
-          ? 'Every enemy Silo is rubble. Your banners stay on the field.'
-          : `The ${PLAYER_NAME[1]} Silo is rubble. Your banners stay on the field.`
+          ? 'Every other side is out. Your banners stay on the field.'
+          : `${PLAYER_NAME[1]} is out. Your banners stay on the field.`
     } else if (state.outcome === 'lose') {
       endKicker.textContent = state.playerCount > 2 ? 'The field' : (PLAYER_NAME[1] ?? 'Silo 02')
       endTitle.textContent = 'The silo has fallen'
       endCopy.textContent =
         state.playerCount > 2
-          ? `Your Silo is gone. ${others} fight on without you.`
-          : `Your Silo is gone. ${PLAYER_NAME[1]} takes Surface.`
+          ? `You are out. ${others} fight on without you.`
+          : `You are out. ${PLAYER_NAME[1]} takes Surface.`
     }
     endSeed.textContent = `Field ${state.seed}`
     if (endStats) {
@@ -271,7 +272,7 @@ function syncSideSwitch(state: MatchState): void {
   if (!state.doubleGame) return
   const side = controlledSide(state)
   const marks = Array.from({ length: state.playerCount }, (_, owner) => {
-    const gone = state.eliminated[owner] || !state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+    const gone = state.eliminated[owner]
     return gone ? '0' : '1'
   }).join('')
   const key = `${side}|${marks}`
@@ -828,17 +829,21 @@ export function describeSelection(state: MatchState): string {
     const portraitUrl = ruinedSiloPortraitUrl()
     const portrait = portraitUrl ? `<img class="unit-icon" alt="" src="${portraitUrl}" />` : ''
     const pct = Math.max(0, Math.min(1, building.progress))
+    const ownerName = building.owner >= 0 ? (PLAYER_NAME[building.owner] ?? 'Silo') : 'Neutral'
+    const holding = building.capture > 0 || building.captureBy >= 0
+    const remain = Math.max(0, Math.ceil(SILO_CAPTURE_SECONDS - building.capture))
     return `
-      <p class="eyebrow">Neutral</p>
+      <p class="eyebrow">${ownerName}</p>
       <h2>${portrait}Ruined Silo</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s</p>
+      ${holding ? `<p class="meta">Capture ${remain}s</p>` : ''}
       <p class="lore">${escapeHtml(loreBody('Ruined Silo'))}</p>
     `
   }
   if (building && state.selectedUnits.length === 0) {
     const stats = BUILDING_STATS[building.kind]
-    const pct = Math.max(0, Math.min(1, building.hp / stats.hp))
+    const pct = Math.max(0, Math.min(1, building.hp / buildingMaxHp(building.kind)))
     const queue = building.queue
       .map((job, index) => {
         const stats = UNIT_STATS[job.kind]
@@ -960,6 +965,7 @@ export function describeSelection(state: MatchState): string {
       ${unit.guarding ? '<p class="meta">Guarding</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
       ${unit.ice > 0 ? `<p class="meta">Frozen ${Math.ceil(unit.ice)}s</p>` : ''}
+      ${unit.captureStun > 0 ? `<p class="meta">Inactive ${Math.ceil(unit.captureStun)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }

@@ -3,7 +3,7 @@ import { LESSON_PACE, lessonEnemyPush } from './tutorial'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateGuards, updateScanners } from './scanner'
-import { assignMiners, buildingDumpCap, coverOpenSites, creditDumps, debitDumps, dropoffHasRoom, fillOpenGatherSlots, redirectStuckPorter, releaseCryo } from './commands'
+import { assignMiners, buildingDumpCap, coverOpenSites, creditDumps, debitDumps, dropoffHasRoom, fillOpenGatherSlots, paySiloRepair, redirectStuckPorter, releaseCryo, siloRepairFunds } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
@@ -27,6 +27,7 @@ import {
   pushToast,
   rebuildBlocked,
   recomputeSupply,
+  sideStillIn,
   rockById,
   unitById,
   unitTarget,
@@ -65,6 +66,7 @@ import {
   type Target,
   type Unit,
 } from './types'
+import { CAPTURE_DRAIN_RATE, SILO_CAPTURE_ALERT, SILO_CAPTURE_SECONDS, STALKER_CAPTURE_STUN_SECONDS, siloMaxHp } from './balance'
 
 export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
@@ -73,6 +75,7 @@ export function step(state: MatchState, dt: number): void {
   updateSiloAi(state, dt)
   lessonEnemyPush(state)
   revealCloakedByScanners(state)
+  tickCaptureStuns(state, dt)
 
   for (const unit of state.units) {
     if (unit.frozen == null) refreshUnit(state, unit, dt)
@@ -131,6 +134,7 @@ export function step(state: MatchState, dt: number): void {
   }
   for (const rock of state.rocks) rock.hitFlash = Math.max(0, rock.hitFlash - dt)
   updateProjectiles(state, dt)
+  tickSiloCaptures(state, dt)
   cleanup(state)
   coverOpenSites(state)
   fillOpenGatherSlots(state)
@@ -146,6 +150,16 @@ export function step(state: MatchState, dt: number): void {
 
 function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   unit.repathIn = Math.max(0, unit.repathIn - dt)
+  if (unit.captureStun > 0) {
+    if (unit.order || unit.goalX != null || unit.scanning || unit.guarding) {
+      unit.order = null
+      unit.idleAcquire = false
+      unit.scanning = false
+      unit.guarding = false
+      stopMoving(unit)
+    }
+    return
+  }
   if (unit.ice > 0) return
   if (isShutdown(unit)) {
     if (unit.order || unit.goalX != null || unit.scanning || unit.guarding || unit.cloak > 0) {
@@ -600,7 +614,7 @@ function approachDropoff(state: MatchState, unit: Unit): void {
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
-  if (unit.ice > 0 || isShutdown(unit)) return
+  if (unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit)) return
   let left = dt
   let blockedStep = false
   let guard = 0
@@ -949,10 +963,12 @@ function advanceRepair(state: MatchState, dt: number): void {
       return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
     })
     if (!crew.length) continue
+    building.capture = 0
+    building.captureBy = -1
     const payer = crew[0]
     if (!payer) continue
     if (!building.repairPaid) {
-      if ((state.oreHeld[payer.owner] ?? 0) < SILO_REPAIR_COST) {
+      if (payer.owner !== building.owner || siloRepairFunds(state, payer.owner, building) < SILO_REPAIR_COST) {
         for (const unit of crew) {
           unit.order = null
           stopMoving(unit)
@@ -960,8 +976,16 @@ function advanceRepair(state: MatchState, dt: number): void {
         if (payer.owner === 0) pushToast(state, `Need ${SILO_REPAIR_COST} dumps`)
         continue
       }
-      debitDumps(state, payer.owner, SILO_REPAIR_COST)
+      if (!paySiloRepair(state, payer.owner, building)) {
+        for (const unit of crew) {
+          unit.order = null
+          stopMoving(unit)
+        }
+        continue
+      }
       building.repairPaid = true
+      building.capture = 0
+      building.captureBy = -1
     }
     const speed = 1 + (crew.length - 1) * 0.6
     building.progress += (dt * speed) / SILO_REPAIR_TIME
@@ -972,21 +996,24 @@ function advanceRepair(state: MatchState, dt: number): void {
 
 /** A finished repair is a working Silo at full health, owned by the Stalker who completed it. */
 function restoreSilo(state: MatchState, building: Building, owner: number): void {
-  const stats = BUILDING_STATS.keep
   const mouth = keepEntrance(building)
+  const kept = building.stock
   building.ruined = false
   building.repairPaid = false
   building.owner = owner
-  building.hp = stats.hp
+  building.hp = siloMaxHp()
   building.complete = true
   building.progress = 1
   building.queue = []
-  building.stock = 0
+  building.stock = kept
   building.alert = 0
   building.focusId = null
   building.focusKind = null
   building.struckBy = null
+  building.capture = 0
+  building.captureBy = -1
   building.hatch = 0
+  if (kept > 0) state.oreHeld[owner] = (state.oreHeld[owner] ?? 0) + kept
   building.rallyX = mouth.x
   building.rallyY = mouth.y
   for (const unit of state.units) {
@@ -1123,6 +1150,8 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     ice: 0,
     frostCd: 0,
     power: 1,
+    captureStun: 0,
+    captureOwner: -1,
   }
   state.units.push(unit)
   noteUnitCreated(state, building.owner, kind)
@@ -1133,7 +1162,7 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
 }
 
 function tryFire(state: MatchState, unit: Unit): void {
-  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || unit.kind === 'frog' || unit.ice > 0 || isShutdown(unit)) return
+  if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || unit.kind === 'frog' || unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit)) return
   const target = pickFireTarget(state, unit)
   if (!target || !inWeaponRange(unit, target)) return
   if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
@@ -1474,7 +1503,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'porter') {
       const attacker = source?.owner ?? sourceBuilding?.owner
-      if (attacker == null || attacker === unit.owner || stalkerCovered(state, unit)) return
+      if (attacker == null || attacker === unit.owner || unit.captureStun > 0 || stalkerCovered(state, unit)) return
       captureStalker(state, unit, attacker)
       return
     }
@@ -1527,8 +1556,7 @@ function cleanup(state: MatchState): void {
   }
 
   const deadBuildings = state.buildings.filter((building) => building.hp <= 0 && !building.ruined)
-  if (!deadBuildings.length) return
-  const fallenKeeps: Array<{ owner: number; struckBy: number | null }> = []
+  if (deadBuildings.length) {
   for (const building of deadBuildings) {
     const center = buildingCenter(building)
     burst(state, center.x, center.y, sideTone(building.owner), 16)
@@ -1556,47 +1584,35 @@ function cleanup(state: MatchState): void {
       releaseCryo(state, building)
       building.cryo = false
       building.cryoRecover = 0
-      fallenKeeps.push({ owner: building.owner, struckBy: building.struckBy })
     }
   }
   for (const building of deadBuildings) {
     if (building.kind !== 'keep') continue
+    const locked = building.stock
+    if (locked > 0 && building.owner >= 0) {
+      state.oreHeld[building.owner] = Math.max(0, (state.oreHeld[building.owner] ?? 0) - locked)
+    }
     building.ruined = true
     building.repairPaid = false
-    building.owner = -1
     building.hp = 0
     building.complete = false
     building.progress = 0
     building.queue = []
-    building.stock = 0
     building.alert = 0
     building.focusId = null
     building.focusKind = null
     building.hatch = 0
     building.dropDumps = false
+    building.capture = 0
+    const struck = building.struckBy
+    building.captureBy =
+      struck != null && struck !== building.owner && struck >= 0 && !state.eliminated[struck] ? struck : -1
   }
   state.buildings = state.buildings.filter((building) => building.hp > 0 || building.ruined)
-  let removedSide = false
-  for (let owner = 0; owner < state.playerCount; owner++) {
-    if (state.eliminated[owner] || sideHasKeep(state, owner)) continue
-    const fallen = fallenKeeps.find((entry) => entry.owner === owner)
-    const captor = captorFor(state, owner, fallen?.struckBy ?? null)
-    if (captor == null) eliminateSide(state, owner)
-    else captureSide(state, owner, captor)
-    removedSide = true
-  }
-  if (removedSide) recomputeSupply(state)
+  recomputeSupply(state)
   rebuildBlocked(state)
-  const livingKeep = (building: Building) => building.kind === 'keep' && building.hp > 0 && !building.ruined
-  const playerAlive = state.buildings.some((building) => building.owner === 0 && livingKeep(building))
-  const enemyAlive = state.buildings.some((building) => building.owner > 0 && livingKeep(building))
-  if (!playerAlive) {
-    state.outcome = 'lose'
-    state.events.push({ type: 'lose' })
-  } else if (!enemyAlive) {
-    state.outcome = 'win'
-    state.events.push({ type: 'win' })
   }
+  settleOutcome(state)
 }
 
 function sideTone(owner: number): string {
@@ -1637,9 +1653,9 @@ function attackerOwner(state: MatchState, sourceId: number): number | null {
 }
 
 function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
-  const previous = unit.owner
-  if (previous === newOwner) return
-  unit.owner = newOwner
+  if (unit.owner === newOwner || unit.captureStun > 0) return
+  unit.captureStun = STALKER_CAPTURE_STUN_SECONDS
+  unit.captureOwner = newOwner
   unit.order = null
   unit.idleAcquire = false
   unit.scanning = false
@@ -1647,107 +1663,157 @@ function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
   unit.leashX = null
   unit.leashY = null
   stopMoving(unit)
-  state.selectedUnits = state.selectedUnits.filter((id) => {
-    const selected = unitById(state, id)
-    return !!selected && selected.owner === controlledSide(state) && selected.hp > 0
-  })
-  for (const other of state.units) {
-    if (other.owner !== newOwner) continue
-    const order = other.order
-    if (order?.type === 'attack' && order.kind === 'unit' && order.targetId === unit.id) {
-      other.order = null
-      stopMoving(other)
-    }
-    if (order?.type === 'attackMove' && order.focusKind === 'unit' && order.focusId === unit.id) {
-      order.focusId = null
-      order.focusKind = null
-    }
-  }
-  recomputeSupply(state)
-  if (previous === 0) pushToast(state, 'A Stalker was captured.')
-  else if (newOwner === 0) pushToast(state, 'Stalker captured.')
+  state.selectedUnits = state.selectedUnits.filter((id) => id !== unit.id)
 }
 
-function sideHasKeep(state: MatchState, owner: number): boolean {
-  return state.buildings.some((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
-}
-
-function captorFor(state: MatchState, victim: number, struckBy: number | null): number | null {
-  const struck = struckBy
-  if (struck != null && struck !== victim && !state.eliminated[struck] && sideHasKeep(state, struck)) return struck
-  for (let owner = 0; owner < state.playerCount; owner++) {
-    if (owner === victim || state.eliminated[owner]) continue
-    if (sideHasKeep(state, owner)) return owner
-  }
-  for (let owner = 0; owner < state.playerCount; owner++) {
-    if (owner !== victim && !state.eliminated[owner]) return owner
-  }
-  return null
-}
-
-function captureSide(state: MatchState, victim: number, captor: number): void {
-  if (state.eliminated[victim]) return
-  state.eliminated[victim] = true
-  noteSiloCaptured(state, captor)
-  for (const building of state.buildings) {
-    if (building.owner !== victim || building.hp <= 0) continue
-    if (building.kind === 'keep' || building.kind === 'silo') building.stock = 0
-    building.owner = captor
-    building.focusId = null
-    building.focusKind = null
-    building.alert = 0
-  }
-  const taken = new Set<number>()
+function tickCaptureStuns(state: MatchState, dt: number): void {
+  let switched = false
   for (const unit of state.units) {
-    if (unit.owner !== victim || unit.hp <= 0) continue
-    unit.owner = captor
+    if (unit.hp <= 0 || unit.captureStun <= 0) continue
     unit.order = null
     unit.idleAcquire = false
     unit.scanning = false
     unit.guarding = false
-    unit.leashX = null
-    unit.leashY = null
     stopMoving(unit)
-    taken.add(unit.id)
+    unit.captureStun = Math.max(0, unit.captureStun - dt)
+    if (unit.captureStun > 0) continue
+    const next = unit.captureOwner
+    unit.captureOwner = -1
+    if (next < 0 || next === unit.owner || state.eliminated[next]) continue
+    const previous = unit.owner
+    unit.owner = next
+    switched = true
+    if (previous === controlledSide(state)) pushToast(state, 'A Stalker was captured.')
+    else if (next === controlledSide(state)) pushToast(state, 'Stalker captured.')
   }
-  const seized = state.oreHeld[victim] ?? 0
-  state.oreHeld[victim] = 0
+  if (switched) recomputeSupply(state)
+}
+
+function combatHolder(unit: Unit, building: Building): boolean {
+  if (unit.hp <= 0 || unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit)) return false
+  if (unit.kind !== 'pike' && unit.kind !== 'howler') return false
+  const range = UNIT_STATS[unit.kind].range
+  return distToRect(unit.x, unit.y, buildingRect(building)) <= range
+}
+
+function tickSiloCaptures(state: MatchState, dt: number): void {
+  const finished: Building[] = []
+  for (const building of state.buildings) {
+    if (building.kind !== 'keep' || !building.ruined || building.owner < 0) continue
+    const repairing = state.units.some(
+      (unit) =>
+        unit.owner === building.owner &&
+        unit.hp > 0 &&
+        unit.kind === 'porter' &&
+        unit.captureStun <= 0 &&
+        unit.order?.type === 'repair' &&
+        unit.order.buildingId === building.id &&
+        distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT,
+    )
+    if (repairing) {
+      building.capture = 0
+      building.captureBy = -1
+      continue
+    }
+    const holders = new Map<number, number>()
+    for (const unit of state.units) {
+      if (!combatHolder(unit, building)) continue
+      holders.set(unit.owner, (holders.get(unit.owner) ?? 0) + 1)
+    }
+    let defenders = 0
+    let attackers = 0
+    for (const [owner, count] of holders) {
+      if (owner === building.owner) defenders += count
+      else if (!state.eliminated[owner]) attackers += count
+    }
+    if (attackers > 0 && defenders > 0) continue
+    if (attackers > 0) {
+      building.captureBy = captureHolder(building, holders)
+      building.capture += dt
+      if (building.capture >= SILO_CAPTURE_SECONDS) finished.push(building)
+      continue
+    }
+    if (building.capture <= 0) {
+      building.capture = 0
+      building.captureBy = -1
+      continue
+    }
+    building.capture = Math.max(0, building.capture - dt * CAPTURE_DRAIN_RATE)
+    if (building.capture <= 0) building.captureBy = -1
+  }
+  for (const building of finished) finishSiloCapture(state, building)
+}
+
+function captureHolder(building: Building, holders: Map<number, number>): number {
+  const present = (owner: number) => owner !== building.owner && (holders.get(owner) ?? 0) > 0 && owner >= 0
+  if (present(building.captureBy)) return building.captureBy
+  if (building.struckBy != null && present(building.struckBy)) return building.struckBy
+  let best = -1
+  let count = 0
+  for (const [owner, n] of holders) {
+    if (owner === building.owner || n <= count) continue
+    best = owner
+    count = n
+  }
+  return best
+}
+
+function finishSiloCapture(state: MatchState, building: Building): void {
+  const victim = building.owner
+  const captor = building.captureBy
+  if (victim < 0 || captor < 0 || captor === victim || state.eliminated[captor]) {
+    building.capture = 0
+    building.captureBy = -1
+    return
+  }
+  const seized = building.stock
+  building.stock = 0
+  building.owner = captor
+  building.ruined = false
+  building.repairPaid = false
+  building.hp = siloMaxHp()
+  building.complete = true
+  building.progress = 1
+  building.queue = []
+  building.capture = 0
+  building.captureBy = -1
+  building.struckBy = null
+  building.alert = 0
+  building.focusId = null
+  building.focusKind = null
+  building.hatch = 0
+  building.dropDumps = false
+  const mouth = keepEntrance(building)
+  building.rallyX = mouth.x
+  building.rallyY = mouth.y
   creditDumps(state, captor, seized)
-  const seat = controlledSide(state)
-  state.selectedUnits = state.selectedUnits.filter((id) => {
-    const unit = unitById(state, id)
-    return !!unit && unit.owner === seat && unit.hp > 0
-  })
-  if (state.selectedBuilding != null) {
-    const selected = buildingById(state, state.selectedBuilding)
-    if (!selected || selected.owner !== seat || selected.hp <= 0) state.selectedBuilding = null
+  noteSiloCaptured(state, captor)
+  recomputeSupply(state)
+  rebuildBlocked(state)
+  if (sideStillIn(state, victim)) {
+    if (victim === controlledSide(state)) pushToast(state, SILO_CAPTURE_ALERT)
+  } else eliminateSide(state, victim)
+}
+
+function settleOutcome(state: MatchState): void {
+  if (state.outcome) return
+  for (let owner = 0; owner < state.playerCount; owner++) {
+    if (state.eliminated[owner] || sideStillIn(state, owner)) continue
+    eliminateSide(state, owner)
   }
-  for (const unit of state.units) {
-    const order = unit.order
-    if (order?.type === 'attack' && order.kind === 'unit' && taken.has(order.targetId) && unit.owner === captor) {
-      unit.order = null
-      stopMoving(unit)
-    }
-    if (order?.type === 'attack' && order.kind === 'building') {
-      const building = buildingById(state, order.targetId)
-      if (building && building.owner === unit.owner) {
-        unit.order = null
-        stopMoving(unit)
-      }
-    }
-    if (order?.type === 'attackMove' && order.focusId != null && order.focusKind === 'unit' && taken.has(order.focusId)) {
-      order.focusId = null
-      order.focusKind = null
-    }
-    if (order?.type === 'construct') {
-      const site = buildingById(state, order.buildingId)
-      if (!site || site.owner !== unit.owner) {
-        unit.order = null
-        stopMoving(unit)
-      }
-    }
+  if (state.outcome) return
+  const playerOut = !sideStillIn(state, 0)
+  let enemyIn = false
+  for (let owner = 1; owner < state.playerCount; owner++) {
+    if (sideStillIn(state, owner)) enemyIn = true
   }
-  pushToast(state, `${PLAYER_NAME[victim] ?? 'A side'} is eliminated.`)
+  if (playerOut) {
+    state.outcome = 'lose'
+    state.events.push({ type: 'lose' })
+  } else if (!enemyIn) {
+    state.outcome = 'win'
+    state.events.push({ type: 'win' })
+  }
 }
 
 /** Half a Power bar comes off at the moment Freeze ends. Empty Power shuts the unit down. */

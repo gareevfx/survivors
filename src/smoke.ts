@@ -1,3 +1,4 @@
+import { SILO_CAPTURE_ALERT, SILO_CAPTURE_SECONDS, STALKER_CAPTURE_STUN_SECONDS, siloMaxHp } from './game/balance'
 import { audibleEvents } from './game/audio'
 import { DRONE_BIKE_AVOID, scoutArea, sideKnowsEnemyKeep, SILO_AI_EXPANSION_REACH, siloRallyPoint, siloWaveNeed, updateSiloAi } from './game/siloAi'
 import { runCommand } from './game/console'
@@ -64,6 +65,18 @@ function stalkerUntouched(unit: { hp: number; age: number } | null | undefined):
   if (!unit) return false
   const expected = UNIT_STATS.porter.hp * (1 - Math.min(unit.age, STALKER_LIFESPAN) / STALKER_LIFESPAN)
   return Math.abs(unit.hp - expected) < 1e-4
+}
+
+/** The 20s stun stays with the old owner. One short step then hands the Stalker over. */
+function finishStalkerCapture(state: MatchState, id: number): Unit | undefined {
+  const waiting = unitById(state, id)
+  assert(waiting && waiting.captureStun > 0, 'the Stalker was not stunned for capture')
+  const owner = waiting.owner
+  waiting.captureStun = 0.01
+  step(state, 1 / 60)
+  const taken = unitById(state, id)
+  assert(taken && taken.owner !== owner && taken.captureStun === 0, 'the stun did not hand the Stalker over')
+  return taken
 }
 
 /** Hit points are numbers, so 8/3 is stored. Subtracting it from a whole value can be off by one bit. */
@@ -1193,8 +1206,14 @@ function endOfMatchStats(): void {
   assert(open.stats[0]?.created.pike === (beforeCreated[0]?.pike ?? 0) + 1, 'the extra Flasher was not created')
   commandAttack(open, [pike.id], stalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(open, 1 / 60)
+  const waiting = unitById(open, stalker.id)
+  assert(waiting?.owner === 1, 'the Stalker changed sides before the stun ended')
+  assert((waiting?.captureStun ?? 0) > STALKER_CAPTURE_STUN_SECONDS - 2, 'the capture stun was not 20 seconds')
+  assert(waiting.order == null, 'a stunned Stalker kept an order')
+  waiting.captureStun = 0.01
+  step(open, 1 / 60)
   const taken = unitById(open, stalker.id)
-  assert(taken?.owner === 0, 'the uncovered Stalker was not captured')
+  assert(taken?.owner === 0 && taken.captureStun === 0, 'the uncovered Stalker was not captured after the stun')
   assert(open.stats[1]?.lost.porter === (beforeLost[1]?.porter ?? 0), 'capturing a Stalker counted as a loss')
   assert(open.stats[0]?.created.porter === (beforeCreated[0]?.porter ?? 0), 'a captured Stalker counted as created')
 
@@ -1202,18 +1221,36 @@ function endOfMatchStats(): void {
   const started = duel.stats.map((row) => ({ created: { ...row.created }, lost: { ...row.lost }, dumps: row.dumps }))
   const enemy = duel.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(enemy, 'missing the enemy Silo')
+  const enemyStock = enemy.stock
+  const playerBank = duel.oreHeld[0] ?? 0
   enemy.hp = 0
+  enemy.struckBy = 0
   step(duel, 1 / 60)
-  assert(duel.outcome === 'win', 'destroying the Silo did not end the 1v1')
+  assert(duel.outcome == null, 'ruining the Silo ended the 1v1')
+  assert(enemy.ruined && Number(enemy.owner) === 1 && enemy.stock === enemyStock, 'the ruin did not keep its owner and dumps')
+  const hold = buildingCenter(enemy)
+  makeUnit(duel, 0, 'pike', hold.x, hold.y + 40)
+  const survivor = makeUnit(duel, 1, 'howler', hold.x + 900, hold.y)
+  const afterPike = duel.stats.map((row) => ({ created: { ...row.created }, lost: { ...row.lost } }))
+  enemy.capture = SILO_CAPTURE_SECONDS - 0.01
+  enemy.captureBy = 0
+  step(duel, 1 / 60)
+  assert(Number(enemy.owner) === 0 && enemy.hp === siloMaxHp() && !enemy.ruined, 'the hold did not give the Silo to the captor')
+  assert((duel.oreHeld[0] ?? 0) === playerBank + enemyStock, 'the hold moved more than that Silo\'s dumps')
+  assert(unitById(duel, survivor.id)?.owner === 1, 'the loser\'s Gorilla transferred')
+  assert(duel.units.some((unit) => unit.owner === 1 && unit.kind === 'porter'), 'the loser\'s Stalkers transferred')
   assert(duel.stats[0]?.silos === 1, 'the captor did not record the Silo')
   assert(duel.stats[1]?.silos === 0, 'the fallen side recorded its own capture')
   assert(duel.stats[0]?.dumps === started[0]?.dumps && duel.stats[1]?.dumps === started[1]?.dumps, 'capturing a bank counted as collected dumps')
   for (const kind of UNIT_KINDS) {
-    assert(duel.stats[0]?.created[kind] === started[0]?.created[kind], `capture created a ${kind}`)
-    assert(duel.stats[1]?.created[kind] === started[1]?.created[kind], `capture created a ${kind} for the loser`)
-    assert(duel.stats[0]?.lost[kind] === started[0]?.lost[kind], `capture lost a ${kind}`)
-    assert(duel.stats[1]?.lost[kind] === started[1]?.lost[kind], `transferred ${kind}s counted as lost`)
+    assert(duel.stats[0]?.created[kind] === afterPike[0]?.created[kind], `capture created a ${kind}`)
+    assert(duel.stats[1]?.created[kind] === afterPike[1]?.created[kind], `capture created a ${kind} for the loser`)
+    assert(duel.stats[0]?.lost[kind] === afterPike[0]?.lost[kind], `capture lost a ${kind}`)
+    assert(duel.stats[1]?.lost[kind] === afterPike[1]?.lost[kind], `transferred ${kind}s counted as lost`)
   }
+  for (const unit of duel.units) if (unit.owner === 1) unit.hp = 0
+  step(duel, 1 / 60)
+  assert(duel.outcome === 'win', 'clearing the enemy after the capture did not end the 1v1')
 
   const wiped = createMatch(4, 'ffa')
   const victim = 1
@@ -1224,9 +1261,10 @@ function endOfMatchStats(): void {
   assert(victimKeep, 'missing the Silo to wipe')
   victimKeep.hp = 0
   step(wiped, 1 / 60)
-  assert(wiped.units.every((unit) => unit.owner !== victim), 'the wiped side kept a unit')
-  assert(wiped.stats[victim]?.lost.porter === victims.length, `the wipe lost ${wiped.stats[victim]?.lost.porter}, not ${victims.length}`)
-  assert(wiped.stats.every((row) => row.silos === 0), 'a wipe with no captor counted a Silo')
+  assert(!wiped.eliminated[victim], 'a ruin with no captor removed the side')
+  assert(wiped.units.some((unit) => unit.owner === victim), 'a ruin with no captor deleted the side\'s units')
+  assert(wiped.stats[victim]?.lost.porter === 0, 'ruining a Silo counted the Stalkers as lost')
+  assert(wiped.stats.every((row) => row.silos === 0), 'a ruin with no finished hold counted a Silo')
 
   const aged = createMatch(6)
   const elder = aged.units.find((unit) => unit.owner === 0 && unit.kind === 'porter' && unit.hp > 0)
@@ -1287,13 +1325,51 @@ function keepDecidesTheField(): void {
   assert(enemy, 'missing enemy keep')
   enemy.hp = 0
   step(state, 1 / 60)
+  assert(state.outcome == null, 'ruining the enemy Silo ended the 1v1')
+  finishHold(state, enemy, 0, true)
   assert(state.outcome === 'win', `expected win, got ${state.outcome}`)
   const loss = createMatch(2)
   const own = loss.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(own, 'missing player keep')
   own.hp = 0
   step(loss, 1 / 60)
+  assert(loss.outcome == null, 'ruining the player Silo ended the 1v1')
+  finishHold(loss, own, 1, true)
   assert(loss.outcome === 'lose', `expected loss, got ${loss.outcome}`)
+}
+
+/** Capture every Silo this side still owns, then drop whatever else it has. */
+function clearSide(state: MatchState, owner: number, captor: number): void {
+  for (let guard = 0; guard < 4; guard++) {
+    const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep')
+    if (!keep) break
+    for (const unit of state.units) if (unit.owner === owner) unit.hp = 0
+    for (const building of state.buildings) {
+      if (building.owner === owner && building.kind !== 'keep') building.hp = 0
+    }
+    finishHold(state, keep, captor, false)
+  }
+}
+
+/** Advance a ruined Silo to the end of its hold. Clear the victim when the match should end. */
+function finishHold(state: MatchState, keep: Building, captor: number, clearVictim: boolean): void {
+  if (!keep.ruined) {
+    keep.hp = 0
+    keep.struckBy = captor
+    step(state, 1 / 60)
+  }
+  const victim = keep.owner
+  if (clearVictim && victim !== captor) {
+    for (const unit of state.units) if (unit.owner === victim) unit.hp = 0
+    for (const building of state.buildings) {
+      if (building.owner === victim && building.id !== keep.id) building.hp = 0
+    }
+  }
+  const center = buildingCenter(keep)
+  makeUnit(state, captor, 'pike', center.x, center.y + 36)
+  keep.capture = SILO_CAPTURE_SECONDS - 0.01
+  keep.captureBy = captor
+  step(state, 1 / 60)
 }
 
 function enemyPlays(): void {
@@ -2699,6 +2775,8 @@ siloAiRefusesUnchartedGround()
 ruinedSiloCanBeRepaired()
 siloAiDefendsItsSilo()
 siloAiKeepsStalkersWorking()
+siloAiHoldsEnemyRuin()
+captureRulesAndTickBudget()
 cellsBlockTrainingUntilStorage()
 fullStorageRefusesAHaul()
 buildingDumpCaps()
@@ -2766,7 +2844,9 @@ function captureHarvestAndPassages(): void {
   const pike = makeUnit(open, 0, 'pike', stalker.x + 18, stalker.y)
   commandAttack(open, [pike.id], stalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(open, 1 / 60)
-  const taken = unitById(open, stalker.id)
+  const waiting = unitById(open, stalker.id)
+  assert(waiting?.owner === 1 && (waiting.captureStun ?? 0) > STALKER_CAPTURE_STUN_SECONDS - 2, 'an uncovered Stalker changed sides before the stun')
+  const taken = finishStalkerCapture(open, stalker.id)
   assert(taken?.owner === 0 && stalkerUntouched(taken), `uncovered stalker was not captured (${taken?.owner}, ${taken?.hp})`)
   assert(open.toasts.some((toast) => toast.text === 'Stalker captured.'), 'no stalker capture toast')
 
@@ -2846,7 +2926,9 @@ function captureHarvestAndPassages(): void {
   const risingShooter = makeUnit(rising, 0, 'pike', risingStalker.x + 18, risingStalker.y)
   commandAttack(rising, [risingShooter.id], risingStalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(rising, 1 / 60)
-  const risingTaken = unitById(rising, risingStalker.id)
+  const risingWaiting = unitById(rising, risingStalker.id)
+  assert(risingWaiting?.owner === 1 && (risingWaiting.captureStun ?? 0) > 0, 'an unfinished storage stunned nobody')
+  const risingTaken = finishStalkerCapture(rising, risingStalker.id)
   assert(
     risingTaken?.owner === 0 && stalkerUntouched(risingTaken),
     `an unfinished storage protected the stalker (${risingTaken?.owner}, ${risingTaken?.hp})`,
@@ -2865,7 +2947,9 @@ function captureHarvestAndPassages(): void {
   const exposedShooter = makeUnit(beyond, 0, 'pike', exposedStalker.x + 18, exposedStalker.y)
   commandAttack(beyond, [exposedShooter.id], exposedStalker.id, 'unit')
   for (let i = 0; i < 40; i++) step(beyond, 1 / 60)
-  const exposedTaken = unitById(beyond, exposedStalker.id)
+  const exposedWaiting = unitById(beyond, exposedStalker.id)
+  assert(exposedWaiting?.owner === 1 && (exposedWaiting.captureStun ?? 0) > 0, 'a stalker outside storage sight was not stunned')
+  const exposedTaken = finishStalkerCapture(beyond, exposedStalker.id)
   assert(exposedTaken?.owner === 0, `a stalker outside storage sight was not captured (${exposedTaken?.owner})`)
 
   const ai = createMatch(6)
@@ -2981,7 +3065,7 @@ function captureHarvestAndPassages(): void {
   const extra = makeBuilding(ffa, 2, 'silo', fallen.tx + 4, fallen.ty, true)
   extra.stock = 11
   ffa.oreHeld[2] = (ffa.oreHeld[2] ?? 0) + 11
-  const victimOre = ffa.oreHeld[2] ?? 0
+  const siloStock = fallen.stock
   const captorOre = ffa.oreHeld[1] ?? 0
   fallen.hp = 6
   const fallenCenter = buildingCenter(fallen)
@@ -2992,29 +3076,29 @@ function captureHarvestAndPassages(): void {
   commandAttack(ffa, [killer.id], fallen.id, 'building')
   for (let i = 0; i < 90; i++) {
     step(ffa, 1 / 60)
-    if (ffa.eliminated[2]) break
+    if (fallen.ruined) break
   }
-  assert(ffa.eliminated[2], 'destroying the silo did not eliminate that side')
-  assert(ffa.outcome == null, 'one capture ended the free-for-all')
-  assert(!ffa.units.some((unit) => unit.owner === 2), 'captured units kept the loser')
-  assert(!ffa.buildings.some((building) => building.owner === 2), 'captured buildings kept the loser')
-  for (const id of ids) assert(unitById(ffa, id)?.owner === 1, 'a captured unit did not join the killer')
+  assert(fallen.ruined && fallen.owner === 2, 'destroying the silo did not leave it with the owner')
+  assert(!ffa.eliminated[2], 'destroying the silo eliminated that side')
+  assert(ffa.outcome == null, 'one ruin ended the free-for-all')
+  for (const id of ids) assert(unitById(ffa, id)?.owner === 2, 'a unit left the loser when the Silo fell')
   const moved = ffa.buildings.find((building) => building.id === extra.id)
-  const captorKeep = ffa.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0)
-  assert(moved?.owner === 1 && moved.stock === 0, 'captured Storage dumps were left in that building')
-  assert(captorKeep?.stock === captorOre + victimOre, 'captured dumps were not poured into the Silo first')
-  assert(ffa.oreHeld[1] === captorOre + victimOre, `dumps moved to ${ffa.oreHeld[1]}, expected ${captorOre + victimOre}`)
-  assert(ffa.oreHeld[2] === 0, 'the loser kept dumps')
+  assert(Number(moved?.owner) === 2 && moved?.stock === 11, 'the Storage transferred with the Silo')
+  const stillFighting = makeUnit(ffa, 2, 'pike', fallenCenter.x + 900, fallenCenter.y)
+  fallen.capture = SILO_CAPTURE_SECONDS - 0.01
+  fallen.captureBy = 1
+  step(ffa, 1 / 60)
+  assert(Number(fallen.owner) === 1 && fallen.hp === siloMaxHp(), 'the hold did not give the Silo to the killer')
+  assert(!ffa.eliminated[2], 'a side with a Flasher was eliminated by the Silo capture')
+  assert(unitById(ffa, stillFighting.id)?.owner === 2, 'the Flasher joined the killer')
+  for (const id of ids) assert(unitById(ffa, id)?.owner === 2, 'a unit joined the killer')
+  assert(Number(moved?.owner) === 2 && moved?.stock === 11, 'Storage dumps moved to the captor')
+  const captorKeep = ffa.buildings.find((building) => building.owner === 1 && building.kind === 'keep' && building.id !== fallen.id)
+  assert((captorKeep?.stock ?? 0) + fallen.stock === captorOre + siloStock, 'only the fallen Silo\'s dumps were not poured to the captor')
+  assert(ffa.oreHeld[2] === 11, `the loser bank is ${ffa.oreHeld[2]}, expected the Storage stock`)
   assert(ffa.selectedUnits.includes(playerUnit.id), 'the player lost their own selection')
-  assert(!ffa.selectedUnits.includes(capturedId), 'a captured unit stayed in the player selection')
-  const sample = unitById(ffa, capturedId)
-  assert(sample, 'the captured unit disappeared')
-  assert(
-    sideTileVisible(ffa, 1, Math.floor(sample.x / TILE), Math.floor(sample.y / TILE)),
-    'the captor cannot see a unit it just took',
-  )
   updateSiloAi(ffa, 0.5)
-  assert(ffa.eliminated[2] && unitById(ffa, capturedId)?.owner === 1, 'AI gave the captured side back')
+  assert(!ffa.eliminated[2] && unitById(ffa, capturedId)?.owner === 2, 'AI took the side that still has units')
 
   const duel = createMatch(2)
   const enemy = duel.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
@@ -3026,10 +3110,12 @@ function captureHarvestAndPassages(): void {
   commandAttack(duel, [finisher.id], enemy.id, 'building')
   for (let i = 0; i < 90; i++) {
     step(duel, 1 / 60)
-    if (duel.outcome) break
+    if (enemy.ruined) break
   }
-  assert(duel.outcome === 'win', `capturing the enemy silo did not win (${duel.outcome})`)
-  for (const id of enemyIds) assert(unitById(duel, id)?.owner === 0, '1v1 capture left units with the loser')
+  assert(duel.outcome == null, 'ruining the enemy silo won the 1v1')
+  for (const id of enemyIds) assert(unitById(duel, id)?.owner === 1, '1v1 ruin took the loser\'s units')
+  finishHold(duel, enemy, 0, true)
+  assert(duel.outcome === 'win', `clearing the enemy after the hold did not win (${duel.outcome})`)
 }
 
 function eightPlayerFieldPlacesEightSilos(): void {
@@ -3129,17 +3215,26 @@ function eightPlayerFieldPlacesEightSilos(): void {
   commandAttack(state, [killer.id], victim.id, 'building')
   for (let i = 0; i < 90; i++) {
     step(state, 1 / 60)
-    if (state.eliminated[7]) break
+    if (victim.ruined) break
   }
-  assert(state.eliminated[7], 'destroying a Silo did not eliminate that side in the 8-player match')
-  assert(state.outcome == null, 'one capture ended the 8-player match')
-  for (const id of ids) assert(unitById(state, id)?.owner === 3, 'a captured unit did not join Silo 04')
-  assert(state.oreHeld[3] === captorOre + victimOre, `dumps moved to ${state.oreHeld[3]}, expected ${captorOre + victimOre}`)
-  assert(state.oreHeld[7] === 0, 'Silo 08 kept dumps')
+  assert(victim.ruined && victim.owner === 7, 'destroying Silo 08 did not leave the ruin with Silo 08')
+  assert(!state.eliminated[7], 'destroying a Silo eliminated that side in the 8-player match')
+  assert(state.outcome == null, 'one ruin ended the 8-player match')
+  for (const id of ids) assert(unitById(state, id)?.owner === 7, 'a unit left Silo 08 when its Silo fell')
   assert(
     state.buildings.filter((building) => building.kind === 'keep' && building.hp > 0).length === 7,
-    'every other Silo fell with the first capture',
+    'every other Silo fell with the first ruin',
   )
+  const stillFighting = makeUnit(state, 7, 'pike', fallenCenter.x + 900, fallenCenter.y)
+  victim.capture = SILO_CAPTURE_SECONDS - 0.01
+  victim.captureBy = 3
+  step(state, 1 / 60)
+  assert(Number(victim.owner) === 3 && victim.hp === siloMaxHp(), 'the hold did not give Silo 08 to Silo 04')
+  assert(!state.eliminated[7], 'Silo 08 was eliminated while a Flasher remained')
+  assert(unitById(state, stillFighting.id)?.owner === 7, 'the Flasher transferred with the Silo')
+  for (const id of ids) assert(unitById(state, id)?.owner === 7, 'a captured unit joined Silo 04')
+  assert(state.oreHeld[3] === captorOre + victimOre, `dumps moved to ${state.oreHeld[3]}, expected ${captorOre + victimOre}`)
+  assert(state.oreHeld[7] === 0, 'Silo 08 kept dumps outside the Silo')
 }
 
 function bothModesUseTheirOwnMapSize(): void {
@@ -3282,25 +3377,31 @@ function eliminatingASideRemovesIt(): void {
   victim.hp = 0
   step(state, 1 / 60)
   assert(state.outcome == null, 'one fallen Silo ended the free-for-all')
-  assert(state.eliminated[2], 'Silo 03 was not marked eliminated')
+  assert(!state.eliminated[2], 'Silo 03 was eliminated while it still had units')
+  assert(state.units.some((unit) => unit.owner === 2), 'the loser\'s units were removed')
+  assert(victim.ruined && victim.owner === 2, 'the ruin did not stay with Silo 03')
+  for (const unit of state.units) if (unit.owner === 2) unit.hp = 0
+  finishHold(state, victim, 1, false)
+  assert(state.eliminated[2], 'Silo 03 was not marked eliminated once it had nothing left')
   assert(!state.units.some((unit) => unit.owner === 2), 'eliminated units remained')
-  assert(!state.buildings.some((building) => building.owner === 2), 'eliminated buildings remained')
   assert(
     state.toasts.some((toast) => toast.text.includes(PLAYER_NAME[2] ?? '') && toast.text.includes('eliminated')),
     'no elimination toast',
   )
   assert(state.buildings.some((building) => building.id === other.id && building.hp > 0), 'another side was removed')
-  other.hp = 0
-  second.hp = 0
-  step(state, 1 / 60)
-  assert(state.outcome === 'win', `destroying every enemy Silo did not win (${state.outcome})`)
+  clearSide(state, 3, 0)
+  clearSide(state, 1, 0)
+  assert(state.outcome === 'win', `removing every enemy did not win (${state.outcome})`)
 
   const loss = createMatch(5, 'ffa')
   const home = loss.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
   assert(home, 'missing the player Silo')
   home.hp = 0
   step(loss, 1 / 60)
-  assert(loss.outcome === 'lose', `a fallen player Silo did not lose (${loss.outcome})`)
+  assert(loss.outcome == null, 'a ruined player Silo ended the match while units remained')
+  for (const unit of loss.units) if (unit.owner === 0) unit.hp = 0
+  finishHold(loss, home, 1, false)
+  assert(loss.outcome === 'lose', `a player with nothing left did not lose (${loss.outcome})`)
 }
 
 function footprintGap(tx: number, ty: number, w: number, h: number, ox: number, oy: number): number {
@@ -5384,9 +5485,11 @@ function pillarCapturesAnUncoveredStalker(): void {
   for (let i = 0; i < 180; i++) {
     pin(stalker)
     step(open, 1 / 60)
-    if (unitById(open, stalker.id)?.owner === 0) break
+    if ((unitById(open, stalker.id)?.captureStun ?? 0) > 0) break
   }
-  const taken = unitById(open, stalker.id)
+  const waiting = unitById(open, stalker.id)
+  assert(waiting?.owner === 1 && (waiting.captureStun ?? 0) > 0, 'a Pillar did not stun the uncovered stalker')
+  const taken = finishStalkerCapture(open, stalker.id)
   assert(taken?.owner === 0 && stalkerUntouched(taken), `a Pillar did not capture the uncovered stalker (${taken?.owner}, ${taken?.hp})`)
 
   const sheltered = createMatch(4)
@@ -5574,32 +5677,31 @@ function ruinedSiloCanBeRepaired(): void {
   enemy.hp = 0
   enemy.struckBy = 0
   step(duel, 1 / 60)
-  assert(duel.outcome === 'win', `destroying the Silo did not end the 1v1 (${duel.outcome})`)
+  assert(duel.outcome == null, `ruining the Silo ended the 1v1 (${duel.outcome})`)
   const wreck = duel.buildings.find((building) => building.id === enemyId)
-  assert(wreck?.ruined && wreck.owner === -1 && wreck.hp === 0, 'the 1v1 Silo disappeared instead of leaving a ruin')
+  assert(wreck?.ruined && wreck.owner === 1 && wreck.hp === 0, 'the 1v1 Silo disappeared instead of leaving a ruin')
   assert(
     !duel.buildings.some((building) => building.owner === 1 && building.kind === 'keep' && building.hp > 0),
     'the loser still has a living Silo',
   )
 
   const state = createMatch(4, 'ffa')
-  const fallen = state.buildings.find((building) => building.owner === 2 && building.kind === 'keep')
+  const fallen = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
   assert(fallen, 'missing a free-for-all Silo')
-  const victimOre = state.oreHeld[2] ?? 0
-  const captorOre = state.oreHeld[1] ?? 0
+  const victimOre = state.oreHeld[1] ?? 0
   const fallenId = fallen.id
   fallen.hp = 0
-  fallen.struckBy = 1
+  fallen.struckBy = 0
   state.aiAcc = -20
   for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -20
   step(state, 1 / 60)
-  assert(state.eliminated[2], 'destroying the Silo did not capture that side')
+  assert(!state.eliminated[1], 'destroying the Silo eliminated that side')
   assert(state.outcome == null, 'one ruined Silo ended the free-for-all')
-  assert(!state.buildings.some((building) => building.owner === 2), 'captured buildings kept the loser')
-  assert(!state.units.some((unit) => unit.owner === 2), 'captured units kept the loser')
-  assert(state.oreHeld[1] === captorOre + victimOre, 'dumps did not transfer with the capture')
+  assert(state.units.some((unit) => unit.owner === 1), 'the loser\'s units were removed')
+  assert(state.oreHeld[1] === 0, 'the ruined Silo left its dumps spendable')
+  assert(fallen.stock === victimOre, 'the ruined Silo dropped its dumps')
   const ruin = state.buildings.find((building) => building.id === fallenId)
-  assert(ruin?.ruined && ruin.owner === -1 && ruin.hp === 0 && !ruin.complete, 'the Silo did not stay as a neutral ruin')
+  assert(ruin?.ruined && ruin.owner === 1 && ruin.hp === 0 && !ruin.complete, 'the Silo did not stay with its owner')
   for (let y = 0; y < BUILDING_STATS.keep.h; y++) {
     for (let x = 0; x < BUILDING_STATS.keep.w; x++) {
       assert(!isWalkable(state, ruin.tx + x, ruin.ty + y), `the ruin does not block ${ruin.tx + x},${ruin.ty + y}`)
@@ -5651,6 +5753,7 @@ function ruinedSiloCanBeRepaired(): void {
   const stalker = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
   assert(stalker, 'missing a Stalker to refuse the repair')
   state.oreHeld[1] = 0
+  ruin.stock = 0
   const refused = commandRepair(state, [stalker.id], ruin.id)
   assert(refused != null, 'a repair started with no dumps')
   assert(stalker.order?.type !== 'repair', 'the Stalker was ordered to repair without dumps')
@@ -5707,10 +5810,10 @@ function ruinedSiloCanBeRepaired(): void {
   assert(started, 'the repair never showed progress')
   const restored = state.buildings.find((building) => building.id === fallenId)
   assert(restored && !restored.ruined && restored.complete && restored.owner === 1, 'the repair did not restore the Silo')
-  assert(restored.hp === BUILDING_STATS.keep.hp, `the Silo came back with ${restored.hp} health`)
+  assert(restored.hp === siloMaxHp(), `the Silo came back with ${restored.hp} health`)
   assert(state.oreHeld[1] === 0, `repair left ${state.oreHeld[1]} dumps`)
   assert(state.supplyCap[1] === capBefore + BUILDING_STATS.keep.supply, 'the restored Silo did not add its cells')
-  assert(state.eliminated[2], 'repairing the ruin brought the captured side back')
+  assert(!state.eliminated[1], 'repairing the ruin eliminated its owner')
   state.oreHeld[1] = UNIT_STATS.porter.cost
   assert(tryTrain(state, restored.id, 'porter') == null, 'the restored Silo does not train Stalkers')
   updateVision(state)
@@ -8292,9 +8395,15 @@ function guidedLessonAdvancesWhenEachActionHappens(): void {
   assert(flasher && state.lesson, 'no Flasher for the capture')
   commandAttack(state, [flasher.id], state.lesson.captive, 'unit')
   let captured = false
+  let armed = false
   for (let i = 0; i < 900 && !captured; i++) {
     step(state, 1 / 60)
-    captured = state.units.find((unit) => unit.id === state.lesson?.captive)?.owner === 0
+    const prize = state.units.find((unit) => unit.id === state.lesson?.captive)
+    if (prize && prize.captureStun > 0 && prize.owner !== 0 && !armed) {
+      prize.captureStun = 0.02
+      armed = true
+    }
+    captured = prize?.owner === 0
   }
   assert(captured, 'the exposed Stalker was not captured')
   leaveLesson(state, 'capture')
@@ -8361,9 +8470,19 @@ function guidedLessonAdvancesWhenEachActionHappens(): void {
   assert(quiet.every((unit) => unit.order == null), 'the enemy moved before the push')
   step(state, 1 / 60)
   assert(quiet.some((unit) => unit.order?.type === 'attack'), 'the enemy squad did not attack the Silo')
+  for (const unit of state.units) if (unit.owner === 1) unit.hp = 0
   foeKeep.hp = 0
+  foeKeep.struckBy = 0
   step(state, 1 / 60)
-  assert(state.outcome === 'win', 'destroying the enemy Silo did not win')
+  const holder = state.units.find((unit) => unit.owner === 0 && unit.kind === 'pike' && unit.hp > 0)
+  assert(holder, 'the lesson has no Flasher to hold the ruin')
+  const foeCenter = buildingCenter(foeKeep)
+  holder.x = foeCenter.x
+  holder.y = foeCenter.y + 40
+  foeKeep.capture = SILO_CAPTURE_SECONDS - 0.01
+  foeKeep.captureBy = 0
+  step(state, 1 / 60)
+  assert(state.outcome === 'win', 'holding the enemy Silo after its squad was gone did not win')
   assert(lessonView(state) === null, 'the lesson card stayed up after the win')
   lessonTick(state)
   assert(state.lesson!.finished, 'the lesson did not finish')
@@ -8374,4 +8493,175 @@ function guidedLessonAdvancesWhenEachActionHappens(): void {
   assert(skipped.lesson?.index === 1 && skipped.lesson.prepared === -1, 'Skip step did not move on')
   while (skipped.lesson && !skipped.lesson.finished) skipLesson(skipped)
   assert(skipped.lesson?.finished && skipped.outcome === null && !skipped.fogCleared, 'skipping the lesson ended the match or cleared fog')
+}
+
+function captureRulesAndTickBudget(): void {
+  const state = createMatch(3, 'ffa')
+  const home = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const foe = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(home && foe, 'missing silos for the hold rules')
+  assert(home.hp === siloMaxHp(), `Silo hp is ${home.hp}, expected ${siloMaxHp()}`)
+  const yard = makeBuilding(state, 0, 'yard', home.tx + 5, home.ty, true)
+  const vault = makeBuilding(state, 1, 'silo', foe.tx + 5, foe.ty, true)
+  vault.stock = 40
+  state.oreHeld[1] = (state.oreHeld[1] ?? 0) + 40
+  const siloStock = foe.stock
+  foe.hp = 0
+  foe.struckBy = 0
+  step(state, 1 / 60)
+  assert(foe.ruined && foe.owner === 1 && foe.stock === siloStock, 'the ruin did not keep its dumps')
+  assert(vault.owner === 1 && vault.stock === 40, 'the Storage was captured with the Silo')
+  const center = buildingCenter(foe)
+  const attacker = makeUnit(state, 0, 'pike', center.x, center.y + 40)
+  const defender = makeUnit(state, 1, 'howler', center.x - 30, center.y + 20)
+  state.aiAcc = -100
+  state.playerAiAcc = -100
+  for (let owner = 0; owner < state.playerCount; owner++) state.sideAcc[owner] = -100
+  foe.capture = 10
+  foe.captureBy = 0
+  step(state, 1)
+  assert(foe.capture === 10, `a contested hold moved to ${foe.capture}`)
+  defender.hp = 0
+  step(state, 1)
+  assert(foe.capture > 10 && foe.capture < 12, `an open hold did not advance (${foe.capture})`)
+  attacker.x = center.x + 800
+  attacker.y = center.y + 800
+  const marked = foe.capture
+  step(state, 1)
+  assert(foe.capture < marked, 'the hold did not drain when the attacker left')
+  const miner = state.units.find((unit) => unit.owner === 1 && unit.kind === 'porter' && unit.hp > 0)
+  assert(miner, 'missing a Stalker to stun')
+  miner.captureStun = STALKER_CAPTURE_STUN_SECONDS
+  miner.captureOwner = 0
+  miner.order = null
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  assert(miner.order == null && miner.owner === 1, 'SiloAI ordered a stunned Stalker')
+  miner.captureStun = 0
+  miner.captureOwner = -1
+  foe.stock = 0
+  state.oreHeld[1] = vault.stock
+  foe.capture = 12
+  foe.captureBy = 0
+  miner.x = center.x
+  miner.y = center.y + 48
+  miner.order = { type: 'repair', buildingId: foe.id }
+  step(state, 1 / 60)
+  assert(foe.capture === 0 && foe.captureBy < 0, 'a repairing Stalker did not reset the hold')
+  foe.hp = 0
+  foe.ruined = true
+  foe.owner = 1
+  foe.complete = false
+  foe.capture = SILO_CAPTURE_SECONDS - 0.01
+  foe.captureBy = 0
+  miner.order = null
+  attacker.x = center.x
+  attacker.y = center.y + 36
+  const foeArmy = makeUnit(state, 1, 'howler', center.x + 900, center.y)
+  step(state, 1 / 60)
+  assert(
+    foe.owner === 0 && vault.owner === 1 && vault.stock === 40,
+    'capture moved the Storage',
+  )
+  assert(unitById(state, foeArmy.id)?.owner === 1, 'the loser\'s Gorilla transferred with the Silo')
+  const pad = makeBuilding(state, 0, 'silo', home.tx + 8, home.ty, true)
+  pad.stock = 0
+  home.hp = 0
+  home.struckBy = 1
+  step(state, 1 / 60)
+  assert(tryTrain(state, home.id, 'porter') != null, 'a ruined Silo trained a Stalker')
+  state.oreHeld[0] = 500
+  recomputeSupply(state)
+  assert(tryTrain(state, yard.id, 'pike') === null, 'the Factory stopped without a living Silo')
+  const taker = makeUnit(state, 1, 'pike', buildingCenter(home).x, buildingCenter(home).y + 36)
+  home.capture = SILO_CAPTURE_SECONDS - 0.01
+  home.captureBy = 1
+  step(state, 1 / 60)
+  assert(home.owner === 1, 'the player Silo was not captured')
+  assert(state.toasts.some((toast) => toast.text === SILO_CAPTURE_ALERT), 'the retake alert was missing')
+  assert(!state.eliminated[0], 'the player was eliminated while the Factory remained')
+  void taker
+
+  const crowd = createMatch(11, 'ffa8')
+  crowd.aiControl = true
+  crowd.godMode = true
+  for (const unit of crowd.units) {
+    if (unit.kind !== 'porter') continue
+    unit.captureStun = STALKER_CAPTURE_STUN_SECONDS
+    unit.captureOwner = (unit.owner + 1) % crowd.playerCount
+    unit.order = null
+  }
+  const ruin = crowd.buildings.find((building) => building.owner === 3 && building.kind === 'keep')
+  assert(ruin, 'missing an 8-player Silo')
+  ruin.hp = 0
+  ruin.struckBy = 0
+  step(crowd, 1 / 60)
+  const spot = buildingCenter(ruin)
+  makeUnit(crowd, 0, 'pike', spot.x, spot.y + 40)
+  let worst = 0
+  for (let i = 0; i < 180; i++) {
+    const began = performance.now()
+    step(crowd, 1 / 60)
+    worst = Math.max(worst, performance.now() - began)
+    if (crowd.outcome) break
+  }
+  assert(worst < 100, `an 8-player tick took ${worst.toFixed(1)}ms`)
+  for (const unit of crowd.units) {
+    if (unit.kind !== 'porter') continue
+    unit.captureStun = 0
+    unit.captureOwner = -1
+  }
+  let liveWorst = 0
+  const liveBegan = performance.now()
+  for (let i = 0; i < 600; i++) {
+    const began = performance.now()
+    step(crowd, 1 / 60)
+    liveWorst = Math.max(liveWorst, performance.now() - began)
+    if (crowd.outcome) break
+  }
+  const liveElapsed = performance.now() - liveBegan
+  assert(liveWorst < 250, `a live 8-player tick took ${liveWorst.toFixed(1)}ms`)
+  assert(liveElapsed < 45000, `the live 8-player run took ${(liveElapsed / 1000).toFixed(1)}s`)
+}
+
+function siloAiHoldsEnemyRuin(): void {
+  const state = createMatch(8)
+  const foe = state.buildings.find((building) => building.owner === 0 && building.kind === 'keep')
+  const home = state.buildings.find((building) => building.owner === 1 && building.kind === 'keep')
+  assert(foe && home, 'missing silos for the hold order')
+  foe.hp = 0
+  foe.struckBy = 1
+  step(state, 1 / 60)
+  assert(foe.ruined && Number(foe.owner) === 0, 'the player Silo did not stay a ruin')
+  const stats = BUILDING_STATS.keep
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      const index = (foe.ty + y) * state.mapW + (foe.tx + x)
+      state.aiVisible[index] = 1
+      state.aiExplored[index] = 1
+    }
+  }
+  const homePoint = buildingCenter(home)
+  const pike = makeUnit(state, 1, 'pike', homePoint.x + 40, homePoint.y)
+  const stunned = makeUnit(state, 1, 'porter', homePoint.x, homePoint.y + 28)
+  stunned.captureStun = STALKER_CAPTURE_STUN_SECONDS
+  stunned.captureOwner = 0
+  state.aiAttacking = true
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const order = unitById(state, pike.id)?.order
+  const center = buildingCenter(foe)
+  assert(
+    order?.type === 'attackMove' && Math.hypot(order.x - center.x, order.y - center.y) < 6 * TILE,
+    'SiloAI did not send a Flasher to hold the ruined Silo',
+  )
+  assert(unitById(state, stunned.id)?.order == null, 'SiloAI ordered a stunned Stalker while holding a ruin')
+  const parked = { x: order.x, y: order.y }
+  state.aiAcc = 0
+  updateSiloAi(state, 0.5)
+  const again = unitById(state, pike.id)?.order
+  assert(
+    again?.type === 'attackMove' && again.x === parked.x && again.y === parked.y,
+    'SiloAI reissued the hold and moved the parking spot',
+  )
 }
