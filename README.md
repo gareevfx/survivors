@@ -7,55 +7,34 @@ Ready-to-play online version of the game [Play Survivors](https://gareevfx.com/p
 
 The world has run out of fresh resources, and what's left is the wreckage. Piles of technical debris, called Dumps, lie scattered across the map. Each player starts with a single Silo, the command center that trains Stalkers. These hardy scavengers can't be destroyed. They haul Dumps back to the Silo or to Storages that hold your Cells, and they clear rocks and trees from their path as they go.
 
-Stalkers aren't safe from everyone. Anyone can capture one that wanders outside the watchful range of a Silo, Flasher, Gorilla or Storage. Pillars, the windmills with battle towers, can also capture them. So you expand carefully. Factories turn out Flashers, which are lightning-fast raiders. They also build Gorillas, the heavy tanks that smash buildings, and Hover scouts that map the unknown, because nobody can build in uncharted land.
-
-Everything comes down to the Silo. Destroy an enemy's Silo and you capture it, along with every building, every unit and every resource that player owned. In a 1v1 on a tight 80x40 map, that ends the match. In the four-player free-for-all on 90x50, the war goes on. Even a ruined Silo isn't gone for good, since a brave Stalker can repair it.
-
-Each match is a race between scavenging and fighting. The SiloAI plays by the same rules and never lets a Stalker idle. It builds Storages beside fresh Dumps and keeps a tidy gap between its buildings. It widens narrow passages and gathers its army before it strikes. You can face it as an opponent, or hand it your own side as an autoplayer.
+Stalkers aren't safe from everyone. Anyone can capture one that wanders outside the watchful range of a Silo, Flasher, Gorilla or Storage. Pillars, the windmills with battle towers, can also capture them. So you expand carefully. Factories turn out Flashers, which are lightning-fast raiders. They also build Gorillas, the heavy tanks that smash buildings, and Fly scouts that map the unknown, because nobody can build in uncharted land.
 
 ## Game rules
 
 **Goal**
-- Destroy an enemy Silo to capture it. All of that player's buildings and units become yours, and their resources transfer to you.
-- In 1v1 that wins the match. In the 4-player mode the game continues.
-- A destroyed Silo stays as a ruin, and a Stalker can repair it.
+- Destroy an enemy Silo, which leaves a ruin, and then hold it with Flashers or Gorillas for 60 seconds to capture it.
+- The capture pauses while the owner's combat units are in range, drains if your units leave, and resets if the owner's Stalker repairs the ruin.
+- Capturing a Silo gives you only the Dumps stored in it. The loser keeps their other buildings and units and gets the alert "Your Silo was captured - retake it", so Silos can change hands back and forth.
+- A player is out once they have no Silo or ruin, no Factory and no combat units. In 1v1 that ends the match, and in free-for-all the rest play on.
 
 **Economy**
-- Stalkers gather Dumps (piles of technical debris) and deliver them to the Silo or to a Storage.
-- Storage raises your Cells capacity, and the limit is 100 Cells. Training units checks Cells.
-- A Storage holding 500 Dumps is full and accepts no more deliveries.
-- A Stalker can also harvest from an enemy Storage.
-- When a Storage is destroyed by a Flasher or Gorilla, one pile of Dumps is left at the site.
+- Stalkers haul Dumps to the Silo, which holds 3000, or to Storages, which hold 750 each.
+- You can only build on explored ground.
+- Demolishing your own Factory, Storage or Pillar returns 25% of its cost.
 
 **Stalkers**
-- Stalkers can't be destroyed, but an enemy can capture them.
-- They can't be captured inside the vision range of a Silo, Flasher, Gorilla or Storage.
-- They can be captured while they are building a Storage.
-- Pillars can capture them.
+- They can't be destroyed, but enemies can capture them outside the cover of a Silo, Storage, Flasher or Gorilla. Pillars can capture them too.
+- A captured Stalker turns grey for 20 seconds with a countdown and then joins the captor.
 - They clear rocks and trees from their path.
 
 **Buildings and units**
-- Silo: trains Stalkers and is the command center. It is 3x3.
-- Storage: stores Cells.
-- Pillar: a windmill with a battle tower. Its build time and life are halved.
-- Factory: makes combat and exploration units. It is 3x3.
-- Flasher: a very fast unit.
-- Gorilla: a tank, best against buildings.
-- Hover: a flying scout.
-
-**Map**
-- Narrow passages must be at least 2 tiles wide.
-- Tree and rock life is halved.
-- Stalkers can't build in uncharted territory.
-- Modes: 1v1 on 80x40, and 4 players on 90x50.
+- Silo: the command center and the only place that trains Stalkers. It has 3 times its old health.
+- Storage, Factory, Pillar: enemies can only destroy these, never capture them.
+- Pillar: refills Power and revives units. Combat units with 0 Power shut down and can be refilled from a battery.
+- Factory: builds Flashers (fast), Gorillas (tanks that smash buildings), Fly (scouts, with Scanner and Guard) and the Frog, whose Freeze is on R and lasts 20 seconds but doesn't work inside a Silo's sight.
 
 **SiloAI**
-- It plays by the same rules, as an opponent or as an autoplayer.
-- Military units attack or defend, and Stalkers never idle.
-- It builds Storage near new Dumps when the ones near its Silo run out.
-- It keeps a 2-cell gap between buildings.
-- It gathers a group of units before attacking.
-- It widens narrow passages.
+- It plays by the same rules, as an opponent or as an autoplayer for your side.
 
 ## Donat
 
