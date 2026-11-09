@@ -1,10 +1,10 @@
-import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandAttack, commandConstruct, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, dropoffRoom, dropoffsFull, installCryo, sendHoverGrid, thawCryo, tryPlace, tryTrain } from './commands'
+import { aiPlaceNearKeep, assignMiners, cancelBuilding, commandArtillery, commandAttack, commandConstruct, commandFlash, commandFreezeAuto, commandFrost, commandHarvestOrAttack, commandMove, commandRepair, dropoffRoom, dropoffsFull, installCryo, thawCryo, tryPlace, tryTrain } from './commands'
 import { areaCharted, findBuildSpot, findBuildSpotWithin, findTowerWatchSpot, nearestParking, nearestWalkable, stopMoving } from './nav'
 import { findPath } from './pathfind'
 import { buildingCenter, buildingRect, cryoOccupants, cryoParty, distToRect, inFriendlyPillarSight, insideSiloFreezeBan, isWalkable, rockAt, rockById, sideStillIn } from './state'
-import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, isShutdown, PILLAR_CHARGE_INSET, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
+import { AGGRO_RANGE, BUILDING_STATS, CRYO_COST, CRYO_FREEZE_COST, CRYO_SLOTS, INTERACT, hiddenFromEnemies, isShutdown, PILLAR_CHARGE_INSET, POWER_LOW, powerSeconds, SILO_REPAIR_COST, STORAGE_CAP, TILE, UNIT_STATS, type Building, type MatchState, type PlayerId, type Rock, type Unit } from './types'
 import { aiSuspended } from './control'
-import { depositKnown, rememberedBuilding, sideTileExplored } from './vision'
+import { depositKnown, guardCloaksBuilding, rememberedBuilding, sideTileExplored, sideTileVisible } from './vision'
 
 /**
  * SiloAI plays one side from that side's own sight.
@@ -200,6 +200,7 @@ function seenFlightHazards(state: MatchState, side: Brain, fromX: number, fromY:
   const sight = UNIT_STATS.drone.sight
   for (const building of state.buildings) {
     if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'tower' || !building.complete) continue
+    if (guardCloaksBuilding(state, building)) continue
     const center = buildingCenter(building)
     const seen =
       seesFootprint(state, side, building.tx, building.ty, 1, 1) ||
@@ -251,6 +252,7 @@ function droneGoal(
       unit.owner !== side.owner &&
       unit.hp > 0 &&
       unit.kind !== 'pike' &&
+      !hiddenFromEnemies(unit) &&
       tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE)),
   )
   const crowded = (x: number, y: number) => reserved.some((spot) => Math.hypot(spot.x - x, spot.y - y) < 8 * TILE)
@@ -308,16 +310,12 @@ function droneGoal(
   return best
 }
 
-/** Seconds after a Grid order before this side may hide the flight again. The 45s cloak sits inside it. */
-const GRID_REUSE = 90
-
-/** Every living Drone stays on a scout flight. A second Drone takes a different patch. Ten or more may take the Grid instead. */
+/** Every living Drone stays on a scout flight. A second Drone takes a different patch. One extra Fly can hold beside the Silo. */
 function dispatchDrones(state: MatchState, side: Brain): void {
   const drones = state.units.filter(
     (unit) => unit.owner === side.owner && unit.kind === 'drone' && unit.hp > 0 && unit.power > 0,
   )
   if (!drones.length) return
-  if (issueHoverGrid(state, side, drones)) return
   const spare = spareGuard(state, side, drones)
   const reserved: Array<{ x: number; y: number }> = []
   for (const drone of drones) {
@@ -555,6 +553,7 @@ function knownPillarReaches(state: MatchState, side: Brain, x: number, y: number
   }
   for (const building of state.buildings) {
     if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'tower' || !building.complete) continue
+    if (guardCloaksBuilding(state, building)) continue
     if (!seesFootprint(state, side, building.tx, building.ty, 1, 1)) continue
     const center = buildingCenter(building)
     if (Math.hypot(center.x - x, center.y - y) <= reach) return true
@@ -571,7 +570,7 @@ function knownEnemyNear(state: MatchState, side: Brain, x: number, y: number): b
     if (Math.hypot(unit.x - x, unit.y - y) <= EXPANSION_THREAT) return true
   }
   for (const building of state.buildings) {
-    if (building.owner === side.owner || building.hp <= 0 || building.kind === 'tower') continue
+    if (building.owner === side.owner || building.hp <= 0 || building.kind === 'tower' || guardCloaksBuilding(state, building)) continue
     const stats = BUILDING_STATS[building.kind]
     if (!seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)) continue
     const center = buildingCenter(building)
@@ -845,6 +844,7 @@ function maybeRaidStorage(state: MatchState, side: Brain): void {
   let bestD = Infinity
   for (const building of state.buildings) {
     if (building.owner === side.owner || building.hp <= 0 || building.kind !== 'silo' || building.stock <= 0) continue
+    if (guardCloaksBuilding(state, building)) continue
     const stats = BUILDING_STATS.silo
     if (!seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)) continue
     const center = buildingCenter(building)
@@ -960,55 +960,11 @@ function dronesToTrain(state: MatchState, side: Brain): number {
 }
 
 /**
- * Ten Hovers cover the map and turn invisible. Used to scout while much of the
- * map is still dark, or when the flight or the Silo is under attack. Not again
- * until the cooldown has run, so they are not hidden forever.
- */
-function issueHoverGrid(state: MatchState, side: Brain, drones: Unit[]): boolean {
-  if (drones.length < HOVER_GRID) return false
-  const last = state.gridAt[side.owner] ?? -1
-  if (last >= 0 && state.time - last < GRID_REUSE) return false
-  if (!flightUnderAttack(state, side, drones) && !wantsGridScout(side)) return false
-  sendHoverGrid(state, drones)
-  const sent = drones.every((unit) => unit.cloak > 0)
-  if (!sent) return false
-  state.gridAt[side.owner] = state.time
-  return true
-}
-
-function flightUnderAttack(state: MatchState, side: Brain, drones: Unit[]): boolean {
-  const bikes = seenEnemyBikes(state, side)
-  if (drones.some((drone) => nearBike(bikes, drone.x, drone.y))) return true
-  const keep = ownKeep(state, side.owner)
-  if (!keep) return false
-  const home = buildingCenter(keep)
-  const reach = BUILDING_STATS.keep.sight
-  for (const unit of state.units) {
-    if (unit.owner === side.owner || unit.hp <= 0 || unit.kind === 'drone' || unit.cloak > 0) continue
-    if (!tileBit(state, side.visible, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))) continue
-    if (Math.hypot(unit.x - home.x, unit.y - home.y) <= reach) return true
-  }
-  return false
-}
-
-/** Enough of this side's map is still black that a Grid is worth a scout pass. */
-function wantsGridScout(side: Brain): boolean {
-  let dark = 0
-  let samples = 0
-  const grid = side.explored
-  for (let index = 0; index < grid.length; index += 8) {
-    samples += 1
-    if (grid[index] === 0) dark += 1
-  }
-  return samples > 0 && dark / samples >= 0.2
-}
-
-/**
- * Press Cryo for a group of four whenever the vessels are empty, recovery is done,
+ * Press Cryo for a group of four whenever the vessels are empty, the button lock has run out,
  * four Stalkers are on the map, and the bank can pay 200.
  * If none of those Stalkers are still free and some are stored, Defrost them so they
- * can mine. One free Stalker is enough to leave the Cryo shut. Recovery then blocks
- * an immediate refreeze; a later spare group of four uses the usual rule.
+ * can mine. One free Stalker is enough to leave the Cryo shut. The button lock then
+ * blocks an immediate refreeze; a later spare group of four uses the usual rule.
  */
 function tendCryo(state: MatchState, side: Brain): void {
   const cryo = state.buildings.find(
@@ -1036,11 +992,6 @@ function cryoWanted(state: MatchState, side: Brain): boolean {
   if ((state.oreHeld[side.owner] ?? 0) < CRYO_COST) return false
   const keep = ownKeep(state, side.owner)
   return !!keep?.complete && !keep.cryo
-}
-
-/** Surplus dumps fill a Hover Grid before another Factory goes up. */
-function bankingHovers(state: MatchState, side: Brain, ore: number): boolean {
-  return ore >= HOVER_SURPLUS && hoverRoster(state, side.owner) < HOVER_GRID
 }
 
 /** Empty-handed miners stop only when every Silo and Storage is full. */
@@ -1075,42 +1026,47 @@ function runSide(state: MatchState, owner: PlayerId): void {
   }
   sendScout(state, side, scout)
 
-  const keep = state.buildings.find((building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0)
-  if (keep?.complete) {
-  if (cryoWanted(state, side)) installCryo(state, keep.id)
+  const keeps = state.buildings.filter(
+    (building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0 && building.complete,
+  )
+  const keep = keeps[0]
+  if (keeps.length) {
+  if (keep && cryoWanted(state, side)) installCryo(state, keep.id)
 
-  const queuedPorters = keep.queue.filter((job) => job.kind === 'porter').length
-  if (porters.length + queuedPorters < 6 && keep.queue.length < 2) {
-    tryTrain(state, keep.id, 'porter')
+  for (const home of keeps) {
+    if (home.queue.length >= 2) continue
+    tryTrain(state, home.id, 'porter')
   }
 
   const constructing = state.buildings.some(
     (building) => building.owner === side.owner && !building.complete && building.hp > 0,
   )
   if (!constructing) {
-    // Free Cells against the live cap. A Silo is 12 and each finished Storage adds 8, up to 65.
     const supplyRoom = state.supplyCap[side.owner] - state.supplyUsed[side.owner]
-    const ore = state.oreHeld[side.owner]
+    const ore = state.oreHeld[side.owner] ?? 0
     const yards = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'yard' && building.hp > 0,
     ).length
     const towers = state.buildings.filter(
       (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
     ).length
-    if (supplyRoom <= 2 && ore >= BUILDING_STATS.silo.cost) {
-      placeChartedNearKeep(state, side, 'silo')
-    } else if (dropoffRoom(state, side.owner) <= 200 && ore >= BUILDING_STATS.silo.cost) {
+    const bases = keeps.length
+    if ((supplyRoom <= 2 || dropoffRoom(state, side.owner) <= 200) && ore >= BUILDING_STATS.silo.cost) {
       placeChartedNearKeep(state, side, 'silo')
     } else if (placeExpansionStorage(state, side)) {
       // A Storage now stands beside a Dumps heap this side has seen.
-    } else if (yards < 2 && ore >= BUILDING_STATS.yard.cost) {
+    } else if (yards < bases * 2 && ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')
-    } else if (towers < 3 && ore >= BUILDING_STATS.tower.cost) {
-      if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.yard.cost) {
-        placeChartedNearKeep(state, side, 'yard')
+    } else if (towers < bases * 3 && ore >= BUILDING_STATS.tower.cost) {
+      if (!placeWatchPillar(state, side) && ore >= BUILDING_STATS.silo.cost) {
+        placeChartedNearKeep(state, side, 'silo')
       }
-    } else if (ore >= BUILDING_STATS.yard.cost && !bankingHovers(state, side, ore)) {
+    } else if (ore >= BUILDING_STATS.yard.cost) {
       placeChartedNearKeep(state, side, 'yard')
+    } else if (ore >= BUILDING_STATS.tower.cost) {
+      placeChartedNearKeep(state, side, 'tower')
+    } else if (ore >= BUILDING_STATS.silo.cost) {
+      placeChartedNearKeep(state, side, 'silo')
     }
   }
   }
@@ -1121,7 +1077,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
   let dronesLeft = dronesToTrain(state, side)
   let frogsLeft = frogsToTrain(state, side)
   for (const readyYard of readyYards) {
-    if (readyYard.queue.length >= 1) continue
+    if (readyYard.queue.length >= 2) continue
     if (dronesLeft > 0 && tryTrain(state, readyYard.id, 'drone') === null) {
       dronesLeft -= 1
       continue
@@ -1153,6 +1109,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
     else if (enemyRuin) {
       side.attacking = true
       holdNearRuin(state, army, enemyRuin)
+      sendStalkersToRuin(state, side, enemyRuin)
     }
     finish(state, side)
     return
@@ -1163,7 +1120,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
   const spotted = knownEnemyBuilding(state, side)
   const rally = rallyPoint(state, side, keepPoint)
   const posts = guardPosts(state, side, keepPoint)
-  const need = siloWaveNeed(state)
+  const need = castle ? { count: 4, gorillas: 1 } : siloWaveNeed(state)
   const garrison = garrisonIds(army, keepPoint)
   if (threats.length) {
     side.attacking = false
@@ -1175,6 +1132,7 @@ function runSide(state: MatchState, owner: PlayerId): void {
   if (enemyRuin) {
     side.attacking = true
     holdNearRuin(state, army, enemyRuin)
+    sendStalkersToRuin(state, side, enemyRuin)
     finish(state, side)
     return
   }
@@ -1287,6 +1245,8 @@ function rechargeLowPower(state: MatchState, side: Brain): void {
 }
 
 function finish(state: MatchState, side: Brain): void {
+  tendArtillery(state, side)
+  tendFlash(state, side)
   castFrost(state, side)
   repairRuins(state, side)
   abortThreatenedExpansion(state, side)
@@ -1298,6 +1258,102 @@ function finish(state: MatchState, side: Brain): void {
   scoutUnchartedSite(state, side)
   rechargeLowPower(state, side)
   store(state, side)
+}
+
+function tendFlash(state: MatchState, side: Brain): void {
+  const sight = UNIT_STATS.pike.sight
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'pike' || unit.hp <= 0 || isShutdown(unit)) continue
+    if (unit.flash > 0 || unit.flashCd > 0) continue
+    let foe = false
+    for (const other of state.units) {
+      if (other.owner === unit.owner || other.hp <= 0 || other.kind === 'porter') continue
+      if (Math.hypot(other.x - unit.x, other.y - unit.y) <= sight) {
+        foe = true
+        break
+      }
+    }
+    if (!foe) continue
+    commandFlash(state, [unit.id])
+  }
+}
+
+/** Up to two free Stalkers stand on an enemy ruin so the slow capture can finish. */
+function sendStalkersToRuin(state: MatchState, side: Brain, building: Building): void {
+  const rect = buildingRect(building)
+  const center = buildingCenter(building)
+  let parked = 0
+  const spare: Unit[] = []
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'porter' || unit.hp <= 0 || unit.captureStun > 0 || unit.cargo > 0) continue
+    if (unit.id === side.scout) continue
+    if (distToRect(unit.x, unit.y, rect) <= INTERACT) {
+      parked += 1
+      if (unit.order?.type === 'gather') {
+        unit.order = null
+        stopMoving(unit)
+      }
+      continue
+    }
+    spare.push(unit)
+  }
+  spare.sort((a, b) => Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y))
+  for (const unit of spare) {
+    if (parked >= 2) break
+    commandMove(state, [unit.id], center.x, center.y, false)
+    parked += 1
+  }
+}
+
+/**
+ * A spare Gorilla folds into a gun when it can see an enemy beyond its own reach,
+ * and unfolds when that shot is gone or something closes in.
+ */
+function tendArtillery(state: MatchState, side: Brain): void {
+  let guns = 0
+  for (const unit of state.units) {
+    if (unit.owner === side.owner && unit.kind === 'howler' && unit.hp > 0 && unit.artillery === 'gun') guns += 1
+  }
+  for (const unit of state.units) {
+    if (unit.owner !== side.owner || unit.kind !== 'howler' || unit.hp <= 0 || isShutdown(unit)) continue
+    if (unit.artillery === 'deploy' || unit.artillery === 'pack') continue
+    const close = enemyWithin(state, unit, 220)
+    const far = visibleBeyondRange(state, unit)
+    if (unit.artillery === 'gun') {
+      if (close || !far) commandArtillery(state, [unit.id], false)
+      continue
+    }
+    if (unit.order?.type === 'attack' || unit.order?.type === 'attackMove') continue
+    if (!close && far && guns < 2) {
+      commandArtillery(state, [unit.id], true)
+      guns += 1
+    }
+  }
+}
+
+function enemyWithin(state: MatchState, unit: Unit, reach: number): boolean {
+  for (const other of state.units) {
+    if (other.owner === unit.owner || other.hp <= 0 || other.kind === 'porter' || hiddenFromEnemies(other)) continue
+    if (Math.hypot(other.x - unit.x, other.y - unit.y) <= reach) return true
+  }
+  return false
+}
+
+function visibleBeyondRange(state: MatchState, unit: Unit): boolean {
+  const range = UNIT_STATS.howler.range
+  for (const other of state.units) {
+    if (other.owner === unit.owner || other.hp <= 0 || hiddenFromEnemies(other) || other.frozen != null) continue
+    if (other.kind === 'porter' && other.captureStun > 0) continue
+    if (!sideTileVisible(state, unit.owner, Math.floor(other.x / TILE), Math.floor(other.y / TILE))) continue
+    if (Math.hypot(other.x - unit.x, other.y - unit.y) > range) return true
+  }
+  for (const building of state.buildings) {
+    if (building.owner === unit.owner || building.hp <= 0 || building.ruined) continue
+    const center = buildingCenter(building)
+    if (!sideTileVisible(state, unit.owner, building.tx, building.ty)) continue
+    if (Math.hypot(center.x - unit.x, center.y - unit.y) > range) return true
+  }
+  return false
 }
 
 /**
@@ -1409,7 +1465,7 @@ function holdNearRuin(state: MatchState, units: Unit[], building: Building): voi
   }
 }
 
-/** A ruined enemy Silo this side is already fighting, claiming, or standing next to. */
+/** A ruined enemy Silo this side knows about. Holding it is how that Silo is captured. */
 function enemyRuinToHold(state: MatchState, side: Brain): Building | null {
   const homeBuilding = ownKeep(state, side.owner) ?? ownRuinedKeep(state, side.owner)
   const home = homeBuilding ? buildingCenter(homeBuilding) : { x: 0, y: 0 }
@@ -1418,6 +1474,7 @@ function enemyRuinToHold(state: MatchState, side: Brain): Building | null {
   const stats = BUILDING_STATS.keep
   for (const building of state.buildings) {
     if (building.kind !== 'keep' || !building.ruined || building.owner < 0 || building.owner === side.owner) continue
+    if (guardCloaksBuilding(state, building)) continue
     const center = buildingCenter(building)
     const seen = seesFootprint(state, side, building.tx, building.ty, stats.w, stats.h)
     const claiming = building.captureBy === side.owner
@@ -1431,8 +1488,8 @@ function enemyRuinToHold(state: MatchState, side: Brain): Building | null {
         break
       }
     }
-    if (!seen && !claiming && !near && !struck) continue
-    if (!claiming && !near && !struck && !side.attacking) continue
+    const known = seen || ruinCharted(state, side.owner, building)
+    if (!known && !claiming && !near && !struck) continue
     const distance = Math.hypot(center.x - home.x, center.y - home.y)
     if (distance < bestD) {
       best = building
@@ -1542,9 +1599,18 @@ function rememberBlindSpot(
  * That is the ground where an enemy Stalker would be captured. Extra Pillars fall back beside the Silo.
  */
 function placeWatchPillar(state: MatchState, side: Brain): boolean {
-  const keep = ownKeep(state, side.owner)
-  if (!keep) return false
+  const keeps = state.buildings.filter(
+    (building) => building.owner === side.owner && building.kind === 'keep' && building.hp > 0,
+  )
+  if (!keeps.length) return false
   if ((state.oreHeld[side.owner] ?? 0) < BUILDING_STATS.tower.cost) return false
+  for (const keep of keeps) {
+    if (watchOneKeep(state, side, keep)) return true
+  }
+  return false
+}
+
+function watchOneKeep(state: MatchState, side: Brain, keep: Building): boolean {
   const towers = state.buildings.filter(
     (building) => building.owner === side.owner && building.kind === 'tower' && building.hp > 0,
   )
@@ -1922,7 +1988,7 @@ function arrivedAt(unit: Unit, point: { x: number; y: number }): boolean {
 /** A combat unit or enemy structure already inside this fighter's engagement range. */
 function engagementOccupied(state: MatchState, fighter: Unit): boolean {
   for (const other of state.units) {
-    if (other.owner === fighter.owner || other.hp <= 0 || other.cloak > 0 || other.frozen != null) continue
+    if (other.owner === fighter.owner || other.hp <= 0 || hiddenFromEnemies(other) || other.frozen != null) continue
     if (other.kind === 'porter') continue
     if (other.kind === 'drone' && fighter.kind === 'howler') continue
     if (Math.hypot(other.x - fighter.x, other.y - fighter.y) <= AGGRO_RANGE) return true
@@ -1950,6 +2016,7 @@ function guardDuty(state: MatchState, side: Brain, units: Unit[], keepPoint: { x
   const enemies: Unit[] = []
   for (const enemy of state.units) {
     if (enemy.owner === side.owner || enemy.hp <= 0 || enemy.kind === 'drone' || enemy.cloak > 0) continue
+    if (enemy.kind === 'porter' && enemy.captureStun > 0) continue
     if (!tileBit(state, side.visible, Math.floor(enemy.x / TILE), Math.floor(enemy.y / TILE))) continue
     let near = false
     for (const post of posts) {

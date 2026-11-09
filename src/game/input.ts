@@ -1,8 +1,10 @@
+import { BATTERY_PICKUP_MAX } from './balance'
 import { clampCamera, screenToWorld, worldToScreen, zoomToward, type Camera } from './camera'
 import { controlledSide, cycleSide, handsOff } from './control'
 import {
   commandAttack,
   commandConstruct,
+  commandFlash,
   requestDemolish,
   commandFreeze,
   commandFrost,
@@ -12,6 +14,8 @@ import {
   commandRally,
   commandRepair,
   commandRepairNearest,
+  commandPerimeter,
+  commandRevive,
   commandStop,
   tryPlace,
   tryTrain,
@@ -238,6 +242,14 @@ export function attachInput(opts: {
 
   const worldAt = (sx: number, sy: number) => screenToWorld(opts.getCamera(), sx, sy)
 
+  /** Factory and Storage hotkeys apply while a Stalker group or a living Silo is selected. */
+  function buildHotkey(state: MatchState): boolean {
+    if (activeKind(state) === 'frog') return false
+    if (state.selectedUnits.length) return activeKind(state) === 'porter'
+    const building = state.selectedBuilding != null ? buildingById(state, state.selectedBuilding) : undefined
+    return !!building && building.owner === controlledSide(state) && building.kind === 'keep' && building.hp > 0 && !building.ruined
+  }
+
   function armPlace(kind: BuildingKind): void {
     const state = opts.getState()
     if (state.outcome || state.paused || state.replay || handsOff(state)) return
@@ -253,6 +265,7 @@ export function attachInput(opts: {
     state.placement = state.placement === kind ? null : kind
     state.attackMoveArmed = false
     state.moveArmed = false
+    state.perimeterArmed = false
   }
 
   function trainSelected(kind: UnitKind): void {
@@ -301,7 +314,14 @@ function clearSelection(state: MatchState): void {
 
     const side = controlledSide(state)
     if (!handsOff(state)) {
-      if (state.paused && (state.placement || state.attackMoveArmed || state.moveArmed)) return
+      if (state.paused && (state.placement || state.attackMoveArmed || state.moveArmed || state.perimeterArmed)) return
+
+      if (state.perimeterArmed && state.selectedUnits.length) {
+        rememberLive(state, { op: 'perimeter', ids: state.selectedUnits, x: world.x, y: world.y })
+        commandPerimeter(state, state.selectedUnits, world.x, world.y)
+        state.perimeterArmed = false
+        return
+      }
 
       if (state.placement) {
         const tx = Math.floor(world.x / TILE)
@@ -317,12 +337,14 @@ function clearSelection(state: MatchState): void {
         rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: true })
         commandMove(state, state.selectedUnits, world.x, world.y, true)
         state.attackMoveArmed = false
+        state.perimeterArmed = false
         return
       }
       if (state.moveArmed && state.selectedUnits.length) {
         rememberLive(state, { op: 'move', ids: state.selectedUnits, x: world.x, y: world.y, attack: false })
         commandMove(state, state.selectedUnits, world.x, world.y, false)
         state.moveArmed = false
+        state.perimeterArmed = false
         return
       }
 
@@ -470,6 +492,11 @@ function clearSelection(state: MatchState): void {
     const hit = pick(state, world.x, world.y)
     if (hit?.type === 'unit') {
       const unit = unitById(state, hit.id)
+      if (unit && unit.owner === side && commandRevive(state, state.selectedUnits, hit.id)) {
+        rememberLive(state, { op: 'revive', ids: state.selectedUnits, targetId: hit.id })
+        state.perimeterArmed = false
+        return
+      }
       if (unit && unit.owner !== side) {
         rememberLive(state, { op: 'attack', ids: state.selectedUnits, targetId: hit.id, kind: 'unit' })
         commandAttack(state, state.selectedUnits, hit.id, 'unit')
@@ -736,6 +763,7 @@ function clearSelection(state: MatchState): void {
       state.placement = null
       state.attackMoveArmed = false
       state.moveArmed = false
+      state.perimeterArmed = false
       clearSelection(state)
       return
     }
@@ -749,7 +777,9 @@ function clearSelection(state: MatchState): void {
       (event.code === 'KeyQ' ||
         event.code === 'KeyX' ||
         event.code === 'KeyY' ||
+        event.code === 'KeyE' ||
         event.code === 'KeyL' ||
+        event.code === 'KeyG' ||
         event.code === 'KeyP' ||
         event.code === 'KeyK' ||
         event.code === 'KeyJ' ||
@@ -766,7 +796,9 @@ function clearSelection(state: MatchState): void {
       (event.code === 'KeyQ' ||
         event.code === 'KeyX' ||
         event.code === 'KeyY' ||
+        event.code === 'KeyE' ||
         event.code === 'KeyL' ||
+        event.code === 'KeyG' ||
         event.code === 'KeyP' ||
         event.code === 'KeyK' ||
         event.code === 'KeyJ' ||
@@ -782,6 +814,7 @@ function clearSelection(state: MatchState): void {
       if (state.paused) return
       state.attackMoveArmed = !state.attackMoveArmed
       state.moveArmed = false
+      state.perimeterArmed = false
       state.placement = null
       return
     }
@@ -790,14 +823,19 @@ function clearSelection(state: MatchState): void {
       commandStop(state, state.selectedUnits)
       state.attackMoveArmed = false
       state.moveArmed = false
+      state.perimeterArmed = false
       return
     }
     if (event.code === 'KeyY') {
       armPlace('yard')
       return
     }
-    if (event.code === 'KeyL') {
+    if (event.code === 'KeyE' || event.code === 'KeyL') {
       armPlace('silo')
+      return
+    }
+    if (event.code === 'KeyG') {
+      trainSelected('frog')
       return
     }
     if (event.code === 'KeyT') {
@@ -830,6 +868,10 @@ function clearSelection(state: MatchState): void {
     if (event.code === 'KeyR') {
       if (state.paused) return
       if (frostHotkey(state)) return
+      if (buildHotkey(state)) {
+        armPlace('yard')
+        return
+      }
       if (state.selectedUnits.length) {
         if (activeKind(state) !== 'porter') return
         rememberLive(state, { op: 'repairNearest', ids: state.selectedUnits })
@@ -869,6 +911,22 @@ function clearSelection(state: MatchState): void {
     }
     if (event.code === 'KeyF') {
       opts.selectIdle()
+      return
+    }
+    if (event.code === 'KeyV') {
+      selectOwnCombatUnits(state)
+      return
+    }
+    if (event.code === 'KeyZ') {
+      if (state.paused || activeKind(state) !== 'pike') return
+      const ids = state.selectedUnits.filter((id) => {
+        const unit = unitById(state, id)
+        return !!unit && unit.owner === controlledSide(state) && unit.kind === 'pike' && unit.hp > 0 && unit.flash <= 0 && unit.flashCd <= 0
+      })
+      if (ids.length) {
+        rememberLive(state, { op: 'flash', ids })
+        commandFlash(state, ids)
+      }
       return
     }
     if (event.code === 'Space') {
@@ -1011,7 +1069,7 @@ function orderBattery(state: MatchState, batteryId: number): boolean {
   if (!battery) return false
   const ids = state.selectedUnits.filter((id) => {
     const unit = unitById(state, id)
-    return !!unit && unit.hp > 0 && unit.power > 0 && powerSeconds(unit.kind) > 0
+    return !!unit && unit.hp > 0 && unit.power > 0 && unit.power <= BATTERY_PICKUP_MAX && powerSeconds(unit.kind) > 0
   })
   if (!ids.length) return false
   const x = (battery.tx + 0.5) * TILE

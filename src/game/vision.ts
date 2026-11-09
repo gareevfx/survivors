@@ -3,6 +3,8 @@ import {
   BUILDING_STATS,
   TILE,
   UNIT_STATS,
+  hiddenFromEnemies,
+  powerSeconds,
   type Building,
   type BuildingKind,
   type BuildingSighting,
@@ -183,13 +185,14 @@ export function viewerOwns(state: MatchState, owner: PlayerId): boolean {
 
 export function viewUnitSeen(state: MatchState, unit: Unit): boolean {
   if (unit.frozen != null) return false
-  if (unit.cloak > 0 && !viewerOwns(state, unit.owner)) return false
+  if (hiddenFromEnemies(unit) && !viewerOwns(state, unit.owner)) return false
   if (!state.bothCam && !state.enemyCam && unit.owner === controlledSide(state)) return true
   if (!state.bothCam && state.enemyCam && unit.owner !== 0) return true
   return viewTileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
 
 export function viewBuildingSeen(state: MatchState, building: Building): boolean {
+  if (guardCloaksBuilding(state, building) && !viewerOwns(state, building.owner)) return false
   if (building.ruined) return viewRuinShown(state, building)
   if (!state.bothCam && !state.enemyCam && building.owner === controlledSide(state)) return true
   if (!state.bothCam && state.enemyCam && building.owner !== 0) return true
@@ -218,9 +221,31 @@ export function depositKnown(state: MatchState, owner: PlayerId, tx: number, ty:
   return sideTileExplored(state, owner, tx, ty)
 }
 
+/**
+ * A guarding Fly hides every building its owner has inside that Fly's sight.
+ * Construction and ruins count. The Fly itself stays visible. The owner still sees the buildings.
+ */
+export function guardCloaksBuilding(state: MatchState, building: Building): boolean {
+  const stats = BUILDING_STATS[building.kind]
+  const reach = UNIT_STATS.drone.sight
+  const reach2 = reach * reach
+  for (const unit of state.units) {
+    if (unit.kind !== 'drone' || !unit.guarding || unit.hp <= 0 || unit.power <= 0) continue
+    if (unit.owner !== building.owner) continue
+    for (let y = 0; y < stats.h; y++) {
+      for (let x = 0; x < stats.w; x++) {
+        const dx = (building.tx + x + 0.5) * TILE - unit.x
+        const dy = (building.ty + y + 0.5) * TILE - unit.y
+        if (dx * dx + dy * dy <= reach2) return true
+      }
+    }
+  }
+  return false
+}
+
 export function unitSeen(state: MatchState, unit: Unit): boolean {
   if (unit.frozen != null) return false
-  if (unit.cloak > 0 && unit.owner !== 0) return false
+  if (hiddenFromEnemies(unit) && unit.owner !== 0) return false
   if (unit.owner === 0) return true
   return tileVisible(state, Math.floor(unit.x / TILE), Math.floor(unit.y / TILE))
 }
@@ -228,12 +253,35 @@ export function unitSeen(state: MatchState, unit: Unit): boolean {
 function paintSight(state: MatchState, owner: PlayerId, visible: Uint8Array, explored: Uint8Array): void {
   for (const unit of state.units) {
     if (unit.owner !== owner || unit.hp <= 0 || unit.frozen != null) continue
+    // A guarding Fly still reveals for its owner. An empty Power bar sees nothing.
+    if (powerSeconds(unit.kind) > 0 && unit.power <= 0) continue
     reveal(state, visible, explored, unit.x, unit.y, UNIT_STATS[unit.kind].sight)
   }
   for (const building of state.buildings) {
-    if (building.owner !== owner || building.hp <= 0) continue
+    // A finished building reveals. One still under construction does not open the shroud around it.
+    if (building.owner !== owner || building.hp <= 0 || !building.complete) continue
     const stats = BUILDING_STATS[building.kind]
     reveal(state, visible, explored, (building.tx + stats.w / 2) * TILE, (building.ty + stats.h / 2) * TILE, stats.sight)
+  }
+}
+
+/** Stamp a Silo's sight into this side's map and remember the buildings standing there. */
+export function revealTerritory(state: MatchState, owner: PlayerId, x: number, y: number, radius: number): void {
+  const explored = exploredGrid(state, owner)
+  const visible = visibleGrid(state, owner)
+  reveal(state, visible, explored, x, y, radius)
+  const spots = state.sideSpotted[owner]
+  if (!spots) return
+  for (const building of state.buildings) {
+    if (building.hp <= 0 || building.owner === owner || building.ruined) continue
+    const stats = BUILDING_STATS[building.kind]
+    const cx = (building.tx + stats.w / 2) * TILE
+    const cy = (building.ty + stats.h / 2) * TILE
+    if (Math.hypot(cx - x, cy - y) > radius) continue
+    const next = takeSighting(state, building)
+    const known = spots.find((spot) => spot.id === building.id)
+    if (known) Object.assign(known, next)
+    else spots.push(next)
   }
 }
 
@@ -322,6 +370,7 @@ function rememberSightings(state: MatchState): void {
     if (!spots) continue
     for (const building of state.buildings) {
       if (building.owner === owner || building.hp <= 0 || building.ruined) continue
+      if (guardCloaksBuilding(state, building)) continue
       if (!ownerSeesBuilding(state, owner, building)) continue
       const next = takeSighting(state, building)
       const known = spots.find((spot) => spot.id === building.id)
@@ -333,12 +382,19 @@ function rememberSightings(state: MatchState): void {
       if (!spot) continue
       const building = state.buildings.find((entry) => entry.id === spot.id)
       if (!footprintCurrentlySeen(state, owner, spot, building)) continue
+      if (building && guardCloaksBuilding(state, building)) continue
       const gone = !building || building.hp <= 0 || building.owner === owner || building.ruined
       if (gone) spots.splice(i, 1)
     }
   }
   if (state.selectedGhost != null && !viewMemories(state).some((spot) => spot.id === state.selectedGhost)) {
     state.selectedGhost = null
+  }
+  if (state.selectedBuilding != null) {
+    const selected = state.buildings.find((entry) => entry.id === state.selectedBuilding)
+    if (selected && guardCloaksBuilding(state, selected) && !viewerOwns(state, selected.owner)) {
+      state.selectedBuilding = null
+    }
   }
 }
 
@@ -373,6 +429,8 @@ export function viewMemories(state: MatchState): BuildingSighting[] {
   for (const owner of viewOwners(state)) {
     for (const spot of state.sideSpotted[owner] ?? []) {
       if (seen.has(spot.id) || !memoryInShroud(state, spot)) continue
+      const live = state.buildings.find((entry) => entry.id === spot.id)
+      if (live && guardCloaksBuilding(state, live)) continue
       seen.add(spot.id)
       list.push(spot)
     }
@@ -390,6 +448,8 @@ export function rememberedBuilding(
   owner: PlayerId,
   spot: BuildingSighting,
 ): { id: number; x: number; y: number; kind: BuildingKind; complete: boolean } | null {
+  const live = state.buildings.find((entry) => entry.id === spot.id)
+  if (live && guardCloaksBuilding(state, live)) return null
   if (spot.kind) {
     if (spot.ruined || spot.owner === owner) return null
     if (spot.hp != null && spot.hp <= 0) return null

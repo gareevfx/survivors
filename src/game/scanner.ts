@@ -1,6 +1,7 @@
 import { controlledSide, handsOff } from './control'
 import { setUnitDestination, stopMoving } from './nav'
 import { unitById } from './state'
+import { updateVision } from './vision'
 import { TILE, UNIT_STATS, type MatchState, type PlayerId, type Unit } from './types'
 
 /** Keep a flight until the Fly is this close, matching the AI Drone scout. */
@@ -52,6 +53,7 @@ export function toggleGuard(state: MatchState, ids: number[]): void {
     hover.idleAcquire = false
     stopMoving(hover)
   }
+  updateVision(state)
 }
 
 /**

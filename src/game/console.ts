@@ -58,25 +58,6 @@ export function runCommand(state: MatchState, raw: string): boolean {
     pushToast(state, 'God Mode is off.')
     return true
   }
-  if (text === 'show enemy cam') {
-    if (state.enemyCam && !state.bothCam && !state.fogCleared) {
-      pushToast(state, 'Enemy cam is already on.')
-      return true
-    }
-    leaveViews(state, 'enemy')
-    state.enemyCam = true
-    pushToast(state, 'Enemy cam is on.')
-    return true
-  }
-  if (text === 'off enemy cam') {
-    if (!state.enemyCam) {
-      pushToast(state, 'Enemy cam is already off.')
-      return true
-    }
-    state.enemyCam = false
-    pushToast(state, 'Enemy cam is off.')
-    return true
-  }
   if (text === 'all cams') {
     if (state.bothCam && !state.enemyCam && !state.fogCleared) {
       pushToast(state, 'All cams is already on.')
@@ -159,6 +140,24 @@ export function runCommand(state: MatchState, raw: string): boolean {
     state.control = 0
     clearHands(state)
     pushToast(state, 'Double game is off.')
+    return true
+  }
+  if (text === 'devmod') {
+    if (state.devMode) {
+      pushToast(state, 'Devmod is already on.')
+      return true
+    }
+    state.devMode = true
+    pushToast(state, 'Devmod is on.')
+    return true
+  }
+  if (text === 'devmod off') {
+    if (!state.devMode) {
+      pushToast(state, 'Devmod is already off.')
+      return true
+    }
+    state.devMode = false
+    pushToast(state, 'Devmod is off.')
     return true
   }
   if (text === 'siloai off') {

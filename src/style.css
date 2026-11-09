@@ -102,7 +102,24 @@ button, canvas { font: inherit; }
   min-width: 3.2rem;
 }
 
-.top-actions { display: flex; gap: 6px; }
+.top-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+
+.dev-cheats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(640px, 70vw);
+}
+
+.dev-cheats button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.dev-cheats button[aria-pressed='true'] {
+  color: var(--paper);
+  border-color: var(--gold);
+}
 
 #hud-row {
   position: absolute;
@@ -888,15 +905,22 @@ button, canvas { font: inherit; }
   width: min(560px, 100%);
   display: flex;
   flex-direction: column;
-  max-height: 100%;
+  max-height: calc(100dvh - 40px);
   min-height: 0;
   overflow: hidden;
 }
 
 .about-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
+  overscroll-behavior: contain;
+}
+
+.about-body a {
+  color: var(--gold);
+  text-underline-offset: 2px;
 }
 
 .about-card p {

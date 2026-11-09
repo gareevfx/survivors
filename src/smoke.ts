@@ -6011,7 +6011,7 @@ function cellsBlockTrainingUntilStorage(): void {
 }
 
 function buildingDumpCaps(): void {
-  assert(SILO_DUMP_CAP === 3000, `Silo cap is ${SILO_DUMP_CAP}`)
+  assert(SILO_DUMP_CAP === 1200, `Silo cap is ${SILO_DUMP_CAP}`)
   assert(STORAGE_CAP === 750, `Storage cap is ${STORAGE_CAP}`)
   assert(BUILDING_STATS.keep.blurb.includes('3000'), 'the Silo blurb omits the 3000 cap')
   assert(BUILDING_STATS.silo.blurb.includes('750'), 'the Storage blurb omits the 750 cap')
@@ -7731,9 +7731,9 @@ function freezeHotkeyIsR(): void {
 
 function frogFreeze(): void {
   const stats = UNIT_STATS.frog
-  assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 12 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
+  assert(stats.hp === 64 && stats.cost === 75 && stats.trainTime === 10 && stats.supply === 2, 'Frog cost, time, cells, or hit points changed')
   assert(stats.speed === UNIT_STATS.pike.speed && stats.sight === UNIT_STATS.pike.sight, 'Frog speed or sight does not match a Flasher')
-  assert(FROG_POWER_SECONDS === 6 * 60 && FROG_FREEZE_SECONDS === 20 && FROG_FREEZE_COOLDOWN === 90 && FROG_THAW_POWER === 0.5, 'Frog Power or Freeze timing changed')
+  assert(FROG_POWER_SECONDS === 2 * 60 && FROG_FREEZE_SECONDS === 20 && FROG_FREEZE_COOLDOWN === 90 && FROG_THAW_POWER === 0.5, 'Frog Power or Freeze timing changed')
   assert(stats.blurb.includes('for 20 seconds') && stats.blurb.includes('half a bar') && stats.blurb.includes('in 30 seconds'), 'the Frog blurb dropped the 20 second Freeze or the Pillar charge')
   assert(loreBody('Frog').includes('for 20 seconds') && loreBody('Frog').includes('half a bar'), 'Frog lore still says the old Freeze duration')
   const panel = statsPanelHtml(12, 2, [blankSide(), blankSide()])

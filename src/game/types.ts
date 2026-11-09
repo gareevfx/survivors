@@ -29,13 +29,17 @@ export const SUPPLY_MAX = 65
 /** One Storage holds this many dumps. */
 export const STORAGE_CAP = 750
 /** One Silo holds this many dumps. Spendable dumps are the sum of Silo and Storage stocks, with no side-wide cap. */
-export const SILO_DUMP_CAP = 3000
+export const SILO_DUMP_CAP = 1200
 export const INTERACT = 42
-/** Flasher, Gorilla, Hover, and Frog run this long from a full Power bar. */
-export const FLASHER_POWER_SECONDS = 3 * 60
-export const GORILLA_POWER_SECONDS = 10 * 60
-export const HOVER_POWER_SECONDS = 8 * 60
-export const FROG_POWER_SECONDS = 6 * 60
+/**
+ * Seconds a full Power bar lasts.
+ * Flasher and Frog: 2 minutes. Gorilla: 3 minutes. Fly: 1.5 minutes.
+ * The named copies live in balance.ts. The sim reads these.
+ */
+export const FLASHER_POWER_SECONDS = 2 * 60
+export const GORILLA_POWER_SECONDS = 3 * 60
+export const HOVER_POWER_SECONDS = 90
+export const FROG_POWER_SECONDS = 2 * 60
 /** Frog Freeze holds every other unit in its sight this long. Power does not drain while that lasts. */
 export const FROG_FREEZE_SECONDS = 20
 /** Seconds before that Frog can Freeze again. */
@@ -72,6 +76,11 @@ export function isCombatUnit(kind: UnitKind): boolean {
   return kind !== 'porter'
 }
 
+/** Grid cloak. Enemies cannot see that Fly, target it, or acquire it. Guard does not hide the Fly. */
+export function hiddenFromEnemies(unit: { kind: UnitKind; cloak: number; guarding: boolean }): boolean {
+  return unit.cloak > 0
+}
+
 /** Seconds of Power from full. Stalkers have none. */
 export function powerSeconds(kind: UnitKind): number {
   if (kind === 'pike') return FLASHER_POWER_SECONDS
@@ -93,7 +102,7 @@ export const CRYO_COST = 250
 export const CRYO_SLOTS = 4
 /** Dumps charged for each Stalker when the group of four enters. */
 export const CRYO_FREEZE_COST = 50
-/** Seconds a Silo Cryo refuses Stalkers after a Defrost. */
+/** Seconds the Cryo and Defrost buttons stay locked after a Defrost. */
 export const CRYO_RECOVER = 4 * 60
 export type TargetKind = 'unit' | 'building' | 'rock'
 
@@ -119,7 +128,7 @@ export interface UnitStats {
 export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   porter: {
     label: 'Stalker',
-    blurb: 'Hauls dumps and raises structures. Breaks gray rock and trees that seal a dumps patch. Opponents cannot destroy a Stalker. A unit or a Pillar captures one only when it stands outside the sight of its own Silo, a finished Storage, Flashers, and Gorillas. Lives for 5 minutes.',
+    blurb: '',
     hp: 42,
     speed: 86,
     radius: 9,
@@ -127,16 +136,16 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     range: 26,
     cooldown: 1.05,
     sight: 110,
-    supply: 1,
+    supply: 0,
     cost: 50,
-    trainTime: 8,
+    trainTime: 30,
     projectileSpeed: 280,
     projectileRadius: 2.4,
     flying: false,
   },
   pike: {
     label: 'Flasher',
-    blurb: 'Quick rider with a short reach. Power lasts 3 minutes, then the Flasher shuts down until a battery recharges it. Inside a friendly Pillar\'s sight, Power refills in 30 seconds instead of draining.',
+    blurb: '',
     hp: 58,
     speed: 104,
     radius: 10,
@@ -146,14 +155,14 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     sight: 176,
     supply: 1,
     cost: 50,
-    trainTime: 9,
+    trainTime: 8,
     projectileSpeed: 420,
     projectileRadius: 2.2,
     flying: false,
   },
   howler: {
     label: 'Gorilla',
-    blurb: 'Slow gunner with a long reach. Power lasts 10 minutes, then the Gorilla shuts down until a battery recharges it. Inside a friendly Pillar\'s sight, Power refills in 30 seconds instead of draining.',
+    blurb: '',
     hp: 74,
     speed: 66,
     radius: 11,
@@ -163,14 +172,14 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     sight: 210,
     supply: 2,
     cost: 100,
-    trainTime: 14,
+    trainTime: 10,
     projectileSpeed: 200,
     projectileRadius: 4,
     flying: false,
   },
   drone: {
     label: 'Fly',
-    blurb: `Flies over rock and buildings. No weapons. Sees as far as a Silo. Costs 50 dumps. Flashers deal half damage; gorillas cannot attack it. Select 10 Flies to activate the Grid. Those Flies turn invisible for ${GRID_CLOAK_SECONDS} seconds. A scanning Fly reveals an invisible enemy Fly inside its sight. Power lasts 8 minutes, then the Fly shuts down until a battery recharges it. Inside a friendly Pillar's sight, Power refills in 30 seconds instead of draining.`,
+    blurb: '',
     hp: 80,
     speed: 118,
     radius: 8,
@@ -187,7 +196,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
   },
   frog: {
     label: 'Frog',
-    blurb: 'White buggy with a cryo tank. Same speed and sight as a Flasher. No weapon. 64 hit points, 75 dumps, 12 seconds to build, 2 cells. Power lasts 6 minutes. Freeze ices every other unit in sight for 20 seconds. Cannot Freeze inside a Silo\'s sight. Trees in that circle shatter, and each rock loses half its current hit points. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown 90 seconds. A friendly Pillar refills Power in 30 seconds.',
+    blurb: '',
     hp: 64,
     speed: 104,
     radius: 11,
@@ -197,7 +206,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     sight: 176,
     supply: 2,
     cost: 75,
-    trainTime: 12,
+    trainTime: 10,
     projectileSpeed: 0,
     projectileRadius: 0,
     flying: false,
@@ -221,7 +230,7 @@ export interface BuildingStats {
 export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   keep: {
     label: 'Silo',
-    blurb: 'Drop-off for dumps and home of the stalkers. Holds at most 3000 dumps. At 0 hit points it is a ruin that still belongs to its owner. Enemy Flashers or Gorillas must stand in range for 60 seconds to take it. Only that Silo\'s dumps change hands. A side is out when it has no Silo, no Factory, and no combat units. A Cryo can be added once for 250 dumps: four glass vessels. Select 4 Stalkers and send them to the Silo. Freezing costs 50 dumps each (200 for the group). Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.',
+    blurb: '',
     w: 3,
     h: 3,
     hp: 1700,
@@ -232,7 +241,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   yard: {
     label: 'Factory',
-    blurb: 'Trains flashers, gorillas, flies, and frogs. Destruction leaves 6 piles of 15 dumps.',
+    blurb: '',
     w: 3,
     h: 2,
     hp: 720,
@@ -243,7 +252,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   silo: {
     label: 'Storage',
-    blurb: 'Raises the cells cap by 8. Holds at most 750 dumps. Stalkers can drop dumps here or haul them out of an enemy Storage. A Flasher or Gorilla that destroys it leaves one dumps pile. Destruction also leaves 4 piles of 10 dumps.',
+    blurb: '',
     w: 2,
     h: 2,
     hp: 400,
@@ -254,7 +263,7 @@ export const BUILDING_STATS: Record<BuildingKind, BuildingStats> = {
   },
   tower: {
     label: 'Pillar',
-    blurb: 'One cell. Sees as far as a Fly and shoots the closest enemy in that sight for 8/3 damage, at a Flasher\'s rate. An uncovered enemy Stalker is captured instead. Flies take half of that. Place it inside Silo sight. Leave two empty cells between Pillars. A friendly Flasher, Gorilla, Fly, or Frog inside this sight refills Power in 30 seconds instead of draining. Destruction leaves one pile of 50 dumps.',
+    blurb: '',
     w: 1,
     h: 1,
     hp: 160,
@@ -306,6 +315,8 @@ export type Order =
   | { type: 'construct'; buildingId: number }
   | { type: 'repair'; buildingId: number }
   | { type: 'freeze'; buildingId: number }
+  | { type: 'revive'; targetId: number }
+  | { type: 'perimeter'; ax: number; ay: number; bx: number; by: number; toward: 'a' | 'b' }
 
 export interface Unit {
   id: number
@@ -363,12 +374,32 @@ export interface Unit {
    */
   power: number
   /**
-   * Seconds before a captured Stalker can act again. While this is above zero the Stalker
-   * still belongs to its old owner, takes no orders, and is not a miner.
+   * Seconds a just-captured Stalker stays grey and idle. It already belongs to the captor.
+   * While this is above zero it takes no orders and cannot be captured again.
    */
   captureStun: number
-  /** Side that receives this Stalker when captureStun hits zero. -1 while it is not being captured. */
+  /** Unused while capture switches sides immediately. -1 when the Stalker is not frozen from a capture. */
   captureOwner: number
+  /** Seconds this unit has stayed at 0 Power. A full minute turns it into a Dumps pile. */
+  dryFor: number
+  /**
+   * Gorilla form. Mobile is the tank. Deploy and pack are the 10-second changes.
+   * Gun is the stationary piece.
+   */
+  artillery: 'mobile' | 'deploy' | 'gun' | 'pack'
+  /** Seconds left in the current deploy or pack. */
+  artilleryT: number
+  /** Target a gun has already started shooting. -1 when it has not. */
+  artilleryLock: number
+  /** Kind of artilleryLock. Ignored while the lock is -1. */
+  artilleryLockKind: 'unit' | 'building'
+  /** Last world position that locked target was seen. */
+  artilleryAimX: number
+  artilleryAimY: number
+  /** Seconds left of a Flasher's doubled speed. */
+  flash: number
+  /** Seconds before this Flasher can Flash again. */
+  flashCd: number
 }
 
 /** Expanding frost left by Frog Freeze. Rendering only, spawned by the order. */
@@ -497,6 +528,11 @@ export interface Projectile {
   speed: number
   radius: number
   life: number
+  /** Fixed impact point for an artillery shell. Null shells follow the target. */
+  aimX: number | null
+  aimY: number | null
+  /** Once set, the shell stops following the target and finishes at aimX/aimY. */
+  holdAim: boolean
 }
 
 export interface Particle {
@@ -615,6 +651,8 @@ export interface MatchState {
   bothCam: boolean
   /** When set, Northmark units and buildings take no damage until the next match. */
   godMode: boolean
+  /** Cheat buttons for every console command sit in the top panel. */
+  devMode: boolean
   /** When set, SiloAI plays Silo 01 from Silo 01's own sight. */
   aiControl: boolean
   /**
@@ -668,6 +706,8 @@ export interface MatchState {
   placement: BuildingKind | null
   attackMoveArmed: boolean
   moveArmed: boolean
+  /** The next click sets the far end of a Fly perimeter patrol. */
+  perimeterArmed: boolean
   aiAcc: number
   aiAttacking: boolean
   aiNext: 'pike' | 'howler'

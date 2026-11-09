@@ -1,7 +1,8 @@
+import { ARTILLERY_SECONDS, FLASH_COOLDOWN, FLASH_SECONDS, REVIVE_POWER } from './balance'
 import { controlledSide } from './control'
 import { frostGround } from './sim'
 import { builderTravel, findBuildSpot, gatherBlockRock, harvestLowerBound, harvestTime, haulCost, haulLowerBound, nearestParking, setUnitDestination, stopMoving, withRouteMemo } from './nav'
-import { depositKnown, footprintExplored } from './vision'
+import { depositKnown, footprintExplored, guardCloaksBuilding } from './vision'
 import {
   buildingById,
   buildingCenter,
@@ -32,8 +33,10 @@ import {
   SILO_REPAIR_COST,
   STORAGE_CAP,
   GRID_CLOAK_SECONDS,
+  hiddenFromEnemies,
   isShutdown,
   PLAYER_COLOR,
+  powerSeconds,
   TILE,
   UNIT_STATS,
   isCombatUnit,
@@ -450,6 +453,7 @@ export function commandMove(state: MatchState, ids: number[], x: number, y: numb
   const rows = Math.ceil(units.length / cols)
   units.sort((a, b) => a.y - b.y || a.x - b.x)
   units.forEach((unit, index) => {
+    if (unit.artillery !== 'mobile') return
     unit.scanning = false
     unit.guarding = false
     const col = index % cols
@@ -623,14 +627,15 @@ export function commandAttack(
   let victimKind: UnitKind | null = null
   if (kind === 'unit') {
     const target = unitById(state, targetId)
-    if (!target || target.hp <= 0 || target.cloak > 0) return
+    if (!target || target.hp <= 0 || hiddenFromEnemies(target)) return
+    if (target.kind === 'porter' && target.captureStun > 0) return
     owner = target.owner
     victimKind = target.kind
     x = target.x
     y = target.y
   } else if (kind === 'building') {
     const target = buildingById(state, targetId)
-    if (!target || target.hp <= 0) return
+    if (!target || target.hp <= 0 || guardCloaksBuilding(state, target)) return
     owner = target.owner
     const center = buildingCenter(target)
     x = center.x
@@ -647,6 +652,10 @@ export function commandAttack(
     if (kind === 'rock' && unit.kind !== 'porter') return false
     if (victimKind === 'drone' && unit.kind === 'howler') return false
     if (unit.kind === 'porter' && victimKind != null && isCombatUnit(victimKind)) return false
+    if (unit.kind === 'howler' && unit.artillery === 'gun') {
+      if (victimKind === 'drone' || victimKind === 'porter') return false
+      if (Math.hypot(unit.x - x, unit.y - y) <= UNIT_STATS.howler.sight) return false
+    }
     return neutral || unit.owner !== owner
   })
   if (!units.length) return
@@ -695,7 +704,7 @@ export function commandFreeze(state: MatchState, ids: number[], buildingId: numb
   if (!crew.length) return false
   const tell = crew.some((unit) => unit.owner === controlledSide(state))
   if (building.cryoRecover > 0) {
-    if (tell) pushToast(state, 'Cryo is recovering.')
+    if (tell) pushToast(state, `Cryo ${cryoCountdown(building.cryoRecover)}`)
     return true
   }
   if (crew.length !== CRYO_SLOTS || picked.length !== CRYO_SLOTS) {
@@ -734,7 +743,7 @@ export function commandFreezeAuto(state: MatchState, buildingId: number): boolea
   if (!building || building.hp <= 0 || !building.complete || building.kind !== 'keep' || !building.cryo) return false
   const tell = building.owner === controlledSide(state)
   if (building.cryoRecover > 0) {
-    if (tell) pushToast(state, 'Cryo is recovering.')
+    if (tell) pushToast(state, `Cryo ${cryoCountdown(building.cryoRecover)}`)
     return true
   }
   if (cryoOccupants(state, building.id) >= CRYO_SLOTS || cryoParty(state, building.id).length > 0) {
@@ -799,6 +808,14 @@ export function thawCryo(state: MatchState, buildingId: number): void {
   if (!building || building.kind !== 'keep' || !building.cryo || building.hp <= 0) return
   const released = releaseCryo(state, building)
   if (released > 0) building.cryoRecover = CRYO_RECOVER
+}
+
+/** Minutes and seconds left on the Cryo button lock. */
+export function cryoCountdown(remain: number): string {
+  const seconds = Math.max(0, Math.ceil(remain))
+  const min = Math.floor(seconds / 60)
+  const rem = seconds % 60
+  return `${min}:${rem.toString().padStart(2, '0')}`
 }
 
 /** How many dumps this building can hold. A Silo and a Storage each have their own cap. */
@@ -1035,6 +1052,72 @@ export function commandRepair(state: MatchState, ids: number[], buildingId: numb
   }
   noteOrder(state, crew)
   return null
+}
+
+/** Stalkers walk to a friendly unit below 30% Power and leave it at that charge. */
+export function commandRevive(state: MatchState, ids: number[], targetId: number): boolean {
+  if (state.paused || state.outcome) return false
+  const target = unitById(state, targetId)
+  if (!target || target.hp <= 0 || powerSeconds(target.kind) <= 0 || target.power >= REVIVE_POWER) return false
+  const crew = living(state, ids).filter((unit) => unit.kind === 'porter' && unit.owner === target.owner)
+  if (!crew.length) return false
+  for (const unit of crew) {
+    unit.order = { type: 'revive', targetId }
+    unit.idleAcquire = false
+    unit.nodeMemory = -1
+    unit.scanning = false
+    unit.guarding = false
+    stopMoving(unit)
+  }
+  noteOrder(state, crew)
+  return true
+}
+
+/** Each Fly patrols between where it is now and the clicked point until it gets another order. */
+export function commandPerimeter(state: MatchState, ids: number[], x: number, y: number): void {
+  if (state.outcome || state.paused) return
+  const flies = living(state, ids).filter((unit) => unit.kind === 'drone')
+  for (const unit of flies) {
+    unit.scanning = false
+    unit.guarding = false
+    unit.idleAcquire = false
+    unit.order = { type: 'perimeter', ax: unit.x, ay: unit.y, bx: x, by: y, toward: 'b' }
+    setUnitDestination(state, unit, x, y)
+  }
+  noteOrder(state, flies)
+}
+
+/** Double the speed of these Flashers for a few seconds. */
+export function commandFlash(state: MatchState, ids: number[]): void {
+  if (state.outcome || state.paused) return
+  const crew = living(state, ids).filter((unit) => unit.kind === 'pike' && unit.flash <= 0 && unit.flashCd <= 0)
+  for (const unit of crew) {
+    unit.flash = FLASH_SECONDS
+    unit.flashCd = FLASH_COOLDOWN
+  }
+  noteOrder(state, crew)
+}
+
+/** Fold selected Gorillas into guns, or unfold guns back into tanks. Each change takes 10 seconds. */
+export function commandArtillery(state: MatchState, ids: number[], deploy: boolean): void {
+  if (state.outcome || state.paused) return
+  const crew = living(state, ids).filter((unit) => unit.kind === 'howler')
+  for (const unit of crew) {
+    if (deploy) {
+      if (unit.artillery === 'gun' || unit.artillery === 'deploy') continue
+      unit.artillery = 'deploy'
+    } else {
+      if (unit.artillery === 'mobile' || unit.artillery === 'pack') continue
+      unit.artillery = 'pack'
+    }
+    unit.artilleryT = ARTILLERY_SECONDS
+    unit.order = null
+    unit.idleAcquire = false
+    unit.scanning = false
+    unit.guarding = false
+    stopMoving(unit)
+  }
+  noteOrder(state, crew)
 }
 
 export function commandRally(state: MatchState, buildingId: number, x: number, y: number): void {
@@ -1407,9 +1490,22 @@ export function commandFrost(state: MatchState, ids: number[]): void {
 }
 
 export function aiPlaceNearKeep(state: MatchState, kind: 'yard' | 'silo' | 'tower', owner: PlayerId = 1): boolean {
-  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
-  if (!keep) return false
-  const spot = findBuildSpot(state, kind, keep.tx, keep.ty, owner)
-  if (!spot) return false
-  return tryPlace(state, owner, kind, spot.tx, spot.ty, []) === null
+  const keeps = state.buildings.filter((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
+  keeps.sort((a, b) => nearbyBuildings(state, a, kind) - nearbyBuildings(state, b, kind))
+  for (const keep of keeps) {
+    const spot = findBuildSpot(state, kind, keep.tx, keep.ty, owner)
+    if (!spot) continue
+    if (tryPlace(state, owner, kind, spot.tx, spot.ty, []) === null) return true
+  }
+  return false
+}
+
+function nearbyBuildings(state: MatchState, keep: Building, kind: BuildingKind): number {
+  const home = buildingCenter(keep)
+  let count = 0
+  for (const building of state.buildings) {
+    if (building.owner !== keep.owner || building.hp <= 0 || building.kind !== kind) continue
+    if (Math.hypot(buildingCenter(building).x - home.x, buildingCenter(building).y - home.y) <= 8 * TILE) count += 1
+  }
+  return count
 }

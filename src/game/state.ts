@@ -21,7 +21,7 @@ import {
   TILE,
   TREE_HP,
   UNIT_STATS,
-  isCombatUnit,
+  hiddenFromEnemies,
   type Building,
   type BuildingKind,
   type MatchMode,
@@ -60,22 +60,10 @@ export function rebuildBlocked(state: MatchState): void {
   }
 }
 
-/**
- * A side stays in while it owns a Silo (a ruin it still owns counts), or any other
- * building, or any living unit. It is out only when none of those remain.
- */
-/** Still in the match with a Silo (a ruin counts), a Factory, or a combat unit. */
+/** Still in the match while this side owns a Silo, including a ruin that has not been captured. */
 export function sideStillIn(state: MatchState, owner: number): boolean {
   if (owner < 0 || owner >= state.playerCount) return false
-  for (const building of state.buildings) {
-    if (building.owner !== owner) continue
-    if (building.kind === 'keep') return true
-    if (building.kind === 'yard' && building.hp > 0) return true
-  }
-  for (const unit of state.units) {
-    if (unit.owner === owner && unit.hp > 0 && isCombatUnit(unit.kind)) return true
-  }
-  return false
+  return state.buildings.some((building) => building.owner === owner && building.kind === 'keep')
 }
 
 export function recomputeSupply(state: MatchState): void {
@@ -164,7 +152,7 @@ export function unitTarget(unit: Unit): Target {
     hp: unit.hp,
     targetKind: 'unit',
     unitKind: unit.kind,
-    cloaked: unit.cloak > 0,
+    cloaked: hiddenFromEnemies(unit),
   }
 }
 
@@ -252,10 +240,14 @@ export function placementAllowed(
   if (!footprintExplored(state, owner, kind, tx, ty)) return false
   if (kind !== 'tower') return true
   if (!pillarsClear(state, tx, ty)) return false
-  const keep = state.buildings.find((building) => building.owner === owner && building.kind === 'keep' && building.hp > 0)
-  if (!keep) return false
   const stats = BUILDING_STATS.tower
-  return footprintInKeepSight(keep.tx, keep.ty, tx, ty, stats.w, stats.h)
+  return state.buildings.some(
+    (building) =>
+      building.owner === owner &&
+      building.kind === 'keep' &&
+      building.hp > 0 &&
+      footprintInKeepSight(building.tx, building.ty, tx, ty, stats.w, stats.h),
+  )
 }
 
 /** True when this Pillar footprint leaves at least two empty cells around every other Pillar. */
@@ -359,6 +351,15 @@ export function makeUnit(
     power: 1,
     captureStun: 0,
     captureOwner: -1,
+    dryFor: 0,
+    artillery: 'mobile',
+    artilleryT: 0,
+    artilleryLock: -1,
+    artilleryLockKind: 'unit',
+    artilleryAimX: 0,
+    artilleryAimY: 0,
+    flash: 0,
+    flashCd: 0,
   }
   state.units.push(unit)
   noteUnitCreated(state, owner, kind)
@@ -515,6 +516,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     enemyCam: false,
     bothCam: false,
     godMode: false,
+    devMode: false,
     aiControl: false,
     doubleGame: false,
     control: 0,
@@ -550,6 +552,7 @@ export function createMatch(seed: number, mode: MatchMode = 'duel'): MatchState 
     placement: null,
     attackMoveArmed: false,
     moveArmed: false,
+    perimeterArmed: false,
     aiAcc: playerCount > 4 ? 0.12 : 0,
     aiAttacking: false,
     aiNext: 'pike',

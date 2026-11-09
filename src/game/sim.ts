@@ -3,12 +3,12 @@ import { LESSON_PACE, lessonEnemyPush } from './tutorial'
 import { controlledSide } from './control'
 import { sideKnowsEnemyKeep, updateSiloAi } from './siloAi'
 import { revealCloakedByScanners, updateGuards, updateScanners } from './scanner'
-import { assignMiners, buildingDumpCap, coverOpenSites, creditDumps, debitDumps, dropoffHasRoom, fillOpenGatherSlots, paySiloRepair, redirectStuckPorter, releaseCryo, siloRepairFunds } from './commands'
+import { assignMiners, buildingDumpCap, coverOpenSites, creditDumps, cryoCountdown, debitDumps, dropoffHasRoom, fillOpenGatherSlots, paySiloRepair, redirectStuckPorter, releaseCryo, siloRepairFunds } from './commands'
 import { circleHitsSolid, gatherBlockRock, groundMoveBlocked, nearestParking, nearestWalkable, setUnitDestination, stopMoving } from './nav'
 import { rockShotClear } from './pathfind'
 import { yardEntrance } from './factoryArt'
 import { keepEntrance } from './siloArt'
-import { updateVision } from './vision'
+import { guardCloaksBuilding, revealTerritory, sideTileVisible, updateVision } from './vision'
 import {
   buildingById,
   isWalkable,
@@ -60,13 +60,14 @@ import {
   TILE,
   UNIT_STATS,
   isCombatUnit,
+  hiddenFromEnemies,
   type Building,
   type MatchState,
   type Order,
   type Target,
   type Unit,
 } from './types'
-import { CAPTURE_DRAIN_RATE, SILO_CAPTURE_ALERT, SILO_CAPTURE_SECONDS, STALKER_CAPTURE_STUN_SECONDS, siloMaxHp } from './balance'
+import { SILO_CAPTURE_SECONDS, STALKER_RUIN_CAPTURE_SECONDS, BATTERY_PICKUP_MAX, CAPTURE_DRAIN_RATE, DISCHARGED_DUMPS, DRY_TRASH_SECONDS, REVIVE_POWER, SILO_CAPTURE_ALERT, STALKER_CAPTURE_STUN_SECONDS, siloMaxHp } from './balance'
 
 export function step(state: MatchState, dt: number): void {
   if (state.outcome || state.paused) return
@@ -103,6 +104,9 @@ export function step(state: MatchState, dt: number): void {
       if (unit.ice === 0) applyThawPower(unit)
     }
     if (unit.frostCd > 0) unit.frostCd = Math.max(0, unit.frostCd - dt)
+    if (unit.flash > 0) unit.flash = Math.max(0, unit.flash - dt)
+    if (unit.flashCd > 0) unit.flashCd = Math.max(0, unit.flashCd - dt)
+    tickArtillery(unit, dt)
     if (unit.frozen != null || unit.ice > 0) continue
     if (unit.kind === 'porter' && unit.hp > 0) {
       const lived = unit.age
@@ -114,6 +118,7 @@ export function step(state: MatchState, dt: number): void {
         layGrave(state, unit)
       }
     }
+    trackArtilleryAim(state, unit)
     tryFire(state, unit)
   }
   for (const building of state.buildings) {
@@ -202,7 +207,7 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
   if (order.type === 'attackMove') {
     let focus =
       order.focusId != null && order.focusKind ? getTarget(state, order.focusId, order.focusKind) : null
-    if (focus && coveredStalkerTarget(state, focus)) focus = null
+    if (focus && (coveredStalkerTarget(state, focus) || cloakedBuildingTarget(state, focus))) focus = null
     if (focus && (!isAttackable(unit, focus) || dist(unit, focus) > CHASE_BREAK)) focus = null
     if (!focus) {
       order.focusId = null
@@ -221,6 +226,12 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
 
   if (order.type === 'attack') {
     const focus = getTarget(state, order.targetId, order.kind)
+    if (focus && (stunnedStalkerTarget(state, focus) || cloakedBuildingTarget(state, focus))) {
+      unit.order = null
+      unit.idleAcquire = false
+      stopMoving(unit)
+      return
+    }
     if (!focus || !isAttackable(unit, focus)) {
       const resumeOrder = order.kind === 'rock' ? order.resume : undefined
       const resumeNode = order.kind === 'rock' ? order.resumeNode : undefined
@@ -261,6 +272,16 @@ function refreshUnit(state: MatchState, unit: Unit, dt: number): void {
     return
   }
 
+  if (order.type === 'revive') {
+    refreshRevive(state, unit, order)
+    return
+  }
+
+  if (order.type === 'perimeter') {
+    refreshPerimeter(state, unit, order)
+    return
+  }
+
   refreshConstruct(state, unit, order)
 }
 
@@ -272,7 +293,7 @@ function refreshFreeze(state: MatchState, unit: Unit, order: Extract<Order, { ty
     return
   }
   if (building.cryoRecover > 0) {
-    cancelCryoParty(state, building.id, 'Cryo is recovering.')
+    cancelCryoParty(state, building.id, `Cryo ${cryoCountdown(building.cryoRecover)}`)
     return
   }
   if (cryoOccupants(state, building.id) >= CRYO_SLOTS) {
@@ -339,6 +360,11 @@ function admitCryoGroup(state: MatchState, building: Building, party: Unit[]): v
 }
 
 function holdOrApproach(state: MatchState, unit: Unit, focus: Target): void {
+  if (unit.artillery !== 'mobile') {
+    stopMoving(unit)
+    unit.facing = Math.atan2(focus.y - unit.y, focus.x - unit.x)
+    return
+  }
   if (inWeaponRange(unit, focus) && shotClear(state, unit.x, unit.y, focus.x, focus.y)) {
     stopMoving(unit)
     unit.facing = Math.atan2(focus.y - unit.y, focus.x - unit.x)
@@ -503,6 +529,40 @@ function refreshBinGather(state: MatchState, unit: Unit, order: Extract<Order, {
   approachDropoff(state, unit)
 }
 
+function refreshRevive(state: MatchState, unit: Unit, order: Extract<Order, { type: 'revive' }>): void {
+  const target = unitById(state, order.targetId)
+  if (!target || target.hp <= 0 || target.owner !== unit.owner || powerSeconds(target.kind) <= 0 || target.power >= REVIVE_POWER) {
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  if (Math.hypot(unit.x - target.x, unit.y - target.y) <= INTERACT) {
+    target.power = REVIVE_POWER
+    target.dryFor = 0
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  const drifted = unit.goalX == null || Math.hypot(unit.goalX - target.x, unit.goalY! - target.y) > 24
+  if (drifted) setUnitDestination(state, unit, target.x, target.y)
+}
+
+function refreshPerimeter(state: MatchState, unit: Unit, order: Extract<Order, { type: 'perimeter' }>): void {
+  if (unit.kind !== 'drone') {
+    unit.order = null
+    stopMoving(unit)
+    return
+  }
+  const dest = order.toward === 'b' ? { x: order.bx, y: order.by } : { x: order.ax, y: order.ay }
+  if (Math.hypot(unit.x - dest.x, unit.y - dest.y) <= 20) {
+    order.toward = order.toward === 'b' ? 'a' : 'b'
+    const next = order.toward === 'b' ? { x: order.bx, y: order.by } : { x: order.ax, y: order.ay }
+    setUnitDestination(state, unit, next.x, next.y)
+    return
+  }
+  if (unit.goalX == null) setUnitDestination(state, unit, dest.x, dest.y)
+}
+
 function refreshRepair(state: MatchState, unit: Unit, order: Extract<Order, { type: 'repair' }>): void {
   const building = buildingById(state, order.buildingId)
   if (!building?.ruined) {
@@ -614,7 +674,7 @@ function approachDropoff(state: MatchState, unit: Unit): void {
 }
 
 function moveUnit(state: MatchState, unit: Unit, dt: number): void {
-  if (unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit)) return
+  if (unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit) || unit.artillery !== 'mobile') return
   let left = dt
   let blockedStep = false
   let guard = 0
@@ -647,7 +707,7 @@ function moveUnit(state: MatchState, unit: Unit, dt: number): void {
       }
       break
     }
-    const speed = UNIT_STATS[unit.kind].speed
+    const speed = UNIT_STATS[unit.kind].speed * (unit.flash > 0 ? 2 : 1)
     const stepLen = Math.min(distance, speed * left)
     const desiredX = dx / distance
     const desiredY = dy / distance
@@ -821,7 +881,7 @@ function separate(state: MatchState): void {
 }
 
 function isStationary(unit: Unit): boolean {
-  if (isShutdown(unit)) return true
+  if (isShutdown(unit) || unit.artillery !== 'mobile') return true
   if (unit.goalX != null) return false
   const order = unit.order
   if (!order) return false
@@ -1152,6 +1212,15 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
     power: 1,
     captureStun: 0,
     captureOwner: -1,
+    dryFor: 0,
+    artillery: 'mobile',
+    artilleryT: 0,
+    artilleryLock: -1,
+    artilleryLockKind: 'unit',
+    artilleryAimX: 0,
+    artilleryAimY: 0,
+    flash: 0,
+    flashCd: 0,
   }
   state.units.push(unit)
   noteUnitCreated(state, building.owner, kind)
@@ -1161,14 +1230,53 @@ function placeTrained(state: MatchState, building: Building, kind: Unit['kind'],
   }
 }
 
+function tickArtillery(unit: Unit, dt: number): void {
+  if (unit.kind !== 'howler' || unit.hp <= 0) return
+  if (unit.artillery !== 'deploy' && unit.artillery !== 'pack') return
+  unit.order = null
+  stopMoving(unit)
+  unit.artilleryT = Math.max(0, unit.artilleryT - dt)
+  if (unit.artilleryT > 0) return
+  unit.artillery = unit.artillery === 'deploy' ? 'gun' : 'mobile'
+  unit.artilleryT = 0
+}
+
+function artillerySees(state: MatchState, owner: number, target: Target): boolean {
+  const tx = Math.floor(target.x / TILE)
+  const ty = Math.floor(target.y / TILE)
+  if (sideTileVisible(state, owner, tx, ty)) return true
+  if (target.targetKind !== 'building') return false
+  const building = buildingById(state, target.id)
+  if (!building) return false
+  const stats = BUILDING_STATS[building.kind]
+  for (let y = 0; y < stats.h; y++) {
+    for (let x = 0; x < stats.w; x++) {
+      if (sideTileVisible(state, owner, building.tx + x, building.ty + y)) return true
+    }
+  }
+  return false
+}
+
+function trackArtilleryAim(state: MatchState, unit: Unit): void {
+  if (unit.kind !== 'howler' || unit.artillery !== 'gun' || unit.artilleryLock < 0) return
+  const target = getTarget(state, unit.artilleryLock, unit.artilleryLockKind)
+  if (!target || target.hp <= 0 || !artillerySees(state, unit.owner, target)) return
+  unit.artilleryAimX = target.x
+  unit.artilleryAimY = target.y
+}
+
 function tryFire(state: MatchState, unit: Unit): void {
   if (unit.attackCd > 0 || unit.hp <= 0 || unit.kind === 'drone' || unit.kind === 'frog' || unit.ice > 0 || unit.captureStun > 0 || isShutdown(unit)) return
-  const target = pickFireTarget(state, unit)
-  if (!target || !inWeaponRange(unit, target)) return
-  if (!shotClear(state, unit.x, unit.y, target.x, target.y)) return
+  if (unit.artillery === 'deploy' || unit.artillery === 'pack') return
+  const gun = unit.artillery === 'gun'
+  const target = gun ? pickArtilleryTarget(state, unit) : pickFireTarget(state, unit)
+  if (!target) return
+  if (!gun && (!inWeaponRange(unit, target) || !shotClear(state, unit.x, unit.y, target.x, target.y))) return
   const stats = UNIT_STATS[unit.kind]
   unit.attackCd = stats.cooldown
   unit.facing = Math.atan2(target.y - unit.y, target.x - unit.x)
+  const travel = Math.hypot(target.x - unit.x, target.y - unit.y)
+  const seen = gun && artillerySees(state, unit.owner, target)
   state.projectiles.push({
     id: state.nextId++,
     owner: unit.owner,
@@ -1180,7 +1288,10 @@ function tryFire(state: MatchState, unit: Unit): void {
     damage: stats.damage,
     speed: stats.projectileSpeed,
     radius: stats.projectileRadius,
-    life: 2.6,
+    life: gun ? travel / Math.max(1, stats.projectileSpeed) + 0.6 : 2.6,
+    aimX: gun ? target.x : null,
+    aimY: gun ? target.y : null,
+    holdAim: gun && !seen,
   })
   state.particles.push({
     x: unit.x + Math.cos(unit.facing) * (stats.radius + 2),
@@ -1237,6 +1348,9 @@ function tryFireTower(state: MatchState, building: Building, dt: number): void {
     speed: pike.projectileSpeed,
     radius: pike.projectileRadius,
     life: 2.6,
+    aimX: null,
+    aimY: null,
+    holdAim: false,
   })
   state.particles.push({
     x: origin.x + Math.cos(aim) * 16,
@@ -1290,6 +1404,7 @@ function closestTowerTarget(state: MatchState, building: Building, origin: { x: 
  */
 function towerEngages(state: MatchState, building: Building, origin: { x: number; y: number }, target: Target): boolean {
   if (target.hp <= 0 || target.cloaked || target.owner === building.owner || target.targetKind === 'rock') return false
+  if (cloakedBuildingTarget(state, target)) return false
   if (coveredStalkerTarget(state, target)) return false
   if (!targetInTowerSight(state, building, origin, target)) return false
   return shotClear(state, origin.x, origin.y, target.x, target.y)
@@ -1342,15 +1457,118 @@ function isAttackable(unit: Unit, focus: Target): boolean {
   return focus.owner !== unit.owner
 }
 
+function artilleryInRange(unit: Unit, target: Target): boolean {
+  return Math.hypot(target.x - unit.x, target.y - unit.y) > UNIT_STATS.howler.sight
+}
+
+function gorillaMayShoot(kind: Unit['kind'] | undefined): boolean {
+  return kind !== 'drone' && kind !== 'porter'
+}
+
+/** A deployed gun starts on a visible enemy beyond its own sight, then keeps the last place it saw that target. Flies and Stalkers are ignored. */
+function pickArtilleryTarget(state: MatchState, unit: Unit): Target | null {
+  const order = unit.order
+  if (order?.type === 'attack') {
+    const aimed = getTarget(state, order.targetId, order.kind)
+    if (
+      aimed &&
+      aimed.hp > 0 &&
+      !cloakedBuildingTarget(state, aimed) &&
+      gorillaMayShoot(aimed.unitKind) &&
+      artilleryInRange(unit, aimed) &&
+      artillerySees(state, unit.owner, aimed)
+    ) {
+      rememberArtillery(unit, aimed)
+      return aimed
+    }
+  }
+  const kept = heldArtilleryTarget(state, unit)
+  if (kept) return kept
+  if (order?.type === 'attack') return null
+  let best: Target | null = null
+  let bestD = Infinity
+  for (const other of state.units) {
+    if (other.owner === unit.owner || other.hp <= 0 || hiddenFromEnemies(other) || other.frozen != null) continue
+    if (!gorillaMayShoot(other.kind)) continue
+    const target = unitTarget(other)
+    if (!artillerySees(state, unit.owner, target) || !artilleryInRange(unit, target)) continue
+    const distance = Math.hypot(other.x - unit.x, other.y - unit.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = target
+    }
+  }
+  for (const building of state.buildings) {
+    if (building.owner === unit.owner || building.hp <= 0 || building.ruined || guardCloaksBuilding(state, building)) continue
+    const target = buildingTarget(building)
+    if (!artillerySees(state, unit.owner, target) || !artilleryInRange(unit, target)) continue
+    const distance = Math.hypot(target.x - unit.x, target.y - unit.y)
+    if (distance < bestD) {
+      bestD = distance
+      best = target
+    }
+  }
+  if (best) rememberArtillery(unit, best)
+  else clearArtilleryLock(unit)
+  return best
+}
+
+function rememberArtillery(unit: Unit, target: Target): void {
+  unit.artilleryLock = target.id
+  unit.artilleryLockKind = target.targetKind === 'building' ? 'building' : 'unit'
+  unit.artilleryAimX = target.x
+  unit.artilleryAimY = target.y
+}
+
+function clearArtilleryLock(unit: Unit): void {
+  unit.artilleryLock = -1
+}
+
+/** The gun's current target. A target that left sight is returned at the last place it was seen. */
+function heldArtilleryTarget(state: MatchState, unit: Unit): Target | null {
+  if (unit.artilleryLock < 0) return null
+  const target = getTarget(state, unit.artilleryLock, unit.artilleryLockKind)
+  if (!target || target.hp <= 0 || !gorillaMayShoot(target.unitKind) || cloakedBuildingTarget(state, target)) {
+    clearArtilleryLock(unit)
+    return null
+  }
+  if (artillerySees(state, unit.owner, target)) {
+    if (!artilleryInRange(unit, target)) {
+      clearArtilleryLock(unit)
+      return null
+    }
+    rememberArtillery(unit, target)
+    return target
+  }
+  const ghost: Target = { ...target, x: unit.artilleryAimX, y: unit.artilleryAimY }
+  if (!artilleryInRange(unit, ghost)) {
+    clearArtilleryLock(unit)
+    return null
+  }
+  return ghost
+}
+
+function cloakedBuildingTarget(state: MatchState, target: Target): boolean {
+  if (target.targetKind !== 'building') return false
+  const building = buildingById(state, target.id)
+  return !!building && guardCloaksBuilding(state, building)
+}
+
+function stunnedStalkerTarget(state: MatchState, target: Target): boolean {
+  if (target.targetKind !== 'unit') return false
+  const unit = unitById(state, target.id)
+  return !!unit && unit.kind === 'porter' && unit.captureStun > 0
+}
+
 function pickFireTarget(state: MatchState, unit: Unit): Target | null {
   const order = unit.order
   if (order?.type === 'attack') {
     const aimed = getTarget(state, order.targetId, order.kind)
-    if (aimed && isAttackable(unit, aimed)) return aimed
+    if (aimed && isAttackable(unit, aimed) && !cloakedBuildingTarget(state, aimed)) return aimed
   }
   if (order?.type === 'attackMove' && order.focusId != null && order.focusKind) {
     const aimed = getTarget(state, order.focusId, order.focusKind)
-    if (aimed && isAttackable(unit, aimed)) return aimed
+    if (aimed && isAttackable(unit, aimed) && !cloakedBuildingTarget(state, aimed)) return aimed
   }
   const angry = unit.hurtTimer > 0
   const combat =
@@ -1377,6 +1595,7 @@ function nearestSiegeBuilding(state: MatchState, unit: Unit, radius: number): Ta
   let bestD = radius
   for (const building of state.buildings) {
     if (building.owner === unit.owner || building.hp <= 0) continue
+    if (guardCloaksBuilding(state, building)) continue
     if (building.kind !== 'keep' && building.kind !== 'silo' && building.kind !== 'yard' && building.kind !== 'tower') continue
     const center = buildingCenter(building)
     const d = Math.hypot(center.x - unit.x, center.y - unit.y)
@@ -1392,7 +1611,7 @@ function nearestCombatUnit(state: MatchState, unit: Unit, radius: number): Targe
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
-    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0 || other.frozen != null) continue
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || hiddenFromEnemies(other) || other.frozen != null) continue
     if (other.kind === 'porter') continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
     const distance = Math.hypot(other.x - unit.x, other.y - unit.y)
@@ -1409,7 +1628,7 @@ function nearestEnemyStructure(state: MatchState, unit: Unit, radius: number): T
   let bestD = radius
   const castleFirst = siloControlled(state, unit) && sideKnowsEnemyKeep(state, unit.owner)
   for (const building of state.buildings) {
-    if (building.owner === unit.owner || building.hp <= 0) continue
+    if (building.owner === unit.owner || building.hp <= 0 || guardCloaksBuilding(state, building)) continue
     if (castleFirst && building.kind !== 'keep') continue
     const center = buildingCenter(building)
     const distance = Math.hypot(center.x - unit.x, center.y - unit.y)
@@ -1437,10 +1656,10 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   let best: Target | null = null
   let bestD = radius
   for (const other of state.units) {
-    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || other.cloak > 0 || other.frozen != null) continue
+    if (other.owner === unit.owner || other.hp <= 0 || other.id === unit.id || hiddenFromEnemies(other) || other.frozen != null) continue
     if (other.kind === 'drone' && unit.kind === 'howler') continue
     if (unit.kind === 'porter' && isCombatUnit(other.kind)) continue
-    if (other.kind === 'porter' && stalkerCovered(state, other)) continue
+    if (other.kind === 'porter' && (other.captureStun > 0 || stalkerCovered(state, other))) continue
     const d = Math.hypot(other.x - unit.x, other.y - unit.y)
     if (d < bestD) {
       bestD = d
@@ -1450,7 +1669,7 @@ function nearestHostile(state: MatchState, unit: Unit, radius: number, buildings
   if (!best && buildingsToo) {
     const castleFirst = siloControlled(state, unit) && sideKnowsEnemyKeep(state, unit.owner)
     for (const building of state.buildings) {
-      if (building.owner === unit.owner || building.hp <= 0) continue
+      if (building.owner === unit.owner || building.hp <= 0 || guardCloaksBuilding(state, building)) continue
       if (castleFirst && building.kind !== 'keep') continue
       const center = buildingCenter(building)
       const d = Math.hypot(center.x - unit.x, center.y - unit.y)
@@ -1467,14 +1686,30 @@ function updateProjectiles(state: MatchState, dt: number): void {
   const next = []
   for (const shot of state.projectiles) {
     shot.life -= dt
+    if (shot.life <= 0) continue
     const target = getTarget(state, shot.targetId, shot.targetKind)
-    if (!target || target.hp <= 0 || shot.life <= 0) continue
-    const dx = target.x - shot.x
-    const dy = target.y - shot.y
+    let aimX: number
+    let aimY: number
+    if (shot.aimX == null || shot.aimY == null) {
+      if (!target || target.hp <= 0) continue
+      aimX = target.x
+      aimY = target.y
+    } else {
+      if (!shot.holdAim && target && target.hp > 0 && artillerySees(state, shot.owner, target)) {
+        shot.aimX = target.x
+        shot.aimY = target.y
+      } else shot.holdAim = true
+      aimX = shot.aimX
+      aimY = shot.aimY
+    }
+    const dx = aimX - shot.x
+    const dy = aimY - shot.y
     const distance = Math.hypot(dx, dy)
     if (distance <= shot.radius + 8) {
-      applyHit(state, target, shot.damage, shot.sourceId)
-      burst(state, target.x, target.y, sideTone(shot.owner), 4)
+      if (target && target.hp > 0 && Math.hypot(target.x - aimX, target.y - aimY) <= shot.radius + 12) {
+        applyHit(state, target, shot.damage, shot.sourceId)
+      }
+      burst(state, aimX, aimY, sideTone(shot.owner), 4)
       continue
     }
     const stepLen = Math.min(distance, shot.speed * dt)
@@ -1498,7 +1733,7 @@ function applyHit(state: MatchState, target: Target, damage: number, sourceId: n
   }
   if (target.targetKind === 'unit') {
     const unit = unitById(state, target.id)
-    if (!unit || unit.hp <= 0 || unit.cloak > 0 || unit.frozen != null) return
+    if (!unit || unit.hp <= 0 || hiddenFromEnemies(unit) || unit.frozen != null) return
     const source = unitById(state, sourceId)
     const sourceBuilding = source ? undefined : buildingById(state, sourceId)
     if (unit.kind === 'porter') {
@@ -1547,7 +1782,10 @@ function cleanup(state: MatchState): void {
     const deadIds = new Set(deadUnits.map((unit) => unit.id))
     for (const unit of deadUnits) {
       noteUnitLost(state, unit.owner, unit.kind)
-      if (powerSeconds(unit.kind) > 0) dropBattery(state, unit)
+      if (powerSeconds(unit.kind) > 0) {
+        if (unit.power <= 0) dropUnitDumps(state, unit)
+        else dropBattery(state, unit)
+      }
       burst(state, unit.x, unit.y, sideTone(unit.owner), 8)
       state.events.push({ type: 'death', x: unit.x, y: unit.y })
     }
@@ -1653,9 +1891,11 @@ function attackerOwner(state: MatchState, sourceId: number): number | null {
 }
 
 function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
-  if (unit.owner === newOwner || unit.captureStun > 0) return
+  if (unit.owner === newOwner || unit.captureStun > 0 || state.eliminated[newOwner]) return
+  const previous = unit.owner
+  unit.owner = newOwner
   unit.captureStun = STALKER_CAPTURE_STUN_SECONDS
-  unit.captureOwner = newOwner
+  unit.captureOwner = -1
   unit.order = null
   unit.idleAcquire = false
   unit.scanning = false
@@ -1664,10 +1904,12 @@ function captureStalker(state: MatchState, unit: Unit, newOwner: number): void {
   unit.leashY = null
   stopMoving(unit)
   state.selectedUnits = state.selectedUnits.filter((id) => id !== unit.id)
+  recomputeSupply(state)
+  if (previous === controlledSide(state)) pushToast(state, 'A Stalker was captured.')
+  else if (newOwner === controlledSide(state)) pushToast(state, 'Stalker captured.')
 }
 
 function tickCaptureStuns(state: MatchState, dt: number): void {
-  let switched = false
   for (const unit of state.units) {
     if (unit.hp <= 0 || unit.captureStun <= 0) continue
     unit.order = null
@@ -1676,17 +1918,8 @@ function tickCaptureStuns(state: MatchState, dt: number): void {
     unit.guarding = false
     stopMoving(unit)
     unit.captureStun = Math.max(0, unit.captureStun - dt)
-    if (unit.captureStun > 0) continue
-    const next = unit.captureOwner
-    unit.captureOwner = -1
-    if (next < 0 || next === unit.owner || state.eliminated[next]) continue
-    const previous = unit.owner
-    unit.owner = next
-    switched = true
-    if (previous === controlledSide(state)) pushToast(state, 'A Stalker was captured.')
-    else if (next === controlledSide(state)) pushToast(state, 'Stalker captured.')
+    if (unit.captureStun <= 0) unit.captureOwner = -1
   }
-  if (switched) recomputeSupply(state)
 }
 
 function combatHolder(unit: Unit, building: Building): boolean {
@@ -1696,8 +1929,15 @@ function combatHolder(unit: Unit, building: Building): boolean {
   return distToRect(unit.x, unit.y, buildingRect(building)) <= range
 }
 
+function stalkerHolder(unit: Unit, building: Building): boolean {
+  if (unit.hp <= 0 || unit.kind !== 'porter' || unit.captureStun > 0 || unit.ice > 0) return false
+  if (unit.owner === building.owner || unit.owner < 0) return false
+  return distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
+}
+
 function tickSiloCaptures(state: MatchState, dt: number): void {
   const finished: Building[] = []
+  const stalkerRate = SILO_CAPTURE_SECONDS / STALKER_RUIN_CAPTURE_SECONDS
   for (const building of state.buildings) {
     if (building.kind !== 'keep' || !building.ruined || building.owner < 0) continue
     const repairing = state.units.some(
@@ -1715,21 +1955,31 @@ function tickSiloCaptures(state: MatchState, dt: number): void {
       building.captureBy = -1
       continue
     }
-    const holders = new Map<number, number>()
+    const combat = new Map<number, number>()
+    const stalkers = new Map<number, number>()
     for (const unit of state.units) {
-      if (!combatHolder(unit, building)) continue
-      holders.set(unit.owner, (holders.get(unit.owner) ?? 0) + 1)
+      if (combatHolder(unit, building)) combat.set(unit.owner, (combat.get(unit.owner) ?? 0) + 1)
+      else if (stalkerHolder(unit, building)) stalkers.set(unit.owner, (stalkers.get(unit.owner) ?? 0) + 1)
     }
-    let defenders = 0
-    let attackers = 0
-    for (const [owner, count] of holders) {
-      if (owner === building.owner) defenders += count
-      else if (!state.eliminated[owner]) attackers += count
+    const defenders = combat.get(building.owner) ?? 0
+    let combatAttackers = 0
+    for (const [owner, count] of combat) {
+      if (owner !== building.owner && !state.eliminated[owner]) combatAttackers += count
     }
-    if (attackers > 0 && defenders > 0) continue
-    if (attackers > 0) {
-      building.captureBy = captureHolder(building, holders)
+    let stalkerAttackers = 0
+    for (const [owner, count] of stalkers) {
+      if (owner !== building.owner && !state.eliminated[owner]) stalkerAttackers += count
+    }
+    if (defenders > 0 && (combatAttackers > 0 || stalkerAttackers > 0)) continue
+    if (combatAttackers > 0) {
+      building.captureBy = captureHolder(building, combat)
       building.capture += dt
+      if (building.capture >= SILO_CAPTURE_SECONDS) finished.push(building)
+      continue
+    }
+    if (stalkerAttackers > 0) {
+      building.captureBy = captureHolder(building, stalkers)
+      building.capture += dt * stalkerRate
       if (building.capture >= SILO_CAPTURE_SECONDS) finished.push(building)
       continue
     }
@@ -1787,6 +2037,8 @@ function finishSiloCapture(state: MatchState, building: Building): void {
   building.rallyX = mouth.x
   building.rallyY = mouth.y
   creditDumps(state, captor, seized)
+  const seen = buildingCenter(building)
+  revealTerritory(state, captor, seen.x, seen.y, BUILDING_STATS.keep.sight)
   noteSiloCaptured(state, captor)
   recomputeSupply(state)
   rebuildBlocked(state)
@@ -1836,13 +2088,17 @@ function drainPower(state: MatchState, dt: number): void {
     if (life <= 0 || unit.hp <= 0 || unit.frozen != null) continue
     if (inFriendlyPillarSight(state, unit)) {
       unit.power = Math.min(1, unit.power + dt / PILLAR_CHARGE_SECONDS)
+      if (unit.power > 0) unit.dryFor = 0
       continue
     }
     if (unit.ice > 0) continue
     if (unit.power <= 0) {
       unit.power = 0
+      if (unit.ice <= 0 && unit.frozen == null) unit.dryFor += dt
+      if (unit.dryFor >= DRY_TRASH_SECONDS) unit.hp = 0
       continue
     }
+    unit.dryFor = 0
     unit.power = Math.max(0, unit.power - dt / life)
     if (unit.power > 0) continue
     unit.power = 0
@@ -1860,18 +2116,30 @@ function collectBatteries(state: MatchState): void {
   if (!state.batteries.length) return
   const taken = new Set<number>()
   for (const unit of state.units) {
-    if (unit.hp <= 0 || unit.frozen != null || powerSeconds(unit.kind) <= 0) continue
+    if (unit.hp <= 0 || unit.frozen != null || powerSeconds(unit.kind) <= 0 || unit.power > BATTERY_PICKUP_MAX) continue
     for (const battery of state.batteries) {
       if (taken.has(battery.id)) continue
       const cx = (battery.tx + 0.5) * TILE
       const cy = (battery.ty + 0.5) * TILE
       if (Math.hypot(unit.x - cx, unit.y - cy) > TILE * 0.72) continue
       unit.power = 1
+      unit.dryFor = 0
       taken.add(battery.id)
       break
     }
   }
   if (taken.size) state.batteries = state.batteries.filter((battery) => !taken.has(battery.id))
+}
+
+function dropUnitDumps(state: MatchState, unit: Unit): void {
+  const tx = Math.min(state.mapW - 1, Math.max(0, Math.floor(unit.x / TILE)))
+  const ty = Math.min(state.mapH - 1, Math.max(0, Math.floor(unit.y / TILE)))
+  const pile = state.ore.find((node) => node.tx === tx && node.ty === ty && node.amount > 0)
+  if (pile) {
+    pile.amount += DISCHARGED_DUMPS
+    return
+  }
+  layDumpPile(state, tx, ty, DISCHARGED_DUMPS)
 }
 
 function dropBattery(state: MatchState, unit: Unit): void {
@@ -2121,6 +2389,10 @@ function workingInPlace(state: MatchState, unit: Unit): boolean {
   if (order.type === 'repair') {
     const building = buildingById(state, order.buildingId)
     return !!building && building.ruined && distToRect(unit.x, unit.y, buildingRect(building)) <= INTERACT
+  }
+  if (order.type === 'revive') {
+    const target = unitById(state, order.targetId)
+    return !!target && target.hp > 0 && Math.hypot(unit.x - target.x, unit.y - target.y) <= INTERACT
   }
   if (order.type === 'attack') {
     const target = getTarget(state, order.targetId, order.kind)

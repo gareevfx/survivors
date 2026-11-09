@@ -3,16 +3,20 @@ import {
   cancelBuilding,
   cancelTrain,
   demolishBuilding,
+  commandArtillery,
   commandAttack,
   commandConstruct,
   commandFreeze,
   commandFreezeAuto,
+  commandFlash,
   commandFrost,
   commandGather,
   commandHarvestOrAttack,
   commandHoverGrid,
   commandMove,
+  commandPerimeter,
   commandRally,
+  commandRevive,
   commandRepair,
   commandRepairNearest,
   commandStop,
@@ -47,6 +51,10 @@ export type ReplayAction =
   | { op: 'grid'; ids: number[] }
   | { op: 'scan'; ids: number[] }
   | { op: 'guard'; ids: number[] }
+  | { op: 'perimeter'; ids: number[]; x: number; y: number }
+  | { op: 'revive'; ids: number[]; targetId: number }
+  | { op: 'artillery'; ids: number[]; deploy: boolean }
+  | { op: 'flash'; ids: number[] }
   | { op: 'frost'; ids: number[] }
   | { op: 'console'; text: string }
   | { op: 'side'; owner: number }
@@ -211,6 +219,18 @@ function dispatch(state: MatchState, action: ReplayAction): void {
       return
     case 'guard':
       toggleGuard(state, action.ids)
+      return
+    case 'perimeter':
+      commandPerimeter(state, action.ids, action.x, action.y)
+      return
+    case 'revive':
+      commandRevive(state, action.ids, action.targetId)
+      return
+    case 'flash':
+      commandFlash(state, action.ids)
+      return
+    case 'artillery':
+      commandArtillery(state, action.ids, action.deploy)
       return
     case 'frost':
       commandFrost(state, action.ids)

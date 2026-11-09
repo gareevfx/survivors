@@ -7,7 +7,7 @@ import { attachInput, narrowSelection, selectOwnCombatUnits, setActiveKind } fro
 import { buildTerrain, minimapFrame, renderMinimap, renderWorld } from './game/render'
 import { applyDue, armPlayback, beginRecording, currentTape, finishRecording, rememberAlways, sealReplayStats } from './game/replay'
 import { step } from './game/sim'
-import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor, unitById } from './game/state'
+import { buildingCenter, createMatch, playerKeep, pushToast, sideAnchor } from './game/state'
 import { FFA8_MAP_H, FFA8_MAP_W, FFA_MAP_H, FFA_MAP_W, MAP_H, MAP_W, PLAYER_NAME, type MatchMode, type MatchState } from './game/types'
 import { playerHearsAt } from './game/vision'
 import { resetHudCache, syncHud, toggleReplayStats } from './ui/hud'
@@ -228,8 +228,6 @@ function selectIdlePorters(): void {
   live.selectedGrave = null
   live.selectedGhost = null
   live.events.push({ type: 'select' })
-  const first = unitById(live, ids[0] ?? -1)
-  if (first) focus(first.x, first.y)
 }
 
 hintClose?.addEventListener('click', () => {
@@ -285,6 +283,17 @@ speedButton?.addEventListener('click', () => {
   if (!match?.replay) return
   sfx.unlock()
   runCommand(match, match.speed === 3 ? 'speed x3 off' : 'speed x3')
+})
+document.querySelector('#dev-cheats')?.addEventListener('click', (event) => {
+  if (!match || match.replay) return
+  const button = event.target instanceof Element ? event.target.closest('button') : null
+  if (!(button instanceof HTMLButtonElement)) return
+  const pressed = button.getAttribute('aria-pressed') === 'true'
+  const text = pressed ? button.dataset.off : button.dataset.on
+  if (!text) return
+  sfx.unlock()
+  const known = runCommand(match, text)
+  if (known) rememberAlways(match, { op: 'console', text })
 })
 idle?.addEventListener('click', () => {
   sfx.unlock()

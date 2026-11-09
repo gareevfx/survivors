@@ -1,5 +1,5 @@
-import { SILO_CAPTURE_SECONDS, buildingMaxHp } from '../game/balance'
-import { cancelTrain, commandFreezeAuto, commandFrost, commandHoverGrid, commandRepair, commandRepairNearest, commandStop, demolishArmed, demolishRefund, installCryo, playerHovers, requestDemolish, storageLostOnDemolish, thawCryo, tryTrain } from '../game/commands'
+import { ARTILLERY_SECONDS, FLASH_COOLDOWN, FLASH_SECONDS, SILO_CAPTURE_SECONDS, buildingMaxHp } from '../game/balance'
+import { cancelTrain, commandArtillery, commandFlash, commandFreezeAuto, commandFrost, commandRepair, commandRepairNearest, commandStop, cryoCountdown, demolishArmed, demolishRefund, installCryo, playerHovers, requestDemolish, storageLostOnDemolish, thawCryo, tryTrain } from '../game/commands'
 import { controlledSide, handsOff } from '../game/control'
 import { toggleGuard, toggleScanner } from '../game/scanner'
 import { flasherPortraitUrl } from '../game/flasherArt'
@@ -26,7 +26,6 @@ import {
   SILO_REPAIR_COST,
   SILO_REPAIR_TIME,
   STORAGE_CAP,
-  GRID_CLOAK_SECONDS,
   UNIT_KINDS,
   UNIT_STATS,
   type Building,
@@ -173,6 +172,22 @@ export function syncHud(state: MatchState, actions: HudActions): void {
   if (speed) {
     speed.classList.toggle('hidden', !replayLive)
     speed.setAttribute('aria-pressed', state.speed === 3 ? 'true' : 'false')
+  }
+  const devCheats = document.querySelector<HTMLElement>('#dev-cheats')
+  if (devCheats) {
+    devCheats.classList.toggle('hidden', !state.devMode)
+    for (const button of devCheats.querySelectorAll<HTMLButtonElement>('button')) {
+      const flag = button.dataset.flag
+      const pressed =
+        flag === 'fog' ? state.fogCleared :
+        flag === 'god' ? state.godMode :
+        flag === 'cams' ? state.bothCam :
+        flag === 'ai' ? state.aiControl :
+        flag === 'speed' ? state.speed === 3 :
+        flag === 'double' ? state.doubleGame :
+        false
+      button.setAttribute('aria-pressed', pressed ? 'true' : 'false')
+    }
   }
   if (hint) hint.classList.toggle('hidden', !state.tutorial)
   if (pause) {
@@ -443,7 +458,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         id: 'scan',
         label: 'Scanner',
         hotkey: 'C',
-        title: 'Patrol the whole map: far unexplored ground first, then the tiles seen longest ago. Steers away from enemy combat units and Pillars. Reveals an invisible enemy Fly inside sight.',
+        title: 'Scanner (C)',
         disabled: false,
         armed: hovers.every((unit) => unit.scanning),
         run: () => {
@@ -455,7 +470,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
       cmds.push({
         id: 'guard',
         label: 'Guard',
-        title: 'Hold this spot. When an enemy combat unit enters sight, call half of the nearby combat units to attack-move there.',
+        title: 'Guard',
         disabled: false,
         armed: hovers.every((unit) => unit.guarding),
         run: () => {
@@ -466,19 +481,37 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
           state.attackMoveArmed = false
         },
       })
-      const gridReady = hovers.length >= 10
       cmds.push({
-        id: 'grid',
-        label: 'Grid',
-        title: gridReady
-          ? `Select 10 Flies to activate the Grid. They fly to an even grid covering the map, stay there, and turn invisible for ${GRID_CLOAK_SECONDS} seconds.`
-          : 'Select 10 Flies to activate the Grid',
-        disabled: !gridReady,
+        id: 'perimeter',
+        label: 'Perimeter',
+        title: 'Perimeter',
+        disabled: false,
+        armed: state.perimeterArmed,
         run: () => {
-          rememberLive(state, { op: 'grid', ids: state.selectedUnits })
-          commandHoverGrid(state, state.selectedUnits)
+          state.perimeterArmed = !state.perimeterArmed
           state.moveArmed = false
           state.attackMoveArmed = false
+          state.placement = null
+        },
+      })
+    }
+    if (focus === 'pike') {
+      const flashers = state.selectedUnits
+        .map((id) => unitById(state, id))
+        .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.kind === 'pike' && unit.hp > 0 && unit.owner === controlledSide(state) && unit.power > 0)
+      const ready = flashers.filter((unit) => unit.flash <= 0 && unit.flashCd <= 0)
+      const wait = flashers.reduce((best, unit) => Math.min(best, unit.flash > 0 ? unit.flash : unit.flashCd), Infinity)
+      cmds.push({
+        id: 'flash',
+        label: 'Flash',
+        hotkey: 'Z',
+        detail: ready.length ? `${FLASH_SECONDS}s` : Number.isFinite(wait) ? `${Math.ceil(wait)}s` : `${FLASH_COOLDOWN}s`,
+        title: 'Flash (Z)',
+        disabled: ready.length === 0,
+        run: () => {
+          const ids = ready.map((unit) => unit.id)
+          rememberLive(state, { op: 'flash', ids })
+          commandFlash(state, ids)
         },
       })
     }
@@ -489,6 +522,41 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         placeButton(state, 'silo', actions),
         placeButton(state, 'tower', actions),
       )
+    }
+    if (focus === 'howler') {
+      const gorillas = state.selectedUnits
+        .map((id) => unitById(state, id))
+        .filter((unit): unit is NonNullable<typeof unit> => !!unit && unit.kind === 'howler' && unit.hp > 0 && unit.owner === controlledSide(state))
+      const canDeploy = gorillas.some((unit) => unit.artillery === 'mobile' || unit.artillery === 'pack')
+      const canPack = gorillas.some((unit) => unit.artillery === 'gun' || unit.artillery === 'deploy')
+      if (canDeploy) {
+        const folding = gorillas.some((unit) => unit.artillery === 'deploy')
+        cmds.push({
+          id: 'artillery',
+          label: 'Artillery',
+          detail: folding ? `${Math.ceil(Math.max(...gorillas.filter((unit) => unit.artillery === 'deploy').map((unit) => unit.artilleryT)))}s` : `${ARTILLERY_SECONDS}s`,
+          title: 'Artillery',
+          disabled: folding,
+          run: () => {
+            rememberLive(state, { op: 'artillery', ids: gorillas.map((unit) => unit.id), deploy: true })
+            commandArtillery(state, gorillas.map((unit) => unit.id), true)
+          },
+        })
+      }
+      if (canPack) {
+        const packing = gorillas.some((unit) => unit.artillery === 'pack')
+        cmds.push({
+          id: 'artillery-pack',
+          label: 'Mobile',
+          detail: packing ? `${Math.ceil(Math.max(...gorillas.filter((unit) => unit.artillery === 'pack').map((unit) => unit.artilleryT)))}s` : `${ARTILLERY_SECONDS}s`,
+          title: 'Mobile',
+          disabled: packing,
+          run: () => {
+            rememberLive(state, { op: 'artillery', ids: gorillas.map((unit) => unit.id), deploy: false })
+            commandArtillery(state, gorillas.map((unit) => unit.id), false)
+          },
+        })
+      }
     }
     const frogs =
       focus === 'frog'
@@ -509,10 +577,7 @@ function buildCommands(state: MatchState, actions: HudActions): Cmd[] {
         label: 'Freeze',
         hotkey: 'R',
         detail: ready.length ? `${FROG_FREEZE_COOLDOWN}s` : wait > 0 ? `${Math.ceil(wait)}s` : `${FROG_FREEZE_COOLDOWN}s`,
-        title:
-          ready.length === 0 && banned
-            ? "Can't Freeze near a Silo"
-            : `Ice every other unit inside this Frog's sight for ${FROG_FREEZE_SECONDS} seconds. Trees in that circle shatter, and each rock loses half its current hit points. Power does not drain while frozen. When the ice ends, each unit with Power loses half a bar. Cooldown ${FROG_FREEZE_COOLDOWN} seconds. Cannot Freeze inside a Silo's sight. Press R.`,
+        title: ready.length === 0 && banned ? "Can't Freeze near a Silo" : `Freeze · ${FROG_FREEZE_SECONDS}s · Press R`,
         disabled: ready.length === 0,
         run: () => {
           const ids = ready.map((unit) => unit.id)
@@ -565,10 +630,14 @@ function cancelTrainButton(state: MatchState, buildingId: number): Cmd {
   }
 }
 
-function cryoUse(state: MatchState, building: Building): { recovering: boolean; occupied: boolean; held: number } {
+function cryoUse(state: MatchState, building: Building): { locked: string | null; occupied: boolean; held: number } {
   const held = cryoOccupants(state, building.id)
   const inbound = cryoParty(state, building.id).length > 0
-  return { recovering: building.cryoRecover > 0, occupied: held > 0 || inbound, held }
+  return {
+    locked: building.cryoRecover > 0 ? cryoCountdown(building.cryoRecover) : null,
+    occupied: held > 0 || inbound,
+    held,
+  }
 }
 
 function cryoButton(state: MatchState, building: Building): Cmd {
@@ -578,9 +647,7 @@ function cryoButton(state: MatchState, building: Building): Cmd {
       id: 'cryo',
       label: 'Cryo',
       detail: `${CRYO_COST} dumps`,
-      title: afford
-        ? 'Add four glass vessels to this Silo, once. Select 4 Stalkers and send them here. Freezing costs 50 dumps each, 200 for the group. Defrost releases them beside the Silo, then the Cryo recovers for 4 minutes.'
-        : `Need ${CRYO_COST} dumps`,
+      title: afford ? `Cryo · ${CRYO_COST} dumps` : `Need ${CRYO_COST} dumps`,
       disabled: !afford,
       run: () => {
         rememberLive(state, { op: 'cryo', buildingId: building.id })
@@ -590,19 +657,22 @@ function cryoButton(state: MatchState, building: Building): Cmd {
     }
   }
   const use = cryoUse(state, building)
-  const send =
-    'Send the 4 Stalkers with the most health remaining to this Silo. When health matches, the nearest ones go. Freezing costs 200 dumps for the group when they arrive. Selecting 4 Stalkers and sending them still works.'
-  const countdown = formatRecover(building.cryoRecover)
+  if (use.locked) {
+    return {
+      id: 'cryo',
+      label: 'Cryo',
+      detail: use.locked,
+      title: use.locked,
+      disabled: true,
+      run: () => undefined,
+    }
+  }
   return {
     id: 'cryo',
     label: 'Cryo',
-    detail: use.recovering ? `Recovery ${countdown}` : `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
-    title: use.recovering
-      ? `The Cryo is recovering for ${countdown}.`
-      : use.occupied
-        ? 'Stalkers are frozen or already on their way. Defrost releases the ones inside.'
-        : send,
-    disabled: use.recovering || use.occupied,
+    detail: `${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
+    title: use.occupied ? `${use.held} / ${CRYO_SLOTS}` : `Cryo · ${CRYO_FREEZE_COST * CRYO_SLOTS} dumps`,
+    disabled: use.occupied,
     run: () => {
       rememberLive(state, { op: 'freezeAuto', buildingId: building.id })
       commandFreezeAuto(state, building.id)
@@ -612,12 +682,22 @@ function cryoButton(state: MatchState, building: Building): Cmd {
 
 function defrostButton(state: MatchState, building: Building): Cmd {
   const use = cryoUse(state, building)
+  if (use.locked) {
+    return {
+      id: 'defrost',
+      label: 'Defrost',
+      detail: use.locked,
+      title: use.locked,
+      disabled: true,
+      run: () => undefined,
+    }
+  }
   return {
     id: 'defrost',
     label: 'Defrost',
     detail: use.held ? `${use.held} inside` : 'empty',
-    title: `Defrost releases the frozen Stalkers beside this Silo. The ${CRYO_FREEZE_COST} dumps spent to freeze each one is not returned. The Cryo then recovers for 4 minutes.`,
-    disabled: use.recovering || !use.occupied,
+    title: 'Defrost',
+    disabled: !use.occupied,
     run: () => {
       rememberAlways(state, { op: 'thaw', buildingId: building.id })
       thawCryo(state, building.id)
@@ -633,9 +713,9 @@ function placeButton(state: MatchState, kind: BuildingKind, actions: HudActions)
     label: stats.label,
     icon: buildingPortrait(controlledSide(state), kind),
     iconBuilding: kind,
-    hotkey: kind === 'yard' ? 'Y' : kind === 'silo' ? 'L' : kind === 'tower' ? 'T' : 'O',
+    hotkey: kind === 'yard' ? 'R' : kind === 'silo' ? 'E' : kind === 'tower' ? 'T' : 'O',
     detail: `${stats.cost} dumps`,
-    title: afford ? `${stats.label}. ${stats.blurb}` : `${stats.label} — Need ${stats.cost} dumps`,
+    title: afford ? `${stats.label} · ${stats.cost} dumps` : `${stats.label} — Need ${stats.cost} dumps`,
     disabled: !afford,
     armed: state.placement === kind,
     run: () => actions.armPlace(kind),
@@ -662,7 +742,6 @@ function repairButton(state: MatchState): Cmd {
     label: 'Repair',
     icon: ruinedSiloPortraitUrl(),
     iconBuilding: 'repair',
-    hotkey: 'R',
     detail: `${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s`,
     title,
     disabled: !porters.length || !ruin || !afford,
@@ -678,12 +757,8 @@ function demolishButton(state: MatchState, building: Building): Cmd {
   const armed = demolishArmed(building.id)
   const refund = demolishRefund(building)
   const lost = storageLostOnDemolish(state, building)
-  const name = BUILDING_STATS[building.kind].label
-  const spent = building.complete ? `a quarter of its ${BUILDING_STATS[building.kind].cost} dump cost` : 'a quarter of the dumps already spent'
-  let title = armed
-    ? `Confirm. Tear down this ${name} and return ${refund} dumps, ${spent}.`
-    : `Demolish this ${name}. Returns ${refund} dumps, ${spent}. Press again within 3 seconds. Press B.`
-  if (lost > 0) title += ` ${lost} dumps stored here will not fit elsewhere and will be lost.`
+  let title = armed ? `Confirm · ${refund} dumps · B` : `Demolish · ${refund} dumps · B`
+  if (lost > 0) title += ` · ${lost} lost`
   return {
     id: 'demolish',
     label: armed ? 'Confirm' : 'Demolish',
@@ -704,11 +779,11 @@ function trainButton(state: MatchState, buildingId: number, kind: UnitKind): Cmd
   const side = controlledSide(state)
   const afford = (state.oreHeld[side] ?? 0) >= stats.cost
   const room = stats.supply === 0 || (state.supplyUsed[side] ?? 0) + stats.supply <= (state.supplyCap[side] ?? 0)
-  let title = `${stats.label}. ${stats.blurb}`
-  if (!afford) title = `${stats.label} — Need ${stats.cost} dumps`
-  else if (!room) title = `${stats.label} — Cells cap reached — raise a Storage`
   const cells = stats.supply === 1 ? '1 cell' : `${stats.supply} cells`
   const detail = stats.supply === 0 ? `${stats.cost} dumps` : `${stats.cost} dumps · ${cells}`
+  let title = detail.startsWith(stats.label) ? detail : `${stats.label} · ${detail}`
+  if (!afford) title = `${stats.label} — Need ${stats.cost} dumps`
+  else if (!room) title = `${stats.label} — Cells cap reached — raise a Storage`
   return {
     id: `train-${kind}`,
     label: stats.label,
@@ -838,7 +913,6 @@ export function describeSelection(state: MatchState): string {
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       <p class="meta">${SILO_REPAIR_COST} dumps · ${SILO_REPAIR_TIME}s</p>
       ${holding ? `<p class="meta">Capture ${remain}s</p>` : ''}
-      <p class="lore">${escapeHtml(loreBody('Ruined Silo'))}</p>
     `
   }
   if (building && state.selectedUnits.length === 0) {
@@ -875,10 +949,8 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       ${status ? `<p class="meta">${status}</p>` : ''}
-      ${building.kind === 'keep' ? '' : `<p class="lore">${escapeHtml(loreBody(stats.label))}</p>`}
       ${dumpsStatus(building)}
       ${building.kind === 'keep' && building.cryo ? `<p class="meta">${cryoOccupants(state, building.id)} / ${CRYO_SLOTS} · ${CRYO_FREEZE_COST} dumps each · ${CRYO_FREEZE_COST * CRYO_SLOTS} for the group</p>` : ''}
-      ${building.kind === 'keep' && building.cryo && building.cryoRecover > 0 ? `<p class="meta">Recovery ${formatRecover(building.cryoRecover)}</p>` : ''}
       ${stats.damage != null ? `<p class="meta">Damage ${formatThirds(stats.damage)}. Flies take half.</p>` : ''}
       ${!building.complete && !raising ? '<p class="meta">Progress is kept. Right-click the site with a Stalker to resume.</p>' : ''}
       ${queue ? `<div class="queue">${queue}</div>` : ''}
@@ -933,7 +1005,6 @@ export function describeSelection(state: MatchState): string {
       <p class="meta">Last seen</p>
       ${cap > 0 ? `<p class="meta${full ? ' full' : ''}">Dumps: ${stock} / ${cap}</p>` : ''}
       ${memory.kind === 'keep' && memory.cryo ? `<p class="meta">${memory.held ?? 0} / ${CRYO_SLOTS} frozen</p>` : ''}
-      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
     `
   }
 
@@ -960,12 +1031,15 @@ export function describeSelection(state: MatchState): string {
       <h2>${portrait}${stats.label}</h2>
       <div class="meter"><span style="width:${pct * 100}%"></span></div>
       ${powerReadout(state, unit)}
-      <p class="lore">${escapeHtml(loreBody(stats.label))}</p>
       ${unit.scanning ? '<p class="meta">Scanning</p>' : ''}
       ${unit.guarding ? '<p class="meta">Guarding</p>' : ''}
       ${unit.cloak > 0 ? `<p class="meta">Invisible ${Math.ceil(unit.cloak)}s</p>` : ''}
       ${unit.ice > 0 ? `<p class="meta">Frozen ${Math.ceil(unit.ice)}s</p>` : ''}
       ${unit.captureStun > 0 ? `<p class="meta">Inactive ${Math.ceil(unit.captureStun)}s</p>` : ''}
+      ${unit.artillery === 'gun' ? '<p class="meta">Artillery</p>' : ''}
+      ${unit.artillery === 'deploy' ? `<p class="meta">Artillery ${Math.ceil(unit.artilleryT)}s</p>` : ''}
+      ${unit.artillery === 'pack' ? `<p class="meta">Mobile ${Math.ceil(unit.artilleryT)}s</p>` : ''}
+      ${unit.flash > 0 ? `<p class="meta">Flash ${Math.ceil(unit.flash)}s</p>` : ''}
       ${cargo ? `<p class="meta">${cargo}</p>` : ''}
     `
   }
@@ -1000,14 +1074,6 @@ export function describeSelection(state: MatchState): string {
 
 function formatTime(time: number): string {
   const seconds = Math.floor(time)
-  const min = Math.floor(seconds / 60)
-  const rem = seconds % 60
-  return `${min}:${rem.toString().padStart(2, '0')}`
-}
-
-/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
-function formatRecover(time: number): string {
-  const seconds = Math.max(0, Math.ceil(time))
   const min = Math.floor(seconds / 60)
   const rem = seconds % 60
   return `${min}:${rem.toString().padStart(2, '0')}`

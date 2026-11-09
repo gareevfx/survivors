@@ -1,4 +1,4 @@
-import { SILO_CAPTURE_SECONDS, buildingMaxHp } from './balance'
+import { ARTILLERY_SECONDS, SILO_CAPTURE_SECONDS, buildingMaxHp } from './balance'
 import { drawAnimal } from './animalArt'
 import { FAR_ZOOM, type Camera } from './camera'
 import { lessonView } from './tutorial'
@@ -22,7 +22,6 @@ import {
   type MatchMode,
   ORE_NODE_AMOUNT,
   PLAYER_COLOR,
-  CRYO_RECOVER,
   ROCK_HP,
   isShutdown,
   powerSeconds,
@@ -243,6 +242,11 @@ export function renderWorld(
   drawBirds(ctx, state, view)
   if (coarse) drawFogLod(ctx, state, bucket)
   else drawFog(ctx, state, view)
+  for (const unit of units) {
+    if (unit.kind !== 'drone' || !unit.guarding || !viewerOwns(state, unit.owner)) continue
+    if (!viewUnitSeen(state, unit)) continue
+    drawFlyRadar(ctx, unit.x, unit.y, state.time * FLY_RADAR_SPIN + unit.id, teamColor(unit.owner))
+  }
   drawFreezeBan(ctx, state)
   if (state.bothCam) drawBothSight(ctx, state, view)
 
@@ -531,14 +535,6 @@ function drawPlacement(
   ctx.textAlign = 'center'
   ctx.fillText(onMap && !explored ? 'Unexplored ground' : BUILDING_STATS[kind].label, (tx + w / 2) * TILE, ty * TILE - 6)
   ctx.restore()
-}
-
-/** Ceil so a full recovery reads 4:00 and a fraction still shows 0:01. */
-function formatRecover(time: number): string {
-  const seconds = Math.max(0, Math.ceil(time))
-  const min = Math.floor(seconds / 60)
-  const rem = seconds % 60
-  return `${min}:${rem.toString().padStart(2, '0')}`
 }
 
 const ghostHeld = new WeakMap<Building, number>()
@@ -909,6 +905,7 @@ function drawUnitLod(ctx: CanvasRenderingContext2D, unit: Unit, selected: boolea
     ctx.restore()
   }
   const powered = powerSeconds(unit.kind) > 0
+  drawArtilleryBar(ctx, unit, stats.radius)
   if (powered || selected || unit.hp < stats.hp - 0.5) {
     bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
   }
@@ -1007,15 +1004,6 @@ function drawBuildingChrome(
         (unit) => unit.order?.type === 'construct' && unit.order.buildingId === building.id && unit.hp > 0,
       )
       ctx.fillText(crew ? 'Raising' : 'Paused', x + w / 2, y - 12)
-    }
-  } else if (building.kind === 'keep' && building.cryo && building.cryoRecover > 0) {
-    const remain = building.cryoRecover
-    bar(ctx, x + 8, y - 8, w - 16, 1 - remain / CRYO_RECOVER, '#9fd7e8')
-    if (labels) {
-      ctx.fillStyle = '#f4e7bf'
-      ctx.font = '10px "Segoe UI", sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText(`Recovery ${formatRecover(remain)}`, x + w / 2, y - 12)
     }
   } else if (selected || building.hp < stats.hp || building.hitFlash > 0) {
     bar(ctx, x + 8, y - 7, w - 16, building.hp / maxHp, hpColor(building.hp / maxHp))
@@ -1192,10 +1180,6 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
         ? Math.sin(unit.anim) * 1.1
         : 0
 
-  if (unit.kind === 'drone' && unit.guarding && viewerOwns(state, unit.owner)) {
-    drawFlyRadar(ctx, unit.x, unit.y, state.time * FLY_RADAR_SPIN + unit.id, teamColor(unit.owner))
-  }
-
   if (selected || (state.tutorial && unit.owner === controlledSide(state) && unit.kind === 'porter')) {
     const pulse = state.tutorial && !selected ? 0.45 + Math.sin(state.time * 4) * 0.2 : 0.9
     ctx.save()
@@ -1333,6 +1317,7 @@ function drawUnit(ctx: CanvasRenderingContext2D, state: MatchState, unit: Unit, 
   }
 
   const powered = powerSeconds(unit.kind) > 0
+  drawArtilleryBar(ctx, unit, stats.radius)
   const showHp = powered || selected || unit.hp < stats.hp - 0.5 || unit.hitFlash > 0
   if (showHp) bar(ctx, unit.x - 12, unit.y - stats.radius - 10, 24, unit.hp / stats.hp, hpColor(unit.hp / stats.hp))
   if (powered) {
@@ -1463,6 +1448,13 @@ function drawCaptureRing(ctx: CanvasRenderingContext2D, x: number, y: number, ra
   ctx.arc(x, y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress)
   ctx.stroke()
   ctx.restore()
+}
+
+/** Folding into a gun, or back into a tank. The bar fills across the 10 seconds. */
+function drawArtilleryBar(ctx: CanvasRenderingContext2D, unit: Unit, radius: number): void {
+  if (unit.artillery !== 'deploy' && unit.artillery !== 'pack') return
+  const ratio = Math.max(0, Math.min(1, 1 - unit.artilleryT / ARTILLERY_SECONDS))
+  bar(ctx, unit.x - 12, unit.y - radius - 16, 24, ratio, '#e6c15a')
 }
 
 function bar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, ratio: number, fill: string): void {
